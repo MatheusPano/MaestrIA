@@ -8,16 +8,26 @@ import 'package:flutter/foundation.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'agents.dart';
+import 'docs.dart';
 import 'editor.dart';
 import 'git.dart';
+import 'history.dart';
 import 'hooks.dart';
 import 'layout.dart';
+import 'links.dart';
 import 'notify.dart';
+import 'paths.dart';
 import 'pty.dart';
+import 'report.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
 
-enum TabKind { shell, claude }
+/// O que um painel é.
+///
+/// [reader] é o de fora: não tem processo, não tem pty e não tem sessão -- é um
+/// documento na árvore de painéis, do mesmo tamanho e com o mesmo cabeçalho
+/// que os outros. Ver [MxDoc], e `ui/doc_pane.dart` pra como ele é desenhado.
+enum TabKind { shell, claude, reader }
 
 /// One panel. Owns its pty and its hook-derived state.
 class MxTab {
@@ -28,6 +38,8 @@ class MxTab {
     required this.cwd,
     required this.branch,
     this.customLabel,
+    this.doc,
+    this.launcher,
   });
 
   final String id;
@@ -41,6 +53,25 @@ class MxTab {
 
   final TermSession term = TermSession();
   final HookState hooks = HookState();
+
+  /// O que este painel mostra, quando ele é um [TabKind.reader]. Null em todos
+  /// os outros -- e não-null em todos os readers, que é o que [isReader]
+  /// garante pra quem vai desreferenciar.
+  final MxDoc? doc;
+
+  /// Um painel de leitura: nada aqui tem processo, fila, git ou estado de
+  /// sessão pra dizer. Meia dúzia de lugares perguntam isso antes de tratar
+  /// este painel como uma sessão.
+  bool get isReader => kind == TabKind.reader && doc != null;
+
+  /// O programa que este painel subiu, quando ele saiu de um. Ver [Launcher].
+  ///
+  /// Por referência, como a [folder]: renomear o programa renomeia os painéis
+  /// dele, e trocar o comando vale no próximo "rodar de novo". Vira null
+  /// quando o programa é apagado -- o painel continua o terminal que sempre
+  /// foi, com o que estiver rodando dentro dele, em vez de sumir junto com a
+  /// linha que o abriu.
+  Launcher? launcher;
 
   /// The project inside the folder this panel is part of, if any. Null is a
   /// panel that is just a panel in a folder -- the shape everything had before
@@ -60,15 +91,6 @@ class MxTab {
   /// thing into a session that had not been asked anything.
   final List<FollowUp> followUps = [];
 
-  /// Whether the fork rows under this panel are folded away. Começa fechada:
-  /// uma frota aberta empurra os painéis de baixo pra fora do rail toda vez
-  /// que um turno resolve delegar, e o que a sessão está fazendo o subtítulo
-  /// dela já diz. Quem quiser ver os forks abre a linha.
-  ///
-  /// Not saved: the forks belong to the turn that spawned them, so a fold
-  /// state that outlived them would come back pointing at nothing.
-  bool fleetCollapsed = true;
-
   /// Filled in from `claude agents --json` once the session registers itself.
   String? sessionId;
 
@@ -83,6 +105,25 @@ class MxTab {
   String? agentName;
   int dirty = 0;
   final DateTime startedAt = DateTime.now();
+
+  /// O ⌘+ deste painel: passos de um ponto sobre o corpo base ([MxType.size]).
+  ///
+  /// Do painel e não da janela de propósito — numa grade de quatro, um deles é
+  /// o que você está lendo de perto e os outros três são de canto de olho. E
+  /// em passos, não em tamanho, pra que trocar a base nas configurações leve
+  /// todos junto sem apagar a diferença que cada um pediu.
+  int zoom = 0;
+
+  /// O corpo com que o pty deste painel é desenhado. Um leitor não passa por
+  /// aqui: ele soma os mesmos passos à escala do markdown, que é outra.
+  double get fontSize => Mx.type.sizeAt(zoom);
+
+  /// O grupo de que este painel faz parte, se faz de algum. Ver [PaneGroup].
+  ///
+  /// Um só, e o último em que ele entrou: dois grupos podem conter a mesma
+  /// sessão, e a linha da lateral tem uma cor e um clique -- não dois. Quem
+  /// grava e limpa isto é [AppStore._stamp], sempre a partir do grupo inteiro.
+  String? groupId;
 
   /// Marked by hand: this session did its job.
   ///
@@ -102,6 +143,14 @@ class MxTab {
 
   String get title {
     if (customLabel != null && customLabel!.isNotEmpty) return customLabel!;
+    // Um documento se chama pelo que ele é: o nome do arquivo, "plano de
+    // TASK#47730", "relatório do dia". A pasta e a branch não dizem nada sobre
+    // ele que o título já não diga melhor.
+    if (doc case final open?) return open.title;
+    // E um painel de programa se chama pelo programa: "btop", e não pelo repo
+    // em que ele por acaso subiu. Mesmo raciocínio do documento acima -- a
+    // pasta e a branch não dizem nada dele que o nome não diga melhor.
+    if (launcher case final l?) return l.name;
     // A loose panel has no folder to be named after. What it does have is the
     // folder it was pointed at -- and `~` when that is only home.
     if (folder.isLoose) return cwd == folder.root ? '~' : cwd.split('/').last;
@@ -117,31 +166,97 @@ class MxTab {
   }
 
   String get subtitle {
+    if (doc case final open?) {
+      final when =
+          '${open.at.hour.toString().padLeft(2, '0')}:'
+          '${open.at.minute.toString().padLeft(2, '0')}';
+      if (open.missing) return '${open.source.label} · o arquivo não está mais lá';
+      // A origem e a hora, que são as duas perguntas que um documento aberto
+      // levanta: de onde ele saiu, e se é o de agora ou o de duas horas atrás.
+      // A origem sai quando o título já a carrega -- "plano de TASK#47730" com
+      // "de TASK#47730" embaixo é o cabeçalho dizendo a mesma coisa duas vezes.
+      final from = open.origin;
+      final says = from != null && from.isNotEmpty && !title.contains(from);
+      return [open.source.label, if (says) 'de $from', when].join(' · ');
+    }
     if (exited) return 'processo saiu (${term.exitCode ?? '?'})';
+    // O comando, que é a única coisa que o cabeçalho ainda não disse: o nome
+    // do programa já é o título, e "programa" embaixo dele não informaria
+    // nada. `npm run dev` embaixo de "dev" informa.
+    if (launcher case final l?) return l.command;
     if (kind == TabKind.shell) return 'shell';
     return hooks.subtitle;
   }
 
   bool get exited => term.exited;
-  ClaudeStatus get status =>
-      kind == TabKind.shell ? (exited ? ClaudeStatus.ended : ClaudeStatus.unknown) : hooks.status;
 
-  /// What it takes to bring this panel back next time the app opens.
-  Map<String, dynamic> toJson() => {
+  /// O id que um `--resume` desta sessão levaria: o que o painel anotou, ou o
+  /// que os hooks contaram.
+  String? get resumeId => sessionId ?? hooks.sessionId;
+
+  /// A conversa dá pra retomar, com ou sem processo vivo.
+  ///
+  /// A distinção que faltava: sair do processo não é perder a sessão. É o que
+  /// mandar a sessão pro background faz -- o claude solta o terminal e segue
+  /// rodando fora dele --, e é o que um `/exit` faz também; nos dois casos o
+  /// que ficou pra trás é uma conversa endereçada por um id, que é justamente
+  /// o que o painel volta a abrir. Ver [AppStore._writeConfig], que é quem
+  /// tratava esse painel como um painel morto.
+  bool get resumable => kind == TabKind.claude && resumeId != null;
+
+  /// Um leitor nunca está fazendo nada: ele é uma folha de papel. Fica em
+  /// [ClaudeStatus.unknown], que é o estado que não acende badge, não conta
+  /// como pendência e não notifica.
+  ClaudeStatus get status => switch (kind) {
+    TabKind.reader => ClaudeStatus.unknown,
+    TabKind.shell => exited ? ClaudeStatus.ended : ClaudeStatus.unknown,
+    TabKind.claude => hooks.status,
+  };
+
+  /// A receita do painel: o que basta pra abrir *um igual* a este.
+  ///
+  /// A metade do [toJson] que descreve o painel em vez do que passou dentro
+  /// dele -- e é por isso que ela tem nome próprio: um grupo salvo (ver
+  /// [PaneGroup]) guarda arranjo, não história. Quem remonta um painel destes,
+  /// dos dois lados, é [AppStore._openPane].
+  Map<String, dynamic> get recipe => {
     'folderRoot': folder.root,
     if (folder.isLoose) 'loose': true,
     if (projectId != null) 'projectId': projectId,
     'kind': kind.name,
     'cwd': cwd,
+    // Só o id: o nome e o comando são do programa, não do painel, e uma cópia
+    // deles aqui voltaria amanhã com o comando de ontem depois de você editar
+    // o programa. Um id que não existe mais volta como terminal -- ver
+    // [AppStore._openPane].
+    if (launcher case final l?) 'launcher': l.id,
     if (customLabel != null) 'label': customLabel,
     // The session id is the whole point: a restored panel resumes the
     // conversation instead of starting a stranger in the same folder.
-    if (kind == TabKind.claude && (sessionId ?? hooks.sessionId) != null)
-      'sessionId': sessionId ?? hooks.sessionId,
+    if (resumable) 'sessionId': resumeId,
+    if (doc case final open?) 'doc': open.toJson(),
+    // Uma sessão que você deixou grande é uma sessão que você quer grande
+    // amanhã também — e é uma tecla, não uma preferência, então não tem outro
+    // lugar onde ser lembrada.
+    if (zoom != 0) 'zoom': zoom,
+  };
+
+  /// What it takes to bring this panel back next time the app opens.
+  Map<String, dynamic> toJson() => {
+    ...recipe,
+    // Fora da receita de propósito: a receita é o que um grupo guarda, e um
+    // grupo guardando a que grupo o painel pertence seria ele apontando pra
+    // si mesmo. Aqui, no layout, é o que faz a cor da linha e o clique dela
+    // sobreviverem ao fechamento da janela.
+    if (groupId != null) 'group': groupId,
     // Unlike the queue, which is armed for a session running *now*, what the
     // work produced outlives the session that produced it: the six files are
     // still the six files tomorrow morning.
     if (hooks.touched.isNotEmpty) 'touched': hooks.touched,
+    // Pelo mesmo motivo dos arquivos, e com mais razão: o plano é o documento
+    // que sobreviveu ao turno, e o hook que o trouxe não acontece de novo. Um
+    // restart que o esquecesse apagaria a única cópia que existe dele.
+    if (hooks.plans.isNotEmpty) 'plans': hooks.plans.map((n) => n.toJson()).toList(),
     // Worth the trip through the config: it is the one thing about a panel
     // that only you knew, and a restart that forgot it would be asking you
     // to read four sessions again to find out which three were settled.
@@ -211,6 +326,23 @@ class AppStore extends ChangeNotifier {
   final Folder loose = Folder.loose(Platform.environment['HOME'] ?? '/');
 
   final List<MxTab> tabs = [];
+
+  /// Os arranjos que você salvou. Ver [PaneGroup] -- e [saveGroup], que é o
+  /// gesto que põe um aqui.
+  ///
+  /// Fora das pastas de propósito, como a lista de painéis: um grupo pode
+  /// juntar painéis de repos diferentes, então pendurá-lo numa pasta seria
+  /// escolher uma das duas por ele.
+  final List<PaneGroup> groups = [];
+
+  /// Os programas que você ensinou ao maestria. Ver [Launcher] -- e
+  /// [openLauncher], que é o que uma linha do menu do + faz.
+  ///
+  /// Fora das pastas como os grupos, e pelo mesmo motivo: `btop` não é do repo
+  /// em que você o abriu primeiro. Um programa é uma forma de abrir painel, e
+  /// vale em qualquer pasta da lateral.
+  final List<Launcher> launchers = [];
+
   final Map<String, List<WorktreeInfo>> worktrees = {};
 
   /// A árvore de painéis, ou null com a tela limpa. As regras de corte,
@@ -283,7 +415,15 @@ class AppStore extends ChangeNotifier {
 
   // --- persistence --------------------------------------------------------
 
-  File get _configFile => File('${Platform.environment['HOME']}/.maestria/config.json');
+  /// A pasta onde a janela guarda o que ela lembra. Ver [mxStateHome] -- mora
+  /// em `services/paths.dart` porque o [HookServer] anota a porta dele ali
+  /// também, e ele sobe antes de existir store pra perguntar.
+  static String get stateHome => mxStateHome;
+
+  File get _configFile => File('$mxStateDir/config.json');
+
+  @visibleForTesting
+  String get configPath => _configFile.path;
 
   Future<void> _loadConfig() async {
     try {
@@ -301,9 +441,19 @@ class AppStore extends ChangeNotifier {
           projects.add(Project.fromJson(p as Map<String, dynamic>));
         }
       }
+      for (final g in (j['groups'] as List? ?? const [])) {
+        if (PaneGroup.fromJson(g) case final group?) groups.add(group);
+      }
+      // Antes do layout de propósito: os painéis salvos apontam pra cá pelo
+      // id, e um painel de `btop` restaurado antes da lista existir voltaria
+      // como um terminal qualquer.
+      for (final l in (j['launchers'] as List? ?? const [])) {
+        if (Launcher.fromJson(l) case final launcher?) launchers.add(launcher);
+      }
       final w = (j['sidebarWidth'] as num?)?.toDouble();
       if (w != null) sidebarWidth = w.clamp(minSidebar, maxSidebar);
       Mx.applyId(j['theme'] as String?);
+      Mx.applyType(MxType.fromJson(j['type']));
       keymap.load(j['shortcuts']);
       await refreshGit();
       await _restoreLayout(j['layout'] as Map<String, dynamic>?);
@@ -320,33 +470,28 @@ class AppStore extends ChangeNotifier {
     if (saved.isEmpty) return;
 
     _restoring = true;
-    final restored = <MxTab>[];
+    // Uma posição por painel salvo, com null onde não deu pra voltar: as
+    // folhas da árvore são índices desta lista, então uma lista que só junta
+    // os que vingaram deslocaria todas as folhas depois do painel que faltou.
+    final restored = <MxTab?>[];
     for (final pane in saved) {
-      final root = (pane['folderRoot'] ?? pane['projectRoot']) as String?;
-      final folder = pane['loose'] == true
-          ? loose
-          : folders.firstWhereOrNull((f) => f.root == root);
-      final cwd = pane['cwd'] as String?;
-      if (folder == null || cwd == null || !Directory(cwd).existsSync()) continue;
-      final label = pane['label'] as String?;
-      final project = projectById(pane['projectId'] as String?);
-      final tab = pane['kind'] == 'claude'
-          ? openClaude(
-              folder,
-              cwd: cwd,
-              label: label,
-              project: project,
-              resumeId: pane['sessionId'] as String?,
-            )
-          : openShell(folder, cwd: cwd, project: project);
-      if (label != null) tab.customLabel = label;
-      tab.hooks.touched.addAll((pane['touched'] as List? ?? const []).whereType<String>());
-      tab.done = pane['done'] == true;
+      final tab = _openPane(pane);
       restored.add(tab);
+      if (tab == null) continue;
+      tab.hooks.touched.addAll((pane['touched'] as List? ?? const []).whereType<String>());
+      tab.hooks.plans.addAll(
+        (pane['plans'] as List? ?? const []).map(PlanNote.fromJson).whereType<PlanNote>(),
+      );
+      tab.done = pane['done'] == true;
+      // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
+      // deixaria as linhas coloridas de um conjunto que não abre mais.
+      final group = pane['group'] as String?;
+      if (groups.any((g) => g.id == group)) tab.groupId = group;
     }
     _restoring = false;
 
-    if (restored.isEmpty) return;
+    final count = restored.nonNulls.length;
+    if (count == 0) return;
     // -1 é o que o `indexWhere` grava quando a última coisa que você fez foi
     // tirar tudo do painel: volta com as sessões vivas na lateral e a tela
     // limpa, que é como você deixou.
@@ -362,8 +507,61 @@ class AppStore extends ChangeNotifier {
           : PaneSplit(PaneAxis.row, [PaneLeaf(left.id), PaneLeaf(right.id)], [0.5, 0.5]);
     }
     focusedPaneId = at(layout['focused'] as int?)?.id ?? Panes.order(panes).firstOrNull;
-    banner = '${restored.length} painéis restaurados da última sessão';
+    banner = '$count painéis restaurados da última sessão';
     notifyListeners();
+  }
+
+  /// Abre o painel que [pane] descreve -- a receita de [MxTab.recipe].
+  ///
+  /// Um lugar só pra isso porque duas coisas remontam painéis a partir do
+  /// mesmo json: o layout da última execução e um grupo salvo (ver
+  /// [openGroup]). Null é o painel que não tem mais onde abrir: a pasta saiu
+  /// da lateral, o cwd não existe, o documento não voltou.
+  MxTab? _openPane(Map<String, dynamic> pane) {
+    final root = (pane['folderRoot'] ?? pane['projectRoot']) as String?;
+    final folder = pane['loose'] == true
+        ? loose
+        : folders.firstWhereOrNull((f) => f.root == root);
+    final cwd = pane['cwd'] as String?;
+    if (folder == null || cwd == null || !Directory(cwd).existsSync()) return null;
+    final label = pane['label'] as String?;
+    final project = projectById(pane['projectId'] as String?);
+    final MxTab tab;
+    if (pane['kind'] == 'reader') {
+      // Um leitor volta como o documento que era: um arquivo se relê do
+      // disco na montagem do painel, e um plano volta do texto que foi
+      // salvo com ele. Sem documento não há painel -- e é melhor não voltar
+      // do que voltar uma folha em branco onde havia um plano.
+      final doc = MxDoc.fromJson(
+        (pane['doc'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
+      );
+      if (doc == null) return null;
+      tab = _newReader(doc, folder: folder, cwd: cwd, project: project);
+    } else if (pane['kind'] == 'claude') {
+      tab = openClaude(
+        folder,
+        cwd: cwd,
+        label: label,
+        project: project,
+        resumeId: pane['sessionId'] as String?,
+      );
+    } else {
+      // Um painel de programa volta rodando o programa: o `btop` que você
+      // deixou aberto é `btop` de novo, e não um prompt parado na pasta dele.
+      // O programa apagado no meio do caminho devolve o terminal que o painel
+      // sempre foi por baixo -- é menos do que você deixou, mas é o painel.
+      tab = openShell(
+        folder,
+        cwd: cwd,
+        project: project,
+        launcher: launcherById(pane['launcher'] as String?),
+      );
+    }
+    if (label != null) tab.customLabel = label;
+    // Contido pela base de agora: quem baixou o corpo nas configurações
+    // desde a última vez não recebe um painel fora do limite.
+    tab.zoom = Mx.type.clampZoom((pane['zoom'] as num?)?.toInt() ?? 0);
+    return tab;
   }
 
   void _save() {
@@ -375,14 +573,24 @@ class AppStore extends ChangeNotifier {
   Future<void> _writeConfig() async {
     try {
       await _configFile.parent.create(recursive: true);
-      final open = tabs.where((t) => !t.exited).toList();
+      // Painel com processo vivo, mais o que ainda tem conversa pra retomar --
+      // ver [MxTab.resumable]. Descartar todo painel sem processo era descartar
+      // a sessão que foi pro background junto com o terminal morto: o claude
+      // sai do pty e continua rodando, e era esse id que fazia falta na volta.
+      final open = tabs.where((t) => !t.exited || t.resumable).toList();
       final tree = Panes.toJson(panes, (id) => open.indexWhere((t) => t.id == id));
       await _configFile.writeAsString(
         jsonEncode({
           'folders': folders.map((f) => f.toJson()).toList(),
           'projects': projects.map((p) => p.toJson()).toList(),
+          // Ao lado do layout e escritos com o mesmo json que ele: um grupo é
+          // um layout guardado com nome. Ver [PaneGroup].
+          if (groups.isNotEmpty) 'groups': groups.map((g) => g.toJson()).toList(),
+          if (launchers.isNotEmpty)
+            'launchers': launchers.map((l) => l.toJson()).toList(),
           'sidebarWidth': sidebarWidth,
           'theme': Mx.palette.id,
+          if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
           'layout': {
             'panes': open.map((t) => t.toJson()).toList(),
@@ -398,6 +606,38 @@ class AppStore extends ChangeNotifier {
   void setTheme(MxPalette palette) {
     if (palette.id == Mx.palette.id) return;
     Mx.apply(palette);
+    _save();
+    notifyListeners();
+  }
+
+  /// Reescreve o pty em [type] e guarda a escolha. Vale na hora, em todo
+  /// painel — o xterm remede a célula e o pty é redimensionado junto.
+  void setTypography(MxType type) {
+    if (type == Mx.type) return;
+    Mx.applyType(type);
+    _save();
+    notifyListeners();
+  }
+
+  /// ⌘+ e ⌘− no painel em foco, em passos.
+  ///
+  /// Um leitor responde também: a pergunta que a tecla faz é sobre o painel,
+  /// não sobre o pty, e um plano lido de perto é o mesmo pedido.
+  void zoomFocused(int by) {
+    final tab = focusedTab;
+    if (tab == null) return;
+    final zoom = Mx.type.clampZoom(tab.zoom + by);
+    if (zoom == tab.zoom) return;
+    tab.zoom = zoom;
+    _save();
+    notifyListeners();
+  }
+
+  /// ⌘0: devolve o painel em foco ao corpo base.
+  void resetZoomFocused() {
+    final tab = focusedTab;
+    if (tab == null || tab.zoom == 0) return;
+    tab.zoom = 0;
     _save();
     notifyListeners();
   }
@@ -436,7 +676,12 @@ class AppStore extends ChangeNotifier {
 
   // --- folders -----------------------------------------------------------
 
-  Future<Folder?> addFolder(String path) async {
+  Future<Folder?> addFolder(String rawPath) async {
+    // O caminho vem de um campo de texto, e num campo de texto se digita `~/`
+    // -- ver [expandHome]. Aqui em cima porque tudo abaixo (o `git` da pasta, o
+    // `existsSync`, o que vai pro config) já tem que estar falando do lugar de
+    // verdade.
+    final path = expandHome(rawPath);
     final root = await Git.mainRoot(path);
     final resolved = root ?? path;
     final existing = folders.firstWhereOrNull((p) => p.root == resolved);
@@ -461,12 +706,6 @@ class AppStore extends ChangeNotifier {
 
   void toggleCollapsed(Folder p) {
     p.collapsed = !p.collapsed;
-    _save();
-    notifyListeners();
-  }
-
-  void toggleWorktrees(Folder p) {
-    p.worktreesCollapsed = !p.worktreesCollapsed;
     _save();
     notifyListeners();
   }
@@ -663,12 +902,6 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Fold the panel's subagents away, the way a folder folds its panels.
-  void toggleFleet(MxTab tab) {
-    tab.fleetCollapsed = !tab.fleetCollapsed;
-    notifyListeners();
-  }
-
   void toggleProjectCollapsed(Project project) {
     project.collapsed = !project.collapsed;
     _save();
@@ -729,23 +962,41 @@ class AppStore extends ChangeNotifier {
 
   // --- tabs ---------------------------------------------------------------
 
-  MxTab openShell(Folder f, {String? cwd, String? command, Project? project}) {
+  MxTab openShell(
+    Folder f, {
+    String? cwd,
+    String? command,
+    Project? project,
+    Launcher? launcher,
+  }) {
     final tab = MxTab(
       id: 'tab${_seq++}',
       folder: f,
       kind: TabKind.shell,
       cwd: cwd ?? f.root,
       branch: '',
+      launcher: launcher,
     );
     if (project != null && project.folderRoot == f.root) tab.projectId = project.id;
     _register(tab);
-    if (command == null) {
+    // O comando do programa, quando quem chamou não trouxe um: é o que faz
+    // "abrir o btop" abrir o btop, e não um prompt onde você digitaria btop.
+    final run = command ?? launcher?.command;
+    if (run == null) {
       tab.term.startShell(tab.cwd);
     } else {
-      tab.term.startCommand(command, tab.cwd);
+      tab.term.startCommand(run, tab.cwd);
     }
     return tab;
   }
+
+  /// Abre [launcher] numa pasta: um terminal que já sobe dentro do programa.
+  ///
+  /// O mesmo caminho de [openShell] -- porque é isso que ele é. O que o
+  /// programa acrescenta é o de fora do pty: o nome no cabeçalho, o desenho na
+  /// lateral, e o painel voltando amanhã rodando a mesma coisa.
+  MxTab openLauncher(Launcher launcher, Folder f, {String? cwd, Project? project}) =>
+      openShell(f, cwd: cwd, project: project, launcher: launcher);
 
   /// Launch `claude` in [cwd], named, with our hook listeners injected.
   MxTab openClaude(
@@ -811,6 +1062,343 @@ class AppStore extends ChangeNotifier {
     });
     return tab;
   }
+
+  // --- histórico de conversas ---------------------------------------------
+
+  /// As conversas que já rodaram em [folder]. Ver `services/history.dart`.
+  ///
+  /// Da pasta *e das worktrees dela*, porque uma conversa é da worktree em que
+  /// aconteceu -- e o trabalho aqui mora em worktree: filtrar só pelo checkout
+  /// principal esconderia justamente as conversas de task. A bandeja dos
+  /// avulsos é a exceção e recebe o histórico inteiro: ela é onde se vai
+  /// quando nenhuma das pastas de cima é a resposta, e uma conversa que se
+  /// procura sem saber mais onde rodou é esse caso.
+  Future<List<ChatEntry>> chatsIn(Folder folder) => ChatHistory.read(
+    root: chatHome,
+    cwds: folder.isLoose
+        ? null
+        : [folder.root, ...?worktrees[folder.root]?.map((w) => w.path)],
+  );
+
+  /// De onde as conversas são lidas. Sob teste, as fixtures -- pela mesma
+  /// razão de [stateHome]: um `flutter test` que fosse ao `~/.claude` de
+  /// verdade dependeria das conversas que a máquina de quem rodou teve.
+  static String get chatHome => Platform.environment.containsKey('FLUTTER_TEST')
+      ? 'test/fixtures/history'
+      : ChatHistory.home;
+
+  /// Em que pé está [chat] agora. Ver [ChatStanding].
+  ChatStanding standingOf(ChatEntry chat) {
+    if (tabs.any((t) => t.resumeId == chat.sessionId)) return ChatStanding.onScreen;
+    // Viva é o que o `claude agents --json` lista: ele só enxerga processo de
+    // pé, que é a razão de ele não servir de histórico -- e a razão de servir
+    // exatamente pra isto.
+    if (agents.latest.any((a) => a.sessionId == chat.sessionId)) return ChatStanding.live;
+    if (chat.missing || chat.cwd.isEmpty || !Directory(chat.cwd).existsSync()) {
+      return ChatStanding.gone;
+    }
+    return ChatStanding.fresh;
+  }
+
+  /// Retoma [chat] num painel: o `--resume` daquela conversa, na pasta em que
+  /// ela rodou.
+  ///
+  /// As três recusas são as de [ChatStanding], e a linha do histórico já as
+  /// mostrava antes do clique -- o aviso aqui é pra quem clicou de qualquer
+  /// jeito, ou pra quando a sessão subiu entre a leitura da lista e o clique.
+  MxTab? resumeChat(ChatEntry chat, {Folder? folder, Project? project}) {
+    switch (standingOf(chat)) {
+      case ChatStanding.onScreen:
+        // Não é pra abrir de novo: é pra olhar. Uma segunda sessão no mesmo id
+        // seria o CLI recusando por sessão viva -- a que o próprio cockpit
+        // acabou de subir.
+        final open = tabs.firstWhere((t) => t.resumeId == chat.sessionId);
+        select(open);
+        return open;
+      case ChatStanding.live:
+        showBanner(
+          '"${chat.label}" ainda está rodando fora do maestria — '
+          'o claude só retoma uma conversa depois que ela sai',
+        );
+        return null;
+      case ChatStanding.gone:
+        showBanner(
+          chat.cwd.isEmpty
+              ? 'não sei em que pasta "${chat.label}" rodou'
+              : 'a pasta dessa conversa não existe mais: ${chat.cwd}',
+        );
+        return null;
+      case ChatStanding.fresh:
+        break;
+    }
+    // A pasta que o cockpit conhece pra esse caminho, quando quem pediu não
+    // disse: o histórico inteiro traz conversa de repo que não está na lateral,
+    // e essa entra nos avulsos.
+    final at =
+        folder ??
+        folders.firstWhereOrNull((f) => chat.cwd == f.root || chat.cwd.startsWith('${f.root}/')) ??
+        loose;
+    return openClaude(
+      at,
+      cwd: chat.cwd,
+      // O painel se chama pela conversa. Sem isto ele viria com o nome da
+      // pasta, igual a todos os outros dali -- e o que se acabou de escolher
+      // numa lista de quarenta foi *aquela* conversa.
+      label: chat.label,
+      resumeId: chat.sessionId,
+      project: project,
+    );
+  }
+
+  // --- painéis de leitura -------------------------------------------------
+
+  /// Põe [doc] na tela, num painel de leitura. Ver [TabKind.reader].
+  ///
+  /// Reaproveita o leitor que já estiver aberto, quando há um: um leitor é um
+  /// *lugar*, do mesmo jeito que um painel de terminal é um lugar, e abrir
+  /// quatro `.md` seguidos é trocar o que está naquele lugar quatro vezes --
+  /// não picar a janela em quatro. Sem nenhum aberto, o documento entra ao
+  /// lado do painel de onde saiu e não em cima dele: quem clica em "ver o
+  /// plano" quer o plano *e* a sessão que o escreveu.
+  MxTab showDoc(MxDoc doc, {MxTab? from}) {
+    final source = from ?? focusedTab;
+    // O que está na tela primeiro; depois um que tenha saído dela -- um leitor
+    // que alguém tirou do painel continua sendo *o* leitor, e abrir o próximo
+    // documento num segundo deixaria dois na lateral pra sempre.
+    final reading =
+        openPanes.firstWhereOrNull((t) => t.isReader) ?? tabs.firstWhereOrNull((t) => t.isReader);
+    if (reading != null) {
+      reading.doc!.become(doc);
+      // O apelido era o nome do documento anterior. Um leitor renomeado à mão
+      // que passa a mostrar outra coisa mentiria no cabeçalho.
+      reading.customLabel = null;
+      if (!Panes.has(panes, reading.id)) _placeBeside(reading, source);
+      focusedPaneId = reading.id;
+      _save();
+      notifyListeners();
+      return reading;
+    }
+    final tab = _newReader(
+      doc,
+      folder: source?.folder ?? focusedFolder,
+      cwd: source?.cwd,
+      project: source == null ? null : projectOf(source),
+    );
+    _placeBeside(tab, source);
+    _save();
+    notifyListeners();
+    return tab;
+  }
+
+  /// O plano de uma sessão, aberto pra ler. Sem [note], o da vez.
+  MxTab? showPlan(MxTab tab, [PlanNote? note]) {
+    final plan = note ?? tab.hooks.plan;
+    if (plan == null) {
+      showBanner('${tab.title} não apresentou nenhum plano ainda');
+      return null;
+    }
+    final which = tab.hooks.plans.indexOf(plan);
+    final versioned = which >= 0 && which < tab.hooks.plans.length - 1
+        ? 'plano ${which + 1}/${tab.hooks.plans.length}'
+        : 'plano';
+    return showDoc(
+      MxDoc(
+        source: DocSource.plan,
+        title: '$versioned de ${tab.title}',
+        text: plan.text,
+        origin: tab.title,
+        at: plan.at,
+      ),
+      from: tab,
+    );
+  }
+
+  /// O último recado da sessão, que é markdown e era lido como texto cru.
+  MxTab? showMessage(MxTab tab) {
+    final said = tab.hooks.lastMessageFull;
+    if (said == null || said.trim().isEmpty) {
+      showBanner('${tab.title} ainda não disse nada ao terminar um turno');
+      return null;
+    }
+    return showDoc(
+      MxDoc(
+        source: DocSource.message,
+        title: 'recado de ${tab.title}',
+        text: said,
+        origin: tab.title,
+      ),
+      from: tab,
+    );
+  }
+
+  /// Um `.md` do disco. O painel relê sozinho enquanto estiver aberto.
+  MxTab? showFile(String path, {MxTab? from}) {
+    if (!File(path).existsSync()) {
+      showBanner('esse arquivo não está mais lá: $path');
+      return null;
+    }
+    return showDoc(MxDoc.file(path, origin: from?.title), from: from);
+  }
+
+  /// Um link, seguido.
+  ///
+  /// A mesma resposta pros dois lugares em que se clica num link, porque é o
+  /// mesmo gesto: o leitor de markdown, que sabe onde os links dele estão, e o
+  /// terminal, onde eles são texto como o resto e alguém tem que reconhecê-los
+  /// (ver `services/links.dart`). Um `.md` abre no leitor — que é o "por
+  /// dentro do maestria" que o app tem —, outro arquivo vai pro Quick Look, e
+  /// endereço de fora sai pro navegador: aqui não há onde desenhar uma página.
+  ///
+  /// [base] é a pasta contra a qual um caminho relativo é resolvido: a do
+  /// arquivo que trouxe o link, ou a da sessão que o imprimiu.
+  Future<void> followLink(String href, {MxTab? from, String? base}) async {
+    if (href.trim().isEmpty) return;
+    final uri = Uri.tryParse(href);
+    if (uri != null && const {'http', 'https', 'mailto'}.contains(uri.scheme)) {
+      final ok = await Notifier.openLink(href);
+      if (!ok) showBanner('não consegui abrir $href');
+      return;
+    }
+    // Só a parte que é caminho: a âncora depois do # não é um arquivo, e o
+    // leitor não tem pra onde rolar até ela.
+    final path = href.split('#').first;
+    if (path.isEmpty) return;
+    final target = resolveLinkPath(path, base: base ?? from?.cwd);
+    if (!File(target).existsSync()) {
+      showBanner('esse link aponta pra um arquivo que não existe: $target');
+      return;
+    }
+    if (readable(target)) {
+      showFile(target, from: from);
+      return;
+    }
+    await Notifier.quickLook(target);
+  }
+
+  /// Um markdown escolhido à mão, aberto no leitor.
+  ///
+  /// A porta que faltava. Tudo o mais aqui abre um documento que o cockpit viu
+  /// nascer — o plano veio pelo hook, o `.md` veio da tira de arquivos
+  /// alterados, que é o que as ferramentas de escrita anunciaram. Um arquivo
+  /// escrito por `cat >`, um de ontem, ou um caminho que a sessão te devolveu
+  /// no meio de uma frase não estão em lista nenhuma, e o scrollback não é
+  /// clicável: sem isto, a única saída era o Finder.
+  ///
+  /// Não filtra por extensão de propósito: o painel nativo já só oferece texto,
+  /// e um `.txt` que alguém escolheu é um `.txt` que alguém quis ler.
+  Future<void> openMarkdown({MxTab? from}) async {
+    final tab = from ?? focusedTab;
+    final picked = await Notifier.chooseMarkdown(startIn: tab?.cwd ?? focusedFolder.root);
+    if (picked == null) return;
+    showFile(picked, from: tab);
+  }
+
+  /// O documento que o leitor está mostrando agora, se há um leitor na tela.
+  ///
+  /// Quem pergunta é a barra de documentos de um painel: com o plano e três
+  /// `.md` oferecidos ali, o que ela precisa dizer é qual deles é o que está
+  /// aberto -- senão clicar duas vezes na mesma ficha parece não ter feito nada.
+  MxDoc? get reading => openPanes.firstWhereOrNull((t) => t.isReader)?.doc;
+
+  /// Se o markdown deste caminho vale um leitor em vez do Quick Look.
+  static bool readable(String path) => isMarkdownPath(path);
+
+  MxTab _newReader(MxDoc doc, {required Folder folder, String? cwd, Project? project}) {
+    final tab = MxTab(
+      id: 'tab${_seq++}',
+      folder: folder,
+      kind: TabKind.reader,
+      cwd: cwd ?? folder.root,
+      branch: '',
+      doc: doc,
+    );
+    if (project != null && project.folderRoot == folder.root) tab.projectId = project.id;
+    // Não passa pelo [_register]: não há processo pra subir nem saída de
+    // processo pra escutar, e a colocação na tela é outra (ao lado, não em
+    // cima).
+    tabs.add(tab);
+    return tab;
+  }
+
+  /// Encaixa [tab] à direita do painel de [beside], quando há um na tela.
+  void _placeBeside(MxTab tab, MxTab? beside) {
+    if (panes == null || beside == null || !Panes.has(panes, beside.id)) {
+      _place(tab);
+      return;
+    }
+    panes = Panes.insert(panes!, tabId: tab.id, targetId: beside.id, side: DropSide.right);
+    focusedPaneId = tab.id;
+  }
+
+  // --- relatório do dia ---------------------------------------------------
+
+  /// Se o relatório está sendo escrito agora. Uma volta ao `claude -p` leva
+  /// dezenas de segundos, e um botão que não diz isso parece um botão quebrado.
+  bool get writingReport => _writingReport;
+  bool _writingReport = false;
+
+  /// O dia, reunido e contado de volta, num painel de leitura.
+  ///
+  /// O material é levantado aqui -- commits, worktrees sujas, as sessões desta
+  /// janela -- e só a prosa é pedida ao Claude; ver [DailyReport]. Quando não
+  /// dá, o painel abre com o material bruto e o motivo em cima dele: um
+  /// resumo que não deu pra escrever ainda tem o dia inteiro dentro.
+  Future<void> openDailyReport() async {
+    if (_writingReport) return;
+    _writingReport = true;
+    showBanner('relatório do dia: reunindo o material e pedindo a prosa ao claude…');
+    try {
+      final material = await DailyReport.material(
+        folders: folders,
+        worktrees: worktrees,
+        projects: projects,
+        // Um leitor não é uma sessão: não rodou nada, não mexeu em nada e não
+        // tem o que reportar sobre o dia.
+        sessions: [
+          for (final t in tabs)
+            if (!t.isReader) _noteOf(t),
+        ],
+      );
+      final outcome = await DailyReport.ask(material);
+      showBanner(
+        outcome.ok
+            ? 'relatório do dia pronto'
+            : 'não deu pra escrever o relatório — abri o material bruto',
+      );
+      showDoc(
+        MxDoc(
+          source: DocSource.report,
+          title: 'relatório do dia',
+          text: outcome.ok
+              ? outcome.text
+              : '# o relatório não saiu\n\n${outcome.text}\n\n---\n\n${outcome.material}',
+          at: outcome.at,
+        ),
+      );
+    } finally {
+      _writingReport = false;
+      notifyListeners();
+    }
+  }
+
+  /// Um painel, achatado no que o relatório sabe ler.
+  SessionNote _noteOf(MxTab t) => SessionNote(
+    title: t.title,
+    folder: t.folder.isLoose ? 'avulsos' : t.folder.name,
+    // O programa, quando o painel é de um: "btop" diz mais ao relatório do
+    // que "shell" -- que é o que todo painel de programa era aqui.
+    kind: t.kind == TabKind.claude ? 'claude' : (t.launcher?.name ?? 'shell'),
+    status: t.status.label,
+    startedAt: t.startedAt,
+    project: projectOf(t)?.name,
+    branch: t.branch,
+    prompts: t.hooks.prompts,
+    tools: t.hooks.tools,
+    touched: t.hooks.touched,
+    lastPrompt: t.hooks.lastPrompt,
+    lastMessage: t.hooks.lastMessage,
+    exited: t.exited,
+  );
 
   /// The manual worktree dance, as one button.
   Future<MxTab?> newTask(
@@ -915,8 +1503,26 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Põe [tab] na tela -- o clique numa linha da lateral.
+  ///
+  /// Quando a tela *é* um grupo (ver [activeGroup]), escolher uma sessão que
+  /// não é dele não troca um quadro da grade: a grade sai inteira e a sessão
+  /// escolhida fica com a tela. É o "se eu clicar em outro painel que não está
+  /// no grupo, ele substitui o grupo inteiro por esse".
+  ///
+  /// Fora de um grupo continua valendo o que [_place] documenta -- trocar o
+  /// que está no lugar em foco. A distinção é o ponto: uma grade que você
+  /// montou à mão e não agrupou é sua, e um clique numa quarta sessão não pode
+  /// desmanchá-la sem você ter pedido; uma grade que é um grupo tem pra onde
+  /// voltar, porque está guardada.
   void select(MxTab tab) {
-    _place(tab);
+    final group = activeGroup;
+    if (group != null && tab.groupId != group.id) {
+      panes = PaneLeaf(tab.id);
+      focusedPaneId = tab.id;
+    } else {
+      _place(tab);
+    }
     _save();
     notifyListeners();
   }
@@ -968,7 +1574,11 @@ class AppStore extends ChangeNotifier {
   /// tela, [dismiss].
   void closeTab(MxTab tab) {
     tab.pendingFollowUp?.cancel();
-    tab.term.kill();
+    // Sem await de propósito: [TermSession.kill] espera o hangup ser atendido
+    // antes de escalar, e a tela não tem nada a ganhar parada esperando por
+    // isso. O painel sai da lateral agora; o processo termina de morrer
+    // sozinho, com quem ele subiu junto.
+    unawaited(tab.term.kill());
     tabs.remove(tab);
     _drop(tab);
     // Encerrar o último painel com sessões vivas na lateral deixaria a tela
@@ -1054,6 +1664,287 @@ class AppStore extends ChangeNotifier {
     tab.projectId = target.projectId;
     _save();
     notifyListeners();
+  }
+
+  // --- grupos de painéis --------------------------------------------------
+
+  /// Guarda o arranjo que está na tela como um grupo chamado [name]. Ver
+  /// [PaneGroup].
+  ///
+  /// A tela é a fonte, e não uma lista de painéis pra marcar: "salvar um
+  /// grupo" é arrumar a grade do jeito que ela serve e dizer que é assim que
+  /// ela abre. Salvar com o nome de um grupo que já existe atualiza aquele
+  /// grupo em vez de criar um homônimo -- dois "grid da manhã" na lateral
+  /// seriam duas linhas iguais e nenhuma forma de saber qual é qual.
+  ///
+  /// Null com a tela limpa ou sem nome: não há arranjo pra guardar.
+  PaneGroup? saveGroup(String name) {
+    final title = name.trim();
+    final open = openPanes;
+    if (title.isEmpty || open.isEmpty) return null;
+    final at = groups.indexWhere((g) => g.name.toLowerCase() == title.toLowerCase());
+    final group = PaneGroup(
+      // Numa atualização, o id do grupo que estava ali: é o mesmo grupo, com
+      // outro arranjo dentro. Ver [addProject] pro formato.
+      id: at < 0 ? 'gp${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}' : groups[at].id,
+      name: title,
+      panes: [for (final t in open) t.recipe],
+      // O mesmo json que o layout salvo leva, e com as folhas apontando pra
+      // lista que acabou de ser escrita: quem remonta a árvore, dos dois
+      // lados, é o `Panes.fromJson`.
+      tree: Panes.toJson(panes, (id) => open.indexWhere((t) => t.id == id)),
+    );
+    if (at < 0) {
+      groups.add(group);
+    } else {
+      groups[at] = group;
+    }
+    _stamp(group, open);
+    _save();
+    notifyListeners();
+    return group;
+  }
+
+  /// Agrupa os painéis que estão na tela -- o "agrupar painéis" do botão
+  /// direito de um painel.
+  ///
+  /// Não pede nome: o gesto é apontar pra grade que já está montada e dizer
+  /// que aqueles painéis andam juntos, e um diálogo no meio disso cobraria uma
+  /// decisão que ninguém tinha pra tomar. O nome sai do que o grupo abre ("3
+  /// terminais"), com um número atrás quando já existe um assim -- e trocar
+  /// por um nome de gente é o "renomear" do menu do grupo.
+  ///
+  /// Null com menos de dois painéis na tela: um painel sozinho não é grade.
+  PaneGroup? groupPanes() {
+    final open = openPanes;
+    if (open.length < 2) return null;
+    final base = PaneGroup.summarize([for (final t in open) t.recipe]);
+    // Nome novo e não o de um grupo existente: cair no nome de outro faria
+    // [saveGroup] atualizar aquele grupo em vez de criar este.
+    var name = base;
+    for (var n = 2; groups.any((g) => g.name.toLowerCase() == name.toLowerCase()); n++) {
+      name = '$base ($n)';
+    }
+    return saveGroup(name);
+  }
+
+  /// Desfaz o grupo. Os painéis continuam abertos e onde estavam: o que se
+  /// desfaz é o laço entre eles, não o arranjo na tela.
+  void ungroup(PaneGroup group) {
+    _stamp(group, const []);
+    groups.remove(group);
+    _save();
+    notifyListeners();
+  }
+
+  /// Marca [members] como os painéis de [group] -- e desmarca quem tinha a
+  /// marca e não está mais na lista.
+  ///
+  /// Sempre pelo grupo inteiro, nunca painel por painel, porque é isso que a
+  /// marca quer dizer: um grupo atualizado com dois painéis não pode deixar o
+  /// terceiro colorido de um conjunto de que ele saiu.
+  void _stamp(PaneGroup group, List<MxTab> members) {
+    for (final t in tabs) {
+      if (t.groupId == group.id && !members.contains(t)) t.groupId = null;
+    }
+    for (final t in members) {
+      t.groupId = group.id;
+    }
+  }
+
+  PaneGroup? groupById(String? id) =>
+      id == null ? null : groups.firstWhereOrNull((g) => g.id == id);
+
+  // --- programas ----------------------------------------------------------
+
+  Launcher? launcherById(String? id) =>
+      id == null ? null : launchers.firstWhereOrNull((l) => l.id == id);
+
+  /// Ensina um programa novo e devolve ele -- é quem chamou que decide se abre
+  /// um painel com ele em seguida.
+  Launcher addLauncher({
+    required String name,
+    required String command,
+    LauncherIcon icon = LauncherIcon.terminal,
+  }) {
+    final launcher = Launcher(
+      // Do relógio e não do tamanho da lista: apagar dois e criar um terceiro
+      // daria a ele o id de um painel salvo que apontava pro primeiro.
+      id: 'lch${DateTime.now().microsecondsSinceEpoch}',
+      name: name.trim(),
+      command: command.trim(),
+      icon: icon,
+    );
+    launchers.add(launcher);
+    _save();
+    notifyListeners();
+    return launcher;
+  }
+
+  /// Muda o que já existe, no lugar. Os painéis abertos seguram o programa por
+  /// referência, então renomear já renomeia o cabeçalho deles -- e o comando
+  /// novo é o que o próximo [relaunch] roda.
+  void editLauncher(
+    Launcher launcher, {
+    String? name,
+    String? command,
+    LauncherIcon? icon,
+  }) {
+    final title = name?.trim();
+    final run = command?.trim();
+    if (title != null && title.isNotEmpty) launcher.name = title;
+    if (run != null && run.isNotEmpty) launcher.command = run;
+    if (icon != null) launcher.icon = icon;
+    _save();
+    notifyListeners();
+  }
+
+  /// Esquece o programa. Não fecha nada: os painéis dele viram os terminais
+  /// que sempre foram por baixo, com o que estiver rodando dentro deles.
+  void removeLauncher(Launcher launcher) {
+    launchers.remove(launcher);
+    for (final t in tabs.where((t) => t.launcher == launcher)) {
+      t.launcher = null;
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// Sobe de novo, no mesmo painel, o programa que já tinha saído.
+  ///
+  /// Um painel de programa é o programa: sair do `btop` deixa uma moldura com
+  /// "processo saiu (0)" onde antes havia um monitor, e a resposta pra isso
+  /// não é fechar o painel e refazer o caminho do menu. Só depois da saída --
+  /// matar um processo vivo pra rodar o mesmo comando seria outro gesto, e um
+  /// que ninguém pediu.
+  void relaunch(MxTab tab) {
+    final command = tab.launcher?.command;
+    if (command == null || !tab.exited) return;
+    tab.term.relaunch(command, tab.cwd);
+    notifyListeners();
+  }
+
+  /// O grupo de que este painel faz parte, se faz de algum.
+  PaneGroup? groupOf(MxTab tab) => groupById(tab.groupId);
+
+  /// O grupo que a tela está mostrando, quando ela está mostrando um.
+  ///
+  /// Derivado e não guardado num campo: é verdade enquanto *todo* painel na
+  /// tela for daquele grupo, e nada mais precisa se lembrar de apagar a
+  /// resposta. Arrastar uma sessão de fora pra dentro da grade, ou trocar o
+  /// conteúdo de um dos quadros, já responde não na jogada seguinte -- sem
+  /// invalidação espalhada por [dismiss], [dropTab] e [closeTab].
+  ///
+  /// É o que separa a grade que veio de um grupo da grade que você montou à
+  /// mão: só na primeira é que escolher uma sessão de fora desmancha a tela
+  /// toda. Ver [select].
+  PaneGroup? get activeGroup {
+    final open = openPanes;
+    if (open.isEmpty) return null;
+    final group = groupOf(open.first);
+    if (group == null) return null;
+    return open.every((t) => t.groupId == group.id) ? group : null;
+  }
+
+  /// Se a tela é a do grupo. Ver [activeGroup].
+  bool showing(PaneGroup group) => activeGroup?.id == group.id;
+
+  void renameGroup(PaneGroup group, String name) {
+    final title = name.trim();
+    if (title.isEmpty || title == group.name) return;
+    group.name = title;
+    _save();
+    notifyListeners();
+  }
+
+  /// Esquece o grupo. Não fecha nada: o grupo era uma forma de dispor painéis,
+  /// e os painéis continuam abertos onde estavam.
+  void removeGroup(PaneGroup group) {
+    groups.remove(group);
+    _save();
+    notifyListeners();
+  }
+
+  /// Põe o arranjo do grupo na tela: os painéis dele, cortados como estavam.
+  ///
+  /// O que estava na tela e não está no grupo sai dela sem morrer, que é o que
+  /// o x do cabeçalho faz -- ver [dismiss]. Clicar num grupo é trocar de
+  /// vista, e clicar numa sessão da lateral continua sendo o que sempre foi:
+  /// aquela sessão no lugar em foco.
+  void openGroup(PaneGroup group) {
+    // Suspende a gravação como faz a restauração da última execução: abrir
+    // seis painéis seriam seis gravações do config, e a que interessa é a do
+    // arranjo pronto, no fim.
+    _restoring = true;
+    final taken = <String>{};
+    final panels = <MxTab?>[];
+    for (final pane in group.panes) {
+      final tab = _adopt(pane, taken) ?? _openPane(pane);
+      // Uma posição por receita, com null onde nada abriu: as folhas da árvore
+      // são índices desta lista. Ver [_restoreLayout].
+      panels.add(tab);
+      if (tab != null) taken.add(tab.id);
+    }
+    _restoring = false;
+
+    final first = panels.nonNulls.firstOrNull;
+    if (first == null) {
+      showBanner('o grupo "${group.name}" não tem mais nenhum painel pra abrir');
+      return;
+    }
+    panes =
+        Panes.fromJson(group.tree, (i) => i >= 0 && i < panels.length ? panels[i]?.id : null) ??
+        PaneLeaf(first.id);
+    focusedPaneId = Panes.order(panes).firstOrNull;
+    // Os painéis que entraram são os painéis do grupo, inclusive os que foram
+    // abertos agora no lugar dos que morreram. É esta marca que faz a linha
+    // deles compartilhar a cor e abrir o grupo em vez de trocar o quadro.
+    _stamp(group, panels.nonNulls.toList());
+    _save();
+    notifyListeners();
+  }
+
+  /// O painel que já está aberto e serve pra esta vaga do grupo, se houver.
+  ///
+  /// Um grupo é um arranjo, não uma leva de sessões novas: os três terminais
+  /// que você tirou da tela pra olhar outra coisa continuam vivos na lateral,
+  /// e voltar ao grupo é trazer *eles* de volta. Subir três shells novos ao
+  /// lado dos que já estavam ali seria acumular uma leva por clique -- é a
+  /// mesma razão pela qual [showDoc] reaproveita o leitor aberto em vez de
+  /// abrir o sexto painel.
+  ///
+  /// [taken] são as vagas já preenchidas: três terminais na mesma pasta são
+  /// três receitas idênticas, e sem isso as três cairiam no mesmo painel.
+  MxTab? _adopt(Map<String, dynamic> pane, Set<String> taken) {
+    if (pane['kind'] == 'reader') {
+      // Um leitor é *o* leitor, ver [showDoc]: o grupo não pede um painel de
+      // leitura novo, pede que o que existe mostre este documento.
+      final doc = MxDoc.fromJson(
+        (pane['doc'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
+      );
+      final reader = tabs.firstWhereOrNull((t) => t.isReader && !taken.contains(t.id));
+      if (doc == null || reader == null) return null;
+      reader.doc!.become(doc);
+      // O apelido era o nome do documento anterior.
+      reader.customLabel = null;
+      return reader;
+    }
+    final root = pane['loose'] == true ? loose.root : pane['folderRoot'] as String?;
+    final sessionId = pane['sessionId'] as String?;
+    return tabs.firstWhereOrNull(
+      (t) =>
+          !taken.contains(t.id) &&
+          t.kind.name == pane['kind'] &&
+          t.folderRoot == root &&
+          t.cwd == pane['cwd'] &&
+          // Painel cujo processo saiu não é o painel de volta: o grupo abre um
+          // no lugar dele -- e uma conversa do claude volta com `--resume`,
+          // que é o arranjo de antes de verdade e não a casca dele.
+          !t.exited &&
+          // Com a conversa anotada na receita, é aquela conversa que o grupo
+          // quer; sem ela, qualquer sessão viva naquela pasta serve.
+          (sessionId == null || t.resumeId == sessionId),
+    );
   }
 
   // --- panes and keyboard -------------------------------------------------
@@ -1311,6 +2202,36 @@ class AppStore extends ChangeNotifier {
     notifier.badge(waiting.isEmpty ? null : '${waiting.length}');
   }
 
+  /// Sair: encerrar toda sessão antes que a janela vá embora.
+  ///
+  /// Nenhum painel é filho deste processo de um jeito que o sistema vá
+  /// recolher. Cada um é uma sessão de terminal própria (ver
+  /// [TermSession.kill]), então ninguém desliga a linha por nós quando o app
+  /// some -- e o que ficou aberto sobrevive a ele, invisível, até a máquina
+  /// reiniciar. Desligar é conosco, e é a última coisa que ainda dá pra fazer.
+  ///
+  /// Diferente de [dispose], isto espera: é chamado de `onExitRequested`, que
+  /// segura o encerramento até responder. O teto é a carência que cada sessão
+  /// dá ao próprio hangup, com todas correndo em paralelo -- alguns segundos.
+  Future<void> shutdown() async {
+    // A gravação vem antes das mortes, não depois: [_writeConfig] só salva
+    // painel que ainda roda, então um save que caísse depois dos hangups
+    // restauraria uma janela vazia na próxima abertura.
+    if (_saveDebounce?.isActive ?? false) {
+      _saveDebounce!.cancel();
+      await _writeConfig();
+    }
+    agents.stop();
+    await hooks.stop();
+    await Future.wait([for (final t in tabs) _end(t)]);
+  }
+
+  /// Cancela o que a sessão ainda ia fazer e desliga a linha.
+  Future<void> _end(MxTab tab) {
+    tab.pendingFollowUp?.cancel();
+    return tab.term.kill();
+  }
+
   @override
   void dispose() {
     // A write that was still waiting out its debounce has nothing left to
@@ -1320,7 +2241,9 @@ class AppStore extends ChangeNotifier {
     hooks.stop();
     for (final t in tabs) {
       t.pendingFollowUp?.cancel();
-      t.term.kill();
+      // Nada de await aqui: este é o caminho sem futuro nenhum pra rodar
+      // depois dele. O hangup sai; quem escala é [shutdown].
+      t.term.hangUp();
     }
     super.dispose();
   }

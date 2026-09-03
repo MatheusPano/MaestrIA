@@ -28,6 +28,19 @@ class Notifier {
     }
   }
 
+  /// O painel nativo pra escolher um markdown, como sheet da nossa janela.
+  ///
+  /// [startIn] é onde ele abre — a pasta do painel em foco, que é quase sempre
+  /// onde o arquivo está. Null quando a pessoa cancela, e também num build sem
+  /// a metade nativa.
+  static Future<String?> chooseMarkdown({String? startIn}) async {
+    try {
+      return await _dock.invokeMethod<String>('chooseMarkdown', startIn);
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// Show a file the way the Finder's space bar would.
   ///
   /// The result strip is read by someone who wants to see the spreadsheet, not
@@ -73,6 +86,15 @@ class Notifier {
       return opened.ok;
     }
     final r = await Sh.run('open -R ${Sh.q(path)}');
+    return r.ok;
+  }
+
+  /// Um link de fora, entregue a quem cuida de links: o navegador padrão.
+  ///
+  /// Existe porque o leitor de markdown desenha links e um link que não abre é
+  /// um link que não devia estar sublinhado.
+  static Future<bool> openLink(String url) async {
+    final r = await Sh.run('${Platform.isLinux ? 'xdg-open' : 'open'} ${Sh.q(url)}');
     return r.ok;
   }
 

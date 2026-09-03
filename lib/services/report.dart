@@ -122,7 +122,12 @@ class DailyReport {
       out.writeln();
       for (final p in projects) {
         final panels = sessions.where((s) => s.project == p.name).length;
-        out.writeln('- ${p.name} (pasta ${p.folderRoot.split('/').last}) — $panels painel(éis)');
+        // O projeto da bandeja não tem pasta pra citar -- e citar o último
+        // pedaço da raiz dele diria "matheuspano", que não é lugar nenhum.
+        final where = folders.any((f) => f.root == p.folderRoot)
+            ? 'pasta ${p.folderRoot.split('/').last}'
+            : 'avulsos';
+        out.writeln('- ${p.name} ($where) — $panels painel(éis)');
         final brief = p.brief.trim();
         if (brief.isNotEmpty) out.writeln('  briefing: ${_oneLine(brief, 300)}');
       }
@@ -257,25 +262,56 @@ class DailyReport {
 
   /// What Claude is asked to do with the material. Kept next to it, because
   /// the two are one prompt and drift apart the moment they are not.
+  ///
+  /// A forma pedida é a de uma daily falada: por frente de trabalho, um bullet
+  /// por coisa feita, com uma linha embaixo dizendo como. Não é enfeite — é o
+  /// uso. Este relatório é lido às 18h e repetido em voz alta às 9h do dia
+  /// seguinte, e prosa corrida não se fala: quem tenta ler um parágrafo numa
+  /// daily termina resumindo o parágrafo ali na hora.
+  ///
+  /// A explicação vai como sub-bullet indentado, e isso é uma restrição do
+  /// leitor, não gosto: uma linha solta debaixo do bullet é a *mesma* linha em
+  /// markdown -- uma quebra simples colapsa em espaço -- e sairia grudada no
+  /// título dela em `ui/doc_pane.dart`.
   static String promptFor(String material) =>
     '''
 Você é o assistente do maestria, o cockpit onde este usuário toca as sessões de
 Claude Code do dia dele. Abaixo vai o material bruto de hoje, coletado pelo
 próprio app: commits, trabalho não commitado e as sessões que rodaram.
 
-Escreva o relatório do dia, em português do Brasil e em markdown, pra ele mesmo
-ler no fim do expediente.
+Escreva o relatório do dia, em português do Brasil e em markdown. Ele lê isso no
+fim do expediente e repete de manhã na daily — então escreva o que ele vai
+*falar*, na ordem em que ele falaria.
 
 - comece com uma frase só, dizendo como foi o dia;
 - depois uma seção `##` por frente de trabalho (o projeto quando houver, senão a
-  pasta), em prosa curta: o que avançou e o que isso significa. Não repita a
-  lista de commits linha a linha — resuma o que eles fizeram juntos;
-- termine com uma seção `## em aberto`: o que ficou sem commit, as sessões
-  paradas esperando resposta, e o próximo passo que o material sugere;
+  pasta);
+- dentro de cada seção, uma lista de bullets. Um bullet por coisa entregue, do
+  jeito que se diz numa daily: uma linha, no passado, dizendo o que passou a
+  funcionar (ou a parar de quebrar) — não o nome do arquivo que mudou;
+- embaixo de cada bullet, indentado com dois espaços, um sub-bullet com a
+  explicação curta: como foi feito, ou por que precisava ser feito. Uma linha,
+  no máximo 25 palavras, e é aqui que entram nomes de arquivo, endpoint ou
+  classe quando ajudarem;
+- agrupe: commits que são a mesma entrega viram um bullet só, e no máximo seis
+  bullets por frente. Nunca repita a lista de commits linha a linha;
+- termine com uma seção `## em aberto`, na mesma forma: o que ficou sem commit,
+  as sessões paradas esperando resposta, e o próximo passo que o material
+  sugere;
 - só o que está no material. Não invente tarefa, decisão nem resultado, e se o
   dia foi vazio diga isso em uma linha e pare;
 - sem preâmbulo, sem "aqui está o relatório", sem fechamento genérico, sem
-  perguntar se ele quer mais alguma coisa. No máximo 400 palavras.
+  perguntar se ele quer mais alguma coisa. No máximo 500 palavras.
+
+A forma, exatamente:
+
+## learning-app-lms
+- Notificação de reação chegou no app.
+  - Novo tipo `message_reaction` no serviço de notificações, com cinco testes
+    cobrindo o texto de quem reagiu.
+- Badge de não-lidas parou de teimar quando a conversa é lida em outra sessão.
+  - O eco do próprio `markRead` apagava o badge; agora só zera quando a leitura
+    cobre a última mensagem.
 
 ---
 

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../services/docs.dart';
 import '../services/notify.dart';
 import '../services/store.dart';
 import '../theme.dart';
@@ -135,9 +136,20 @@ class _FileRowState extends State<_FileRow> {
   /// stop pretending it can be opened.
   bool get _gone => !File(widget.path).existsSync();
 
+  /// Markdown abre aqui dentro, num painel de leitura; o resto vai pro
+  /// Quick Look como sempre foi.
+  ///
+  /// A distinção é a única que importa nesta lista: um `.md` que a sessão
+  /// escreveu -- um plano salvo, um spec, um resumo -- é pra ler agora, ao lado
+  /// da sessão, e o Quick Look o entregava como texto cru com as cerquilhas à
+  /// mostra. Uma planilha continua sendo assunto de outro app.
   Future<void> _open() async {
     if (_gone) {
       widget.store.showBanner('esse arquivo não está mais lá: ${widget.path}');
+      return;
+    }
+    if (AppStore.readable(widget.path)) {
+      widget.store.showFile(widget.path, from: widget.tab);
       return;
     }
     await Notifier.quickLook(widget.path);
@@ -221,6 +233,169 @@ class _FileRowState extends State<_FileRow> {
       '' => Icons.insert_drive_file_outlined,
       _ => Icons.code,
     };
+  }
+}
+
+
+/// Os documentos desta sessão, numa fita colada no rodapé do terminal.
+///
+/// A diferença entre isto e a [ResultStrip] é o que a lista responde. A tira
+/// responde "o que essa sessão mexeu" -- toda ela, dobrada atrás de uma ficha,
+/// porque quarenta arquivos não são uma coisa pra ficar na tela. Esta responde
+/// "o que essa sessão escreveu pra eu *ler*", que são um plano e um punhado de
+/// `.md` — e essa resposta tem que estar visível sem clique, senão a sessão
+/// escreve um documento, diz o caminho dele no meio de um parágrafo, e o
+/// parágrafo rola pra fora da tela levando o documento com ele.
+///
+/// Só aparece quando há o que ler, então um painel que não escreve markdown
+/// não perde um pixel pra ela.
+class DocBar extends StatelessWidget {
+  const DocBar({super.key, required this.store, required this.tab});
+
+  final AppStore store;
+  final MxTab tab;
+
+  /// Quantos `.md` cabem antes de a fita virar uma lista. Passando disso, os
+  /// mais antigos continuam na tira de arquivos alterados.
+  static const _max = 8;
+
+  /// Os markdown que a sessão escreveu, do mais novo pro mais velho: o que ela
+  /// acabou de escrever é o que você está esperando.
+  static List<String> filesOf(MxTab tab) =>
+      tab.hooks.touched.reversed.where(AppStore.readable).take(_max).toList();
+
+  /// Se há alguma coisa pra esta fita mostrar. Quem monta o painel pergunta
+  /// isto antes de gastar altura com ela.
+  static bool has(MxTab tab) => tab.hooks.plan != null || filesOf(tab).isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = tab.hooks.plan;
+    final files = filesOf(tab);
+    final open = store.reading;
+
+    return Container(
+      height: 30,
+      decoration: BoxDecoration(
+        color: Mx.bgSidebar,
+        border: Border(top: BorderSide(color: Mx.border)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 10),
+          Icon(Icons.menu_book_outlined, size: 12, color: Mx.fgFaint),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              children: [
+                if (plan != null)
+                  _DocPill(
+                    icon: Icons.checklist_rtl,
+                    label: tab.hooks.plans.length > 1
+                        ? 'plano ·${tab.hooks.plans.length}'
+                        : 'plano',
+                    tooltip: plan.headline,
+                    // O plano não tem caminho pra comparar: o que identifica o
+                    // que está aberto é ser um plano com o mesmo texto.
+                    open: open != null && open.source == DocSource.plan && open.text == plan.text,
+                    onTap: () => store.showPlan(tab),
+                  ),
+                for (final path in files)
+                  _DocPill(
+                    icon: Icons.article_outlined,
+                    label: path.split('/').last,
+                    tooltip: path,
+                    open: open?.path == path,
+                    gone: !File(path).existsSync(),
+                    onTap: () => store.showFile(path, from: tab),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Uma ficha da fita: um documento, e se é ele que está aberto no leitor.
+class _DocPill extends StatefulWidget {
+  const _DocPill({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+    this.open = false,
+    this.gone = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool open;
+
+  /// O arquivo saiu do disco depois de ter sido escrito -- renomeado, movido,
+  /// apagado. A ficha fica, riscada: some do nada é pior.
+  final bool gone;
+
+  @override
+  State<_DocPill> createState() => _DocPillState();
+}
+
+class _DocPillState extends State<_DocPill> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.gone
+        ? Mx.fgFaint
+        : widget.open
+        ? Mx.accent
+        : (_hover ? Mx.fg : Mx.fgDim);
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Tooltip(
+        message: widget.gone ? '${widget.tooltip}\n(não está mais lá)' : widget.tooltip,
+        child: MouseRegion(
+          cursor: widget.gone ? SystemMouseCursors.basic : SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
+            onTap: widget.gone ? null : widget.onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: widget.open
+                    ? Mx.accent.withValues(alpha: 0.12)
+                    : (_hover ? Mx.bgHover : Colors.transparent),
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(
+                  color: widget.open ? Mx.accent.withValues(alpha: 0.5) : Mx.border,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, size: 11, color: color),
+                  const SizedBox(width: 5),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: color,
+                      decoration: widget.gone ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -1,0 +1,5 @@
+{"type": "custom-title", "customTitle": "maestria_v2", "sessionId": "bbbb2222-2222-4222-8222-000000000002"}
+{"type": "agent-name", "agentName": "maestria_v2", "sessionId": "bbbb2222-2222-4222-8222-000000000002"}
+{"parentUuid": null, "isSidechain": true, "type": "user", "message": {"role": "user", "content": "conte os arquivos dart"}, "sessionId": "bbbb2222-2222-4222-8222-000000000002"}
+{"parentUuid": null, "isSidechain": false, "type": "user", "message": {"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}, {"type": "text", "text": "<ide_opened_file>/tmp/x.dart</ide_opened_file>\n\n## Tarefa\no + da bandeja de grupos ficou torto"}]}, "uuid": "u2", "cwd": "/tmp", "sessionId": "bbbb2222-2222-4222-8222-000000000002"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","tex

@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../services/git.dart';
+import '../services/history.dart';
 import '../services/notify.dart';
+import '../services/paths.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'claude_mark.dart';
 import 'confetti.dart';
 
 InputDecoration _field(String label, [String? hint]) => InputDecoration(
@@ -91,17 +94,53 @@ Future<void> showPanelMenu(
   Offset globalPosition,
 ) async {
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final grouped = store.groupOf(tab);
   final choice = await showMenu<String>(
     context: context,
     color: Mx.bgActive,
     position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
     items: [
+      // Primeiro porque, num painel de programa que saiu, é a única coisa que
+      // se quer fazer com ele. Ver [AppStore.relaunch].
+      if (tab.launcher != null && tab.exited)
+        PopupMenuItem(
+          value: 'relaunch',
+          height: 34,
+          child: Text(
+            'rodar ${tab.launcher!.name} de novo',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
       const PopupMenuItem(
         value: 'rename',
         height: 34,
         child: Text('renomear…', style: TextStyle(fontSize: 12)),
       ),
-      if (tab.kind == TabKind.claude)
+      const PopupMenuItem(
+        value: 'markdown',
+        height: 34,
+        child: Text('abrir um markdown…', style: TextStyle(fontSize: 12)),
+      ),
+      // O que uma sessão do claude produziu pra ler. Os dois são markdown e
+      // sempre foram; o que não havia era onde desenhá-los.
+      if (tab.kind == TabKind.claude) ...[
+        PopupMenuItem(
+          value: 'plan',
+          height: 34,
+          enabled: tab.hooks.plans.isNotEmpty,
+          child: Text(
+            tab.hooks.plans.length > 1
+                ? 'ver o plano (${tab.hooks.plans.length})'
+                : 'ver o plano',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'message',
+          height: 34,
+          enabled: (tab.hooks.lastMessageFull ?? '').trim().isNotEmpty,
+          child: Text('ver o último recado', style: const TextStyle(fontSize: 12)),
+        ),
         PopupMenuItem(
           value: 'chain',
           height: 34,
@@ -112,30 +151,82 @@ Future<void> showPanelMenu(
             style: const TextStyle(fontSize: 12),
           ),
         ),
-      if (!tab.folder.isLoose)
+      ],
+      // Agrupar é do painel que está na tela e da tela em que ele está: os
+      // painéis da grade já aparecem acesos na lateral, e agrupar é apontar
+      // pra um deles e dizer que aqueles andam juntos. Fora de uma grade a
+      // linha não aparece -- um painel sozinho não é um conjunto.
+      //
+      // Painel que já é de um grupo ainda pode agrupar, desde que a tela não
+      // seja aquele grupo: uma grade remontada em volta dele é um arranjo
+      // novo, e sem isto não haveria como guardá-lo. A tela que *é* o grupo
+      // não oferece -- ali agrupar seria salvar de novo o que já está salvo,
+      // e quem atualiza um grupo é o menu dele.
+      if (store.paneCount > 1 &&
+          store.isOpen(tab) &&
+          (grouped == null || !store.showing(grouped)))
+        const PopupMenuItem(
+          value: 'group',
+          height: 34,
+          child: Text('agrupar painéis', style: TextStyle(fontSize: 12)),
+        ),
+      if (grouped case final group?)
+        PopupMenuItem(
+          value: 'ungroup',
+          height: 34,
+          child: Text('desagrupar "${group.name}"', style: const TextStyle(fontSize: 12)),
+        ),
+      // Um leitor não vai pra projeto nem se marca como concluído: as duas
+      // coisas se dizem de um trabalho, e ele é uma folha de papel. Estar fora
+      // de pasta não impede mais: a bandeja também tem projeto. Ver
+      // [showMoveToProject], que é quem diz quando ainda não tem nenhum.
+      if (!tab.isReader)
         const PopupMenuItem(
           value: 'move',
           height: 34,
           child: Text('mover pro projeto…', style: TextStyle(fontSize: 12)),
         ),
-      PopupMenuItem(
-        value: 'done',
-        height: 34,
-        child: Text(
-          tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
-          style: const TextStyle(fontSize: 12),
+      if (!tab.isReader)
+        PopupMenuItem(
+          value: 'done',
+          height: 34,
+          child: Text(
+            tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
+            style: const TextStyle(fontSize: 12),
+          ),
         ),
-      ),
       PopupMenuItem(
         value: 'close',
         height: 34,
-        child: Text('fechar painel', style: TextStyle(fontSize: 12, color: Mx.red)),
+        child: Text(
+          tab.isReader ? 'fechar o leitor' : 'fechar painel',
+          style: TextStyle(fontSize: 12, color: Mx.red),
+        ),
       ),
     ],
   );
   if (choice == null || !context.mounted) return;
 
   switch (choice) {
+    case 'relaunch':
+      store.relaunch(tab);
+    case 'group':
+      final group = store.groupPanes();
+      if (group != null) {
+        // O grupo nasceu batizado pelo que ele abre, e trocar isso é o
+        // "renomear" do menu dele -- o banner é onde isso se diz.
+        store.showBanner('${group.count} painéis agrupados como "${group.name}"');
+      }
+    case 'ungroup':
+      if (grouped != null) store.ungroup(grouped);
+    case 'markdown':
+      // Começa na pasta deste painel: o arquivo que se quer ler é quase sempre
+      // o que a sessão dele acabou de escrever.
+      await store.openMarkdown(from: tab);
+    case 'plan':
+      store.showPlan(tab);
+    case 'message':
+      store.showMessage(tab);
     case 'chain':
       await showFollowUps(context, store, tab);
     case 'move':
@@ -290,7 +381,8 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
     ),
   );
 
-  final path = controller.text.trim();
+  // Digitado à mão, então `~/` também é caminho -- ver [expandHome].
+  final path = expandHome(controller.text.trim());
   if (kind == null || path.isEmpty) return;
   if (!Directory(path).existsSync()) {
     store.showBanner('pasta não encontrada: $path');
@@ -715,38 +807,42 @@ Future<void> showProjectMenu(
     context: context,
     color: Mx.bgActive,
     position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
-    items: const [
-      PopupMenuItem(
+    items: [
+      const PopupMenuItem(
         value: 'claude',
         height: 34,
         child: Text('nova sessão aqui', style: TextStyle(fontSize: 12)),
       ),
-      PopupMenuItem(
-        value: 'task',
-        height: 34,
-        child: Text('nova task nesse projeto…', style: TextStyle(fontSize: 12)),
-      ),
-      PopupMenuItem(
+      // Uma worktree precisa de um repo pra ser worktree de -- ver
+      // [MxKeys.run]. No projeto da bandeja a linha não aparece: ela abriria
+      // um diálogo de branch e pasta que não tem onde acontecer.
+      if (!folder.isLoose)
+        const PopupMenuItem(
+          value: 'task',
+          height: 34,
+          child: Text('nova task nesse projeto…', style: TextStyle(fontSize: 12)),
+        ),
+      const PopupMenuItem(
         value: 'shell',
         height: 34,
         child: Text('novo terminal aqui', style: TextStyle(fontSize: 12)),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: 'brief',
         height: 34,
         child: Text('briefing…', style: TextStyle(fontSize: 12)),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: 'rename',
         height: 34,
         child: Text('renomear', style: TextStyle(fontSize: 12)),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: 'done',
         height: 34,
         child: Text('concluir projeto', style: TextStyle(fontSize: 12)),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: 'dissolve',
         height: 34,
         child: Text('dissolver projeto', style: TextStyle(fontSize: 12)),
@@ -777,7 +873,11 @@ Future<void> showProjectMenu(
     case 'dissolve':
       // The panels outlive it: see AppStore.removeProject.
       store.removeProject(project);
-      store.showBanner('projeto dissolvido — os painéis continuam abertos na pasta');
+      store.showBanner(
+        folder.isLoose
+            ? 'projeto dissolvido — os painéis continuam abertos nos avulsos'
+            : 'projeto dissolvido — os painéis continuam abertos na pasta',
+      );
   }
 }
 
@@ -875,7 +975,11 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
   final folder = tab.folder;
   final projects = store.projectsOf(folder);
   if (projects.isEmpty) {
-    store.showBanner('essa pasta ainda não tem projeto — crie um pelo "+ projeto"');
+    store.showBanner(
+      folder.isLoose
+          ? 'os avulsos ainda não têm projeto — crie um pelo + da bandeja'
+          : 'essa pasta ainda não tem projeto — crie um pelo "+ projeto"',
+    );
     return;
   }
 
@@ -907,7 +1011,7 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
               Icon(Icons.remove_circle_outline, size: 15, color: Mx.fgFaint),
               const SizedBox(width: 9),
               Text(
-                'nenhum — solto na pasta',
+                folder.isLoose ? 'nenhum — solto na bandeja' : 'nenhum — solto na pasta',
                 style: TextStyle(fontSize: 13, color: Mx.fgDim),
               ),
             ],
@@ -923,118 +1027,6 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
 // --- follow-ups -------------------------------------------------------------
 
 /// Arm a panel with what to do when it next goes quiet.
-/// What one fork was sent to do and how far it got.
-///
-/// The row can only afford a line; this is the rest of it -- the brief in
-/// full, the tools it has called in order, and what it reported back. For a
-/// fork still running it is the closest thing to looking over its shoulder,
-/// since its own scrollback never reaches this window.
-Future<void> showSubagent(BuildContext context, MxTab tab, SubagentState agent) =>
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Mx.bgSidebar,
-        title: Row(
-          children: [
-            Icon(
-              agent.running ? Icons.call_split : Icons.check_rounded,
-              size: 16,
-              color: agent.running ? agent.shownStatus.color : Mx.fgDim,
-            ),
-            const SizedBox(width: 8),
-            Expanded(child: Text(agent.title, style: const TextStyle(fontSize: 15))),
-          ],
-        ),
-        content: SizedBox(
-          width: 560,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  [
-                    if (agent.agentType.isNotEmpty) agent.agentType,
-                    if (agent.background) 'background',
-                    agent.running ? 'rodando há ${SubagentState.elapsedLabel(agent.elapsed)}' 
-                        : 'terminou em ${SubagentState.elapsedLabel(agent.elapsed)}',
-                    if (agent.tokens != null) '${agent.tokens} tokens',
-                    '${agent.tools} ferramenta(s)',
-                    'em ${tab.title}',
-                  ].join(' · '),
-                  style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
-                ),
-                if (agent.prompt.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _SubagentSection(title: 'o que foi pedido', body: agent.prompt, mono: true),
-                ],
-                if (agent.trail.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _SubagentSection(
-                    title: agent.running ? 'onde está' : 'por onde passou',
-                    body: agent.trail.reversed.join('\n'),
-                    mono: true,
-                  ),
-                ],
-                if (agent.lastMessageFull != null) ...[
-                  const SizedBox(height: 14),
-                  _SubagentSection(title: 'o que reportou', body: agent.lastMessageFull!),
-                ],
-                const SizedBox(height: 14),
-                Text(
-                  'agent_id ${agent.agentId}',
-                  style: TextStyle(fontFamily: Mx.mono, fontSize: 10, color: Mx.fgFaint),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('fechar')),
-        ],
-      ),
-    );
-
-class _SubagentSection extends StatelessWidget {
-  const _SubagentSection({required this.title, required this.body, this.mono = false});
-
-  final String title;
-  final String body;
-  final bool mono;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(fontSize: 11, color: Mx.fgDim, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 5),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(9),
-          decoration: BoxDecoration(
-            color: Mx.bg,
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(color: Mx.border),
-          ),
-          child: SelectableText(
-            body,
-            style: TextStyle(
-              fontFamily: mono ? Mx.mono : null,
-              fontSize: mono ? 11 : 12.5,
-              color: Mx.fg,
-              height: 1.35,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 Future<void> showFollowUps(BuildContext context, AppStore store, MxTab tab) =>
     showDialog<void>(
       context: context,
@@ -1357,7 +1349,7 @@ class _FilterSheet extends StatelessWidget {
             ],
             // A bandeja só aparece quando há algo nela — filtrar por um lugar
             // vazio é pedir uma lista vazia.
-            if (loose.isNotEmpty)
+            if (loose.isNotEmpty) ...[
               _FilterRow(
                 label: store.loose.name,
                 icon: Icons.inbox_outlined,
@@ -1367,6 +1359,21 @@ class _FilterSheet extends StatelessWidget {
                   redraw();
                 },
               ),
+              // Um passo pra dentro da régua, como os projetos de uma pasta:
+              // a bandeja também nomeia trabalho agora.
+              for (final p in store.projectsOf(store.loose))
+                _FilterRow(
+                  label: p.name,
+                  icon: Icons.workspaces_outline,
+                  color: Mx.purple,
+                  indent: 14,
+                  on: store.filterProjects.contains(p.id),
+                  onTap: () {
+                    store.toggleFilterProject(p);
+                    redraw();
+                  },
+                ),
+            ],
           ],
           for (final group in MxFilterGroup.values) ...[
             _FilterLabel(group.label),
@@ -1483,6 +1490,396 @@ class _FilterRowState extends State<_FilterRow> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- histórico de conversas -------------------------------------------------
+
+/// As conversas que já rodaram aqui, pra clicar numa e retomá-la.
+///
+/// Um diálogo e não uma bandeja na lateral, como a dos grupos: um grupo é uma
+/// linha e são três ou quatro, enquanto o histórico desta máquina tem sessenta
+/// conversas numa pasta só -- na lateral isso empurraria as sessões abertas,
+/// que é o que ela existe pra mostrar, pra fora da tela. Aqui a lista custa
+/// zero até ser pedida, e o pedido é o mesmo `+` com que se abre qualquer
+/// coisa numa pasta.
+Future<void> showChatHistory(
+  BuildContext context,
+  AppStore store,
+  Folder folder, {
+  Project? project,
+}) => showDialog<void>(
+  context: context,
+  builder: (_) => _ChatHistory(store: store, folder: folder, project: project),
+);
+
+class _ChatHistory extends StatefulWidget {
+  const _ChatHistory({required this.store, required this.folder, this.project});
+  final AppStore store;
+  final Folder folder;
+  final Project? project;
+
+  @override
+  State<_ChatHistory> createState() => _ChatHistoryState();
+}
+
+class _ChatHistoryState extends State<_ChatHistory> {
+  /// Pedido uma vez, no `initState` que o `late final` faz: um `build` que
+  /// relesse o disco releria a cada repintura do diálogo.
+  late final Future<List<ChatEntry>> _chats = widget.store.chatsIn(widget.folder);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text(
+        widget.folder.isLoose ? 'conversas de antes' : 'conversas em ${widget.folder.name}',
+        style: const TextStyle(fontSize: 15),
+      ),
+      content: SizedBox(
+        width: 560,
+        child: FutureBuilder<List<ChatEntry>>(
+          future: _chats,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const SizedBox(
+                height: 90,
+                child: Center(
+                  child: SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 1.8),
+                  ),
+                ),
+              );
+            }
+            final chats = snap.data ?? const <ChatEntry>[];
+            if (chats.isEmpty) {
+              return Text(
+                widget.folder.isLoose
+                    ? 'o claude não guardou nenhuma conversa ainda.'
+                    : 'nenhuma conversa em ${widget.folder.name} ainda — as que '
+                          'houver aparecem aqui na próxima vez.',
+                style: TextStyle(fontSize: 12, color: Mx.fgDim),
+              );
+            }
+            return ConstrainedBox(
+              // Rola dentro do diálogo: quarenta linhas não caberiam numa tela
+              // de laptop, e um diálogo mais alto que a janela não fecha.
+              constraints: const BoxConstraints(maxHeight: 420),
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final chat in chats)
+                    _ChatRow(
+                      key: ValueKey(chat.sessionId),
+                      store: widget.store,
+                      chat: chat,
+                      onTap: () {
+                        // Fecha antes de abrir: o painel novo aparece atrás do
+                        // diálogo, e o gesto acabou quando a conversa foi
+                        // escolhida.
+                        Navigator.pop(context);
+                        widget.store.resumeChat(
+                          chat,
+                          // Sem pasta no histórico inteiro: quem sabe de onde
+                          // aquela conversa é é o caminho dela, e é o store
+                          // que faz essa volta.
+                          folder: widget.folder.isLoose ? null : widget.folder,
+                          project: widget.project,
+                        );
+                      },
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('fechar')),
+      ],
+    );
+  }
+}
+
+/// Uma conversa, numa linha: o nome que ela tem, onde e quando rodou, e o
+/// aviso de por que ela não abriria agora, quando é o caso.
+class _ChatRow extends StatefulWidget {
+  const _ChatRow({super.key, required this.store, required this.chat, required this.onTap});
+  final AppStore store;
+  final ChatEntry chat;
+  final VoidCallback onTap;
+
+  @override
+  State<_ChatRow> createState() => _ChatRowState();
+}
+
+class _ChatRowState extends State<_ChatRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chat = widget.chat;
+    final standing = widget.store.standingOf(chat);
+    // A cor do aviso é a do estado: verde é a conversa que já está aqui na
+    // tela, amarelo é a que não abre -- as mesmas duas de [ClaudeStatusUi].
+    final tint = switch (standing) {
+      ChatStanding.onScreen => Mx.green,
+      ChatStanding.live || ChatStanding.gone => Mx.yellow,
+      ChatStanding.fresh => Mx.fgFaint,
+    };
+    // A conversa cujo transcript não disse em que pasta rodou cai no mesmo
+    // [ChatStanding.gone] -- ela também não tem onde ser retomada --, mas por
+    // outro motivo, e o aviso é o do motivo.
+    final note = standing == ChatStanding.gone && chat.cwd.isEmpty
+        ? 'não sei onde ela rodou'
+        : standing.note;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          color: _hover ? Mx.bgHover : Colors.transparent,
+          padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: standing == ChatStanding.gone
+                    ? Icon(Icons.link_off, size: 13, color: Mx.yellow)
+                    : const ClaudeMark(size: 13),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      chat.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.25,
+                        // Apagada a que não abre: a linha continua clicável --
+                        // o clique é o que explica por quê --, mas ela não
+                        // disputa o olho com as que abrem.
+                        color: standing == ChatStanding.gone ? Mx.fgDim : Mx.fg,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            // O tamanho do transcript é o que se tem de "quão
+                            // longa foi" sem abrir o arquivo, e a pasta
+                            // importa mesmo com o histórico filtrado: uma
+                            // worktree é outra pasta.
+                            [chat.ago, chat.where, chat.size].join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: Mx.mono,
+                              fontSize: 10.5,
+                              height: 1.2,
+                              color: Mx.fgFaint,
+                            ),
+                          ),
+                        ),
+                        if (note != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            note,
+                            style: TextStyle(fontSize: 10.5, height: 1.2, color: tint),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// O que o formulário de um programa devolve: o mesmo trio, seja pra criar um
+/// ou pra reescrever o que já existe.
+typedef LauncherDraft = ({String name, String command, LauncherIcon icon});
+
+/// Ensina um programa novo e devolve ele já salvo, ou null se você desistiu.
+///
+/// Quem chama decide o que fazer em seguida -- o menu do + abre um painel com
+/// ele na hora, a tela de configurações só o acrescenta à lista.
+Future<Launcher?> showNewLauncher(BuildContext context, AppStore store) async {
+  final draft = await _launcherForm(context, title: 'novo programa');
+  if (draft == null) return null;
+  return store.addLauncher(name: draft.name, command: draft.command, icon: draft.icon);
+}
+
+/// O mesmo formulário sobre um programa que já existe. Vale na hora e em todo
+/// painel dele: ver [AppStore.editLauncher].
+Future<void> showEditLauncher(BuildContext context, AppStore store, Launcher launcher) async {
+  final draft = await _launcherForm(context, title: 'editar programa', initial: launcher);
+  if (draft == null) return;
+  store.editLauncher(
+    launcher,
+    name: draft.name,
+    command: draft.command,
+    icon: draft.icon,
+  );
+}
+
+Future<LauncherDraft?> _launcherForm(
+  BuildContext context, {
+  required String title,
+  Launcher? initial,
+}) => showDialog<LauncherDraft>(
+  context: context,
+  builder: (ctx) => _LauncherForm(title: title, initial: initial),
+);
+
+/// Nome, comando e desenho -- as três coisas que um [Launcher] é.
+///
+/// Com estado porque o ícone é escolhido clicando: um `showDialog` de conteúdo
+/// fixo não repinta a escolha, e um seletor que não mostra o que está
+/// selecionado não é um seletor.
+class _LauncherForm extends StatefulWidget {
+  const _LauncherForm({required this.title, this.initial});
+
+  final String title;
+  final Launcher? initial;
+
+  @override
+  State<_LauncherForm> createState() => _LauncherFormState();
+}
+
+class _LauncherFormState extends State<_LauncherForm> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.initial?.name ?? '',
+  );
+  late final TextEditingController _command = TextEditingController(
+    text: widget.initial?.command ?? '',
+  );
+  late LauncherIcon _icon = widget.initial?.icon ?? LauncherIcon.terminal;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _command.dispose();
+    super.dispose();
+  }
+
+  /// O comando é o obrigatório; o nome, não. Um programa sem nome se chama
+  /// pela primeira palavra do que ele roda -- `npm run dev` vira "npm", e
+  /// `btop` vira "btop", que é o que você teria digitado ali de qualquer
+  /// forma. Ninguém devia ter que batizar o btop.
+  void _submit() {
+    final command = _command.text.trim();
+    if (command.isEmpty) return;
+    final typed = _name.text.trim();
+    Navigator.pop(context, (
+      name: typed.isEmpty ? command.split(RegExp(r'\s+')).first : typed,
+      command: command,
+      icon: _icon,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text(widget.title, style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _command,
+              autofocus: true,
+              style: TextStyle(fontSize: 13, fontFamily: Mx.mono),
+              decoration: _field('comando', 'btop, lazygit, npm run dev…'),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'roda no painel como você digitaria no terminal — e o painel '
+              'abre já dentro dele, sem prompt no caminho.',
+              style: TextStyle(color: Mx.fgFaint, fontSize: 11, height: 1.35),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _name,
+              style: const TextStyle(fontSize: 13),
+              decoration: _field('nome', 'como ele aparece no menu e na lateral'),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 16),
+            Text('desenho', style: TextStyle(color: Mx.fgDim, fontSize: 12)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final icon in LauncherIcon.values)
+                  _IconChip(
+                    icon: icon,
+                    selected: icon == _icon,
+                    onTap: () => setState(() => _icon = icon),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
+        FilledButton(onPressed: _submit, child: const Text('salvar')),
+      ],
+    );
+  }
+}
+
+/// Um dos desenhos possíveis, do tamanho em que ele vai ser visto na lateral.
+class _IconChip extends StatelessWidget {
+  const _IconChip({required this.icon, required this.selected, required this.onTap});
+
+  final LauncherIcon icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: icon.label,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: selected ? Mx.bgActive : Mx.bg,
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: selected ? Mx.accent : Mx.border),
+            ),
+            child: Icon(icon.glyph, size: 16, color: selected ? Mx.fg : Mx.fgDim),
           ),
         ),
       ),

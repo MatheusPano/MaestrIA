@@ -1,3 +1,8 @@
+// `AppExitResponse` mora aqui e em nenhum outro lugar: o `material.dart` não
+// reexporta. `show` porque o `dart:ui` inteiro traria um `TextStyle`, uma
+// `Image` e uma `Color` pra brigar com os do material.
+import 'dart:ui' show AppExitResponse;
+
 import 'package:flutter/material.dart';
 
 import 'services/store.dart';
@@ -20,15 +25,32 @@ class MaestriaApp extends StatefulWidget {
 
 class _MaestriaAppState extends State<MaestriaApp> {
   final AppStore store = AppStore();
+  late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
+    // O gancho do ⌘Q, e o único momento em que ainda dá pra encerrar as
+    // sessões.
+    //
+    // `dispose` não serve pra isso: quando o macOS encerra o app a árvore de
+    // widgets não é desmontada, ela some junto com o processo -- e as sessões
+    // não vão junto, porque cada uma é uma sessão de terminal própria (ver
+    // `TermSession.kill`) e nada manda o hangup por nós. Sem isto, todo
+    // painel que estava aberto ao sair vira um `claude` órfão rodando pra
+    // sempre, um por vez que o app foi usado.
+    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
     store.init();
+  }
+
+  Future<AppExitResponse> _onExitRequested() async {
+    await store.shutdown();
+    return AppExitResponse.exit;
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     store.dispose();
     super.dispose();
   }
@@ -37,9 +59,11 @@ class _MaestriaAppState extends State<MaestriaApp> {
   Widget build(BuildContext context) {
     // Above the MaterialApp on purpose: the palette feeds `theme:` as much as
     // it feeds the panels, so the whole tree has to be rebuilt from up here.
-    return ValueListenableBuilder<MxPalette>(
-      valueListenable: Mx.current,
-      builder: (context, _, _) => MaterialApp(
+    // A tipografia vem junto (ver [Mx.chrome]) pelo mesmo motivo: a face mono
+    // é lida tanto pelo pty quanto pelos rótulos ao redor dele.
+    return AnimatedBuilder(
+      animation: Mx.chrome,
+      builder: (context, _) => MaterialApp(
         title: 'maestria',
         debugShowCheckedModeBanner: false,
         theme: Mx.theme(),

@@ -1,0 +1,125 @@
+# Uma tag vira duas coisas pra baixar.
+#
+#   make bump V=1.0.3          # sobe a versão no pubspec
+#   git commit -am '...' && git push
+#   git tag v1.0.3 && git push origin v1.0.3
+#
+# Daí em diante é sozinho: o .deb sai de um container ubuntu:22.04 (o mesmo do
+# `make deb`, então o piso de glibc é o mesmo) e o .dmg de um runner macOS, e
+# os dois sobem anexados a uma release na página do repo. Ninguém mais precisa
+# mandar arquivo por mensagem.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Pra reempacotar uma tag que já existe sem ter que apagá-la e recriá-la.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'a tag a empacotar (ex.: v1.0.3)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # A tag é o nome público da versão e o pubspec é o que vai dentro do pacote.
+  # Divergirem é uma release que se anuncia 1.0.3 e instala 1.0.2 -- e o apt,
+  # que decide atualizar pela versão do pacote, não atualizaria nada.
+  versao:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+      - name: a tag bate com o pubspec?
+        run: |
+          set -euo pipefail
+          pubspec=$(sed -n 's/^version: *\([0-9][^+ ]*\).*/\1/p' pubspec.yaml | head -1)
+          if [ "$TAG" != "v$pubspec" ]; then
+            echo "::error::a tag é $TAG e o pubspec diz $pubspec -- rode 'make bump V=...' antes de taguear."
+            exit 1
+          fi
+          echo "maestria $pubspec"
+
+  deb:
+    needs: versao
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+      # O mesmo script do `make deb`: aqui o container roda nativo em vez de
+      # emulado, então o que no Mac leva dezenas de minutos leva alguns.
+      - run: ./packaging/linux/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: packaging/linux/dist/*.deb
+          if-no-files-found: error
+
+  dmg:
+    needs: versao
+    # arm64, e o build sai universal -- ver o `lipo` do make-dmg.sh.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+
+      # A versão do Flutter vem do Makefile, que é onde ela mora pro resto do
+      # projeto: um runner que compilasse com outra não seria o mesmo app.
+      - id: sdk
+        run: echo "version=$(sed -n 's/^FLUTTER_VERSION ?= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-macos-arm64-${{ steps.sdk.outputs.version }}
+
+      - name: flutter ${{ steps.sdk.outputs.version }}
+        run: |
+          set -euo pipefail
+          V='${{ steps.sdk.outputs.version }}'
+          if [ ! -x "$HOME/flutter/bin/flutter" ]; then
+            curl -fsSL -o /tmp/flutter.zip \
+              "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_${V}-stable.zip"
+            unzip -q /tmp/flutter.zip -d "$HOME"
+          fi
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+
+      - run: |
+          git config --global --add safe.directory "$HOME/flutter"
+          flutter config --enable-macos-desktop
+          flutter precache --macos
+
+      - run: ./packaging/macos/make-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: packaging/macos/dist/*.dmg
+          if-no-files-found: error
+
+  publicar:
+    needs: [deb, dmg]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+      - uses: actions/download-artifact@v4
+        with: { path: anexos, merge-multiple: true }
+
+      # `--clobber` porque o workflow_dispatch existe justamente pra reempacotar
+      # uma tag já publicada: sem ele a segunda rodada morre no anexo repetido.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -lh anexos
+          gh release view "$TAG" >/dev/null 2>&1 \
+            && gh release upload "$TAG" anexos/* --clobber \
+            || gh release create "$TAG" anexos/* \
+                 --title "maestria ${TAG#v}" \
+                 --notes-file packaging/NOTAS-DA-RELEASE.md

@@ -6,6 +6,7 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 
 import 'shell.dart';
+import 'vt.dart';
 
 /// One real terminal: a pty child wired to an xterm buffer.
 ///
@@ -15,10 +16,13 @@ import 'shell.dart';
 /// matched against a row of `claude agents --json`.
 class TermSession {
   TermSession({int scrollback = 8000})
-    : terminal = Terminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel);
+    : terminal = VtTerminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel);
 
   final Terminal terminal;
   final TerminalController controller = TerminalController();
+
+  /// The pty's bytes, minus the sequences xterm reads as display attributes.
+  final VtScrubber _scrub = VtScrubber();
   Pty? _pty;
   bool exited = false;
   int? exitCode;
@@ -31,6 +35,21 @@ class TermSession {
   void startCommand(String command, String cwd, {Map<String, String>? env, String? display}) {
     note(display ?? command);
     _start(['-lc', 'exec $command'], cwd, env);
+  }
+
+  /// Roda o comando outra vez neste mesmo painel, depois que o processo saiu.
+  ///
+  /// O scrollback fica: o que o programa deixou escrito antes de sair é
+  /// justamente o que se quer ler quando ele sai sozinho. Só com o processo
+  /// morto -- um pty vivo aqui daria dois filhos escrevendo no mesmo buffer, e
+  /// o `exitCode` do primeiro chegaria depois do segundo subir, marcando como
+  /// morto um painel que acabou de nascer.
+  void relaunch(String command, String cwd) {
+    if (!exited) return;
+    exited = false;
+    exitCode = null;
+    terminal.write('\r\n');
+    startCommand(command, cwd);
   }
 
   /// A dim line in the buffer itself, so the exact command is never a mystery.
@@ -64,7 +83,10 @@ class TermSession {
     );
     _pty = pty;
 
-    pty.output.cast<List<int>>().transform(const Utf8Decoder()).listen(terminal.write);
+    pty.output
+        .cast<List<int>>()
+        .transform(const Utf8Decoder())
+        .listen((chunk) => terminal.write(_scrub(chunk)));
     pty.exitCode.then((code) {
       exited = true;
       exitCode = code;
@@ -166,8 +188,56 @@ class TermSession {
 
   static String _byte(int n) => String.fromCharCode(32 + n);
 
-  void kill() {
-    if (!exited) _pty?.kill();
+  /// Quanto tempo uma sessão ganha pra atender ao hangup por bem.
+  static const _grace = Duration(seconds: 3);
+
+  /// Desliga a sessão, que é o que fechar uma janela de terminal faz.
+  ///
+  /// [Pty.kill] -- um `SIGTERM` seco pra `pty.pid` -- erra nisso duas vezes, e
+  /// o painel que continuava na lista de processos depois de fechado era os
+  /// dois erros juntos:
+  ///
+  ///  * **O sinal.** Um shell interativo ignora SIGTERM: está no POSIX, e o
+  ///    zsh obedece -- medido, um `/bin/zsh -l` sobrevive ao TERM tanto no pid
+  ///    quanto no grupo. Um painel de [startShell] fechado assim ficava no
+  ///    prompt pra sempre. SIGHUP é o sinal que um terminal manda quando vai
+  ///    embora, e é o que nenhum shell pode recusar.
+  ///  * **O alvo.** `pty.pid` é líder de sessão -- o fork do flutter_pty chama
+  ///    `setsid` --, então o grupo de processos *é* esta sessão e não segura
+  ///    mais nada. `-pid` alcança o que o líder subiu e um sinal só pro líder
+  ///    nunca toca: os servidores MCP do claude, o `npm run dev` que uma
+  ///    ferramenta deixou rodando, o pager aberto no shell.
+  ///
+  /// Depois espera. Um hangup é um pedido, e o claude gasta um instante com
+  /// ele gravando o transcript -- vale esperar. O que não saiu depois de
+  /// [_grace] não ia sair, e leva SIGKILL, que nada sobrevive.
+  Future<void> kill() async {
+    final pty = _pty;
+    if (pty == null || exited) return;
+    if (!_signal(pty, ProcessSignal.sighup)) return;
+    await Future.any<void>([pty.exitCode, Future<void>.delayed(_grace)]);
+    if (!exited) _signal(pty, ProcessSignal.sigkill);
+  }
+
+  /// O hangup sozinho: sem espera e sem nada pra aguardar.
+  ///
+  /// Pro caminho que não pode esperar -- o app sendo encerrado --, onde toda
+  /// sessão precisa ser avisada antes que o processo que faria a escalada
+  /// deixe de existir.
+  void hangUp() {
+    final pty = _pty;
+    if (pty != null && !exited) _signal(pty, ProcessSignal.sighup);
+  }
+
+  /// Sinaliza a sessão inteira, caindo pro líder sozinho quando não há grupo
+  /// pra sinalizar. `false` é não ter sobrado nada pra receber o sinal.
+  bool _signal(Pty pty, ProcessSignal signal) {
+    final pid = pty.pid;
+    // `kill(-1)` é todo processo do usuário e `kill(0)` é o grupo deste app:
+    // um pid que não existe mais não pode virar nenhum dos dois.
+    if (pid <= 1) return false;
+    // Negativo é o grupo de processos -- ver [kill].
+    return Process.killPid(-pid, signal) || Process.killPid(pid, signal);
   }
 }
 

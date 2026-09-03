@@ -182,7 +182,6 @@ void main() {
       expect(store.hits, hasLength(1));
       store.dispose();
     });
-
   });
 
   group('a lateral, procurando', () {
@@ -230,8 +229,10 @@ void main() {
       store.dispose();
     });
 
-    // As worktrees são o que o repo *é*, não uma sessão que você procura.
-    testWidgets('recolhe a gaveta de worktrees', (tester) async {
+    // As worktrees são o que o repo *é*, não uma sessão que você procura — e
+    // desde que saíram da árvore pro menu do repo, a busca não tem mais nada
+    // que esconder ali. Este teste guarda isso: nem antes, nem durante.
+    testWidgets('não tem gaveta de worktrees pra atrapalhar', (tester) async {
       final store = storeWithFolder();
       store.worktrees['/repo'] = [
         WorktreeInfo(path: '/repo', branch: 'master', isMain: true),
@@ -240,9 +241,10 @@ void main() {
       panel(store, 'permissão do drive');
 
       await pumpSidebar(tester, store);
-      expect(find.text('worktrees'), findsOneWidget);
+      expect(find.text('worktrees'), findsNothing);
       await search(tester, 'drive');
       expect(find.text('worktrees'), findsNothing);
+      expect(find.text('permissão do drive'), findsOneWidget);
       store.dispose();
     });
 

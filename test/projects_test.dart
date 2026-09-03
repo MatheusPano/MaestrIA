@@ -130,6 +130,79 @@ void main() {
     });
   });
 
+  // Um trabalho com nome que não mora em repo nenhum -- ler um contrato,
+  // arrumar a máquina -- é trabalho com nome do mesmo jeito. Ver [_LooseTray].
+  group('a project in the loose tray', () {
+    test('hangs off the tray and takes its panels', () {
+      final store = storeWithFolder();
+      final project = store.addProject(store.loose, 'arrumar a máquina');
+
+      expect(project.folderRoot, store.loose.root);
+      expect(store.projectsOf(store.loose), [project]);
+      // E não aparece na pasta de ninguém.
+      expect(store.projectsOf(store.folders.first), isEmpty);
+
+      final solto = panel(store, 'solto', folder: store.loose);
+      store.assign(solto, project);
+      expect(solto.projectId, project.id);
+      store.dispose();
+    });
+
+    test('refuses a panel that is in a folder', () {
+      final store = storeWithFolder();
+      final project = store.addProject(store.loose, 'arrumar a máquina');
+      final noRepo = panel(store, 'no repo');
+
+      store.assign(noRepo, project);
+      expect(noRepo.projectId, isNull);
+      store.dispose();
+    });
+
+    test('survives the config round trip', () {
+      final store = storeWithFolder();
+      final made = store.addProject(store.loose, 'ler o contrato', brief: 'contexto');
+      final back = Project.fromJson(made.toJson());
+      expect(back.folderRoot, store.loose.root);
+      expect(back.name, 'ler o contrato');
+      store.dispose();
+    });
+
+    testWidgets('is drawn in the tray, with its panels inside it', (tester) async {
+      final store = storeWithFolder();
+      final project = store.addProject(store.loose, 'arrumar a máquina');
+      panel(store, 'no projeto', folder: store.loose, project: project);
+      panel(store, 'solto na bandeja', folder: store.loose);
+
+      await pumpSidebar(tester, store);
+      expect(find.text('arrumar a máquina'), findsOneWidget);
+      // Uma vez cada: o painel do projeto sai da lista solta da bandeja.
+      expect(find.text('no projeto'), findsOneWidget);
+      expect(find.text('solto na bandeja'), findsOneWidget);
+      // E dentro do projeto, que é uma coisa em que se está: um degrau à
+      // direita da linha solta, que está dentro de nada.
+      final inside = tester.getTopLeft(find.text('no projeto')).dx;
+      final loose = tester.getTopLeft(find.text('solto na bandeja')).dx;
+      expect(inside, greaterThan(loose));
+      store.dispose();
+    });
+
+    // A worktree precisa de um repo pra ser worktree de.
+    //
+    // Sem painel nenhum de propósito: a marca de uma sessão do claude anima
+    // pra sempre, e um `pumpAndSettle` com uma delas na tela nunca volta.
+    testWidgets('has no "nova task" in its menu', (tester) async {
+      final store = storeWithFolder();
+      store.addProject(store.loose, 'arrumar a máquina');
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('o que fazer com esse projeto'));
+      await tester.pumpAndSettle();
+      expect(find.text('nova sessão aqui'), findsOneWidget);
+      expect(find.text('nova task nesse projeto…'), findsNothing);
+      store.dispose();
+    });
+  });
+
   group('the sidebar', () {
     testWidgets('draws a project\'s panels inside it, and only there', (tester) async {
       final store = storeWithFolder();

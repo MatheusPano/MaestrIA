@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'dialogs.dart';
 import 'theme_gallery.dart';
 
-/// As duas metades da tela: como a janela se parece, e o que o teclado faz.
+/// As três metades da tela: como a janela se parece, o que o teclado faz, e o
+/// que o + da lateral tem pra oferecer.
 enum MxSection {
   appearance('aparência', Icons.palette_outlined),
-  shortcuts('atalhos', Icons.keyboard_outlined);
+  shortcuts('atalhos', Icons.keyboard_outlined),
+  launchers('programas', Icons.rocket_launch_outlined);
 
   const MxSection(this.label, this.icon);
   final String label;
@@ -68,9 +72,11 @@ class _SettingsState extends State<_Settings> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<MxPalette>(
-      valueListenable: Mx.current,
-      builder: (context, _, _) => AnimatedBuilder(
+    return AnimatedBuilder(
+      // Rotas guardam a página que construíram, então o diálogo continuaria
+      // nas cores — e no corpo — velhos enquanto o app atrás dele muda.
+      animation: Mx.chrome,
+      builder: (context, _) => AnimatedBuilder(
         animation: widget.store,
         builder: (context, _) => Dialog(
           backgroundColor: Mx.bgSidebar,
@@ -97,6 +103,7 @@ class _SettingsState extends State<_Settings> {
                             child: switch (_section) {
                               MxSection.appearance => _Appearance(store: widget.store),
                               MxSection.shortcuts => _Shortcuts(store: widget.store),
+                              MxSection.launchers => _Launchers(store: widget.store),
                             },
                           ),
                         ),
@@ -264,6 +271,260 @@ class _Appearance extends StatelessWidget {
               'e o pty vai junto: a paleta pinta o scrollback, não só a moldura.',
         ),
         ThemeGallery(store: store),
+        const SizedBox(height: 26),
+        _Typography(store: store),
+      ],
+    );
+  }
+}
+
+/// A tipografia do pty: a face, o corpo e a entrelinha.
+///
+/// Fica embaixo do tema e não numa seção própria porque é a mesma pergunta que
+/// a galeria faz — como o terminal se parece —, e porque as duas se respondem
+/// olhando: a amostra aqui é o pty escrito nas cores do tema que acabou de ser
+/// escolhido logo acima.
+class _Typography extends StatelessWidget {
+  const _Typography({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = Mx.type;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _Heading(
+                'tipografia do pty',
+                hint: 'vale pra todo painel. ⌘= e ⌘− mexem em um só, a partir '
+                    'daqui — e o painel lembra o que você deixou.',
+              ),
+            ),
+            if (type != MxType.standard)
+              TextButton(
+                onPressed: () => store.setTypography(MxType.standard),
+                child: const Text('restaurar padrões', style: TextStyle(fontSize: 11.5)),
+              ),
+          ],
+        ),
+        _Sample(type: type),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final face in MxFaces.installed)
+              _FaceChip(
+                face: face,
+                selected: face.family == type.mono,
+                onTap: () => store.setTypography(type.copyWith(mono: face.family)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          // Um nome que não existe na máquina não some calado: a face cai na
+          // proporcional do sistema e o terminal desalinha inteiro. Por isso a
+          // lista é medida antes de ser desenhada — ver [MxFaces.resolves].
+          'só as que existem nesta máquina; a Hack vem no app',
+          style: TextStyle(fontSize: 11, color: Mx.fgFaint),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            _Stepper(
+              label: 'corpo',
+              // Sem decimal quando não há decimal, e com um quando um config
+              // editado à mão trouxe 13.5: o número aqui é pra ser exato.
+              value: type.size.toStringAsFixed(type.size == type.size.roundToDouble() ? 0 : 1),
+              unit: 'px',
+              onLess: type.size > MxType.minSize
+                  ? () => store.setTypography(type.copyWith(size: type.size - MxType.sizeStep))
+                  : null,
+              onMore: type.size < MxType.maxSize
+                  ? () => store.setTypography(type.copyWith(size: type.size + MxType.sizeStep))
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            _Stepper(
+              label: 'entrelinha',
+              value: type.line.toStringAsFixed(2),
+              onLess: type.line > MxType.minLine
+                  ? () => store.setTypography(type.copyWith(line: type.line - MxType.lineStep))
+                  : null,
+              onMore: type.line < MxType.maxLine
+                  ? () => store.setTypography(type.copyWith(line: type.line + MxType.lineStep))
+                  : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// O pty, escrito como ele vai ficar.
+///
+/// Três linhas e não uma: a entrelinha é a distância *entre* linhas, e uma
+/// amostra de uma linha só seria a única escolha aqui que não dá pra ver.
+class _Sample extends StatelessWidget {
+  const _Sample({required this.type});
+
+  final MxType type;
+
+  @override
+  Widget build(BuildContext context) {
+    final term = Mx.terminal;
+    final style = TextStyle(
+      fontFamily: type.mono,
+      fontSize: type.size,
+      height: type.line,
+      color: term.foreground,
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: term.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Mx.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: r'$ ', style: style.copyWith(color: term.brightBlack)),
+                TextSpan(text: 'git', style: style.copyWith(color: term.green)),
+                const TextSpan(text: ' status --short'),
+              ],
+            ),
+            style: style,
+          ),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: ' M ', style: style.copyWith(color: term.yellow)),
+                const TextSpan(text: 'lib/ui/settings.dart'),
+              ],
+            ),
+            style: style,
+          ),
+          Text('?? Il1 O0 — {} => (i:M)', style: style.copyWith(color: term.brightBlack)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Uma face, escrita nela mesma.
+///
+/// O nome de uma monoespaçada não diz nada sobre ela; a forma do `g` e do `1`
+/// diz tudo. Então o rótulo do chip *é* o preview.
+class _FaceChip extends StatefulWidget {
+  const _FaceChip({required this.face, required this.selected, required this.onTap});
+
+  final MxFace face;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_FaceChip> createState() => _FaceChipState();
+}
+
+class _FaceChipState extends State<_FaceChip> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final lit = widget.selected || _hover;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: widget.selected ? Mx.bgActive : (_hover ? Mx.bgHover : Colors.transparent),
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: widget.selected ? Mx.accent : Mx.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.face.family,
+                style: TextStyle(
+                  fontFamily: widget.face.family,
+                  fontSize: 12,
+                  color: lit ? Mx.fg : Mx.fgDim,
+                ),
+              ),
+              if (widget.face.note case final note?) ...[
+                const SizedBox(width: 6),
+                Text(note, style: TextStyle(fontSize: 10.5, color: Mx.fgFaint)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// `−  13px  +`. Um número que só anda de um passo por vez não precisa de
+/// campo de texto, e um slider erraria o valor que a pessoa quer.
+class _Stepper extends StatelessWidget {
+  const _Stepper({
+    required this.label,
+    required this.value,
+    required this.onLess,
+    required this.onMore,
+    this.unit = '',
+  });
+
+  final String label;
+  final String value;
+  final String unit;
+  final VoidCallback? onLess;
+  final VoidCallback? onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+        const SizedBox(height: 5),
+        Container(
+          decoration: BoxDecoration(
+            color: Mx.bg,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: Mx.border),
+          ),
+          child: Row(
+            children: [
+              _Ghost(icon: Icons.remove, tooltip: 'menos', onTap: onLess),
+              SizedBox(
+                width: 58,
+                child: Text(
+                  '$value$unit',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontFamily: Mx.mono, fontSize: 12, color: Mx.fg),
+                ),
+              ),
+              _Ghost(icon: Icons.add, tooltip: 'mais', onTap: onMore),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -566,7 +827,10 @@ class _Ghost extends StatefulWidget {
 
   final IconData icon;
   final String tooltip;
-  final VoidCallback onTap;
+
+  /// Null é o fim de curso de um [_Stepper]: o botão continua no lugar,
+  /// apagado. Tirá-lo faria o número pular de lado ao chegar no limite.
+  final VoidCallback? onTap;
 
   @override
   State<_Ghost> createState() => _GhostState();
@@ -577,11 +841,13 @@ class _GhostState extends State<_Ghost> {
 
   @override
   Widget build(BuildContext context) {
+    final off = widget.onTap == null;
+    final lit = _hover && !off;
     return Tooltip(
       message: widget.tooltip,
       waitDuration: const Duration(milliseconds: 400),
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
+        cursor: off ? SystemMouseCursors.basic : SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: GestureDetector(
@@ -591,11 +857,15 @@ class _GhostState extends State<_Ghost> {
             height: 26,
             margin: const EdgeInsets.only(left: 2),
             decoration: BoxDecoration(
-              color: _hover ? Mx.bgHover : Colors.transparent,
+              color: lit ? Mx.bgHover : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: _hover ? Mx.border : Colors.transparent),
+              border: Border.all(color: lit ? Mx.border : Colors.transparent),
             ),
-            child: Icon(widget.icon, size: 13, color: _hover ? Mx.fg : Mx.fgFaint),
+            child: Icon(
+              widget.icon,
+              size: 13,
+              color: off ? Mx.border : (lit ? Mx.fg : Mx.fgFaint),
+            ),
           ),
         ),
       ),
@@ -709,6 +979,144 @@ class _Fixed extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Os programas do usuário: a lista, e os gestos que mexem nela.
+///
+/// Uma seção própria e não um canto da aparência porque o que se responde aqui
+/// não é como a janela se parece -- é o que o + da lateral oferece. É a única
+/// tela do app em que se acrescenta um jeito novo de abrir painel.
+class _Launchers extends StatelessWidget {
+  const _Launchers({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Heading(
+          'programas',
+          hint: 'um painel que já abre dentro de um comando — é o que a sessão '
+              'do claude sempre foi, com o comando vindo daqui. cada um vira '
+              'uma linha no + da lateral, e volta rodando quando o app reabre.',
+        ),
+        if (store.launchers.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+            decoration: BoxDecoration(
+              color: Mx.bg,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: Mx.border),
+            ),
+            child: Text(
+              'nenhum ainda. um `btop` aqui é um painel de monitor a um clique '
+              'de distância; um `npm run dev` é o servidor do projeto sempre '
+              'no mesmo lugar.',
+              style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.5),
+            ),
+          ),
+        for (final launcher in store.launchers)
+          _LauncherRow(store: store, launcher: launcher),
+        const SizedBox(height: 12),
+        TextButton.icon(
+          icon: const Icon(Icons.add, size: 15),
+          label: const Text('novo programa…'),
+          onPressed: () => showNewLauncher(context, store),
+        ),
+      ],
+    );
+  }
+}
+
+class _LauncherRow extends StatefulWidget {
+  const _LauncherRow({required this.store, required this.launcher});
+
+  final AppStore store;
+  final Launcher launcher;
+
+  @override
+  State<_LauncherRow> createState() => _LauncherRowState();
+}
+
+class _LauncherRowState extends State<_LauncherRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final launcher = widget.launcher;
+    // Quantos painéis abertos são deste programa: é o que faz "apagar" uma
+    // decisão informada, e não uma surpresa três painéis adiante.
+    final open = widget.store.tabs.where((t) => t.launcher == launcher).length;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _hover ? Mx.bgHover : Mx.bg,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: Mx.border),
+        ),
+        child: Row(
+          children: [
+            Icon(launcher.icon.glyph, size: 17, color: launcher.color),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    launcher.name,
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    launcher.command,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, fontFamily: Mx.mono, color: Mx.fgDim),
+                  ),
+                ],
+              ),
+            ),
+            if (open > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  open == 1 ? '1 painel aberto' : '$open painéis abertos',
+                  style: TextStyle(fontSize: 11, color: Mx.fgFaint),
+                ),
+              ),
+            IconButton(
+              tooltip: 'editar',
+              iconSize: 15,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              onPressed: () => showEditLauncher(context, widget.store, launcher),
+              icon: Icon(Icons.edit_outlined, color: Mx.fgDim),
+            ),
+            IconButton(
+              // Os painéis não vão junto: apagar o programa é esquecer o
+              // atalho, não matar o que está rodando. Ver
+              // [AppStore.removeLauncher].
+              tooltip: open == 0
+                  ? 'apagar'
+                  : 'apagar — os $open painéis continuam abertos, como terminais',
+              iconSize: 15,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              onPressed: () => widget.store.removeLauncher(launcher),
+              icon: Icon(Icons.close, color: Mx.fgDim),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models.dart';
+import 'docs.dart';
+import 'paths.dart';
 
 class HookEvent {
   HookEvent(this.tabId, this.name, this.payload);
@@ -25,10 +27,17 @@ class HookServer {
   int get port => _server?.port ?? 0;
   bool get running => _server != null;
 
+  /// Onde a porta desta janela fica anotada de uma execução pra outra.
+  ///
+  /// Ver [_bind]: é um arquivo com um número e nada mais, então não vale um
+  /// json -- e ele é uma dica, não um estado. Perdê-lo custa uma porta nova.
+  static File get portFile => File('$mxStateDir/hook-port');
+
   Future<void> start() async {
     if (_server != null) return;
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final server = await _bind();
     _server = server;
+    _remember(server.port);
     server.listen((req) async {
       // /hook/<tabId> -- the tab is in the URL because a session id only
       // arrives with the first event, and panels need a home before that.
@@ -53,6 +62,57 @@ class HookServer {
         ..write('{}');
       await req.response.close();
     });
+  }
+
+  /// Sobe na mesma porta da execução passada, quando ela estiver livre.
+  ///
+  /// A porta não é um detalhe interno: ela vai *escrita* dentro do
+  /// `--settings` de cada sessão (ver [settingsFor]), e o que está no
+  /// lançamento é o que vale pelo resto da vida daquela sessão -- o Claude
+  /// Code guarda esses flags no roster do daemon dele e respawna a sessão com
+  /// eles iguais. Com uma porta efêmera a cada `bind(..., 0)`, bastava fechar
+  /// e reabrir a Maestria pra toda sessão sobrevivente ficar fazendo POST num
+  /// número que não escuta mais: `hook error: connect ECONNREFUSED` a cada
+  /// evento, duas vezes por tool call, sem nada que se pudesse editar depois
+  /// (mexer no `settings.json` não alcança o que veio por `--settings`).
+  ///
+  /// Daí a preferência pela porta anotada. Se ela estiver ocupada -- outra
+  /// janela da Maestria de pé, ou um processo qualquer que a tomou --, pega
+  /// uma efêmera e passa a anotar essa: sessão nova nasce apontando pra porta
+  /// certa de qualquer jeito, e a próxima execução tenta a última que
+  /// funcionou em vez de insistir num número que talvez nunca mais vague.
+  Future<HttpServer> _bind() async {
+    if (_saved() case final preferred?) {
+      try {
+        return await HttpServer.bind(InternetAddress.loopbackIPv4, preferred);
+      } on SocketException {
+        // Ocupada. A efêmera abaixo é o plano B.
+      }
+    }
+    return HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  }
+
+  /// A porta anotada, se houver uma que ainda faça sentido pedir.
+  int? _saved() {
+    try {
+      final port = int.tryParse(portFile.readAsStringSync().trim());
+      // `0` é "me dê qualquer uma", e uma porta privilegiada este processo não
+      // teria como abrir: nos dois casos é o mesmo que não haver anotação.
+      return (port != null && port > 1024 && port < 65536) ? port : null;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  void _remember(int port) {
+    if (_saved() == port) return;
+    try {
+      portFile.parent.createSync(recursive: true);
+      portFile.writeAsStringSync('$port\n');
+    } on FileSystemException {
+      // Sem anotação a próxima execução volta a sortear uma porta -- o bug de
+      // sempre, e nada pior que ele. Não é motivo pra não abrir a janela.
+    }
   }
 
   Future<void> stop() async {
@@ -82,12 +142,6 @@ class HookServer {
         'UserPromptSubmit': [group()],
         'PreToolUse': [group(matcher: '*')],
         'PostToolUse': [group(matcher: '*')],
-        // The two halves of a fork's life. Unlike `SessionStart`, both of
-        // these do reach an `http` hook -- verified against 2.1.251 -- and
-        // they are the only place an `agent_id` is announced before the
-        // child's first tool call carries it.
-        'SubagentStart': [group()],
-        'SubagentStop': [group()],
         'Notification': [group()],
         'Stop': [group()],
       },
@@ -104,13 +158,15 @@ class HookReducer {
 
     // Everything a subagent fires reaches the parent's hook, on the parent's
     // tab, stamped with an `agent_id` -- the documented way to tell the two
-    // apart. Without this branch a fork's `Grep` was indistinguishable from
-    // the panel's own work: the row read "rodando Grep(store.dart)" while the
-    // session itself was parked on the `Agent` call, and files four forks
-    // wrote all landed on one timeline.
-    final agentId = p['agent_id'] as String?;
-    if (agentId != null) {
-      _subagent(s, agentId, event, p);
+    // apart. What a fork did is the session's work and counts here; what it is
+    // *doing* is not the session's status. Without this branch the row read
+    // "rodando Grep(store.dart)" while the session itself was parked on the
+    // `Agent` call that spawned it.
+    if (p['agent_id'] != null) {
+      if (event == 'PreToolUse') s.tools++;
+      // Whoever held the pen, the file is what this session produced. A panel
+      // whose forks did all the writing would otherwise show nothing.
+      if (event == 'PostToolUse') _touch(s, p);
       return;
     }
 
@@ -120,8 +176,6 @@ class HookReducer {
         // one at an `http` hook today, which is why a panel settles itself.
         s.status = ClaudeStatus.ready;
       case 'UserPromptSubmit':
-        // A finished fork is the answer to the last turn, not this one.
-        s.subagents.removeWhere((_, a) => !a.running);
         // Answering a question submits a prompt, and so does abandoning it:
         // either way what was asked is no longer pending.
         s.question = null;
@@ -130,8 +184,11 @@ class HookReducer {
         s.status = ClaudeStatus.working;
         s.lastPrompt = _clip(p['user_input'] as String?, 70);
       case 'PreToolUse':
-        if (p['tool_name'] == 'Agent') _agentQueued(s, p['tool_input']);
         if (p['tool_name'] == _askTool) _asked(s, p['tool_input']);
+        // No `PreToolUse` e não no `PostToolUse`: o `ExitPlanMode` só volta se
+        // o plano for aprovado, e um plano recusado é exatamente o que se quer
+        // reler pra dizer por que. O texto é o mesmo nos dois lados.
+        if (p['tool_name'] == _planTool) _planned(s, p['tool_input']);
         s.tools++;
         // `AskUserQuestion` is the one tool whose whole job is to stop: the
         // call itself means the turn is now waiting on a human, so the row
@@ -145,7 +202,6 @@ class HookReducer {
         s.toolStartedAt = DateTime.now();
         s.lastToolTarget = _target(p['tool_input']);
       case 'PostToolUse':
-        if (p['tool_name'] == 'Agent') _agentReturned(s, p);
         s.status = ClaudeStatus.working;
         s.activeTool = null;
         s.toolStartedAt = null;
@@ -167,7 +223,6 @@ class HookReducer {
           s.lastMessage = _clip(p['message'] as String?, 70) ?? s.lastMessage;
         }
       case 'Stop':
-        _reconcile(s, p['background_tasks']);
         s.status = ClaudeStatus.idle;
         s.activeTool = null;
         s.toolStartedAt = null;
@@ -186,52 +241,20 @@ class HookReducer {
     }
   }
 
-  /// One event fired from inside a fork, applied to that fork's row.
-  ///
-  /// The panel's own status is deliberately untouched here: while a subagent
-  /// greps, the session that spawned it is waiting, not grepping.
-  static void _subagent(HookState s, String id, String event, Map<String, dynamic> p) {
-    // Only the four events below say something about a fork. Anything else
-    // that happens to carry an `agent_id` -- a notification, an event added
-    // in a later release -- used to conjure a row here with nothing in it to
-    // show, which is where the nameless "· 0s" lines came from.
-    const handled = {'SubagentStart', 'SubagentStop', 'PreToolUse', 'PostToolUse'};
-    if (!handled.contains(event)) return;
+  /// A ferramenta que entrega um plano. O `tool_input` dela é `{plan: "..."}`,
+  /// e esse markdown é a única cópia que existe do plano fora do scrollback.
+  static const _planTool = 'ExitPlanMode';
 
-    final agent = s.subagents.putIfAbsent(
-      id,
-      () => SubagentState(agentId: id, agentType: (p['agent_type'] as String?) ?? ''),
-    );
-    final type = p['agent_type'] as String?;
-    if (type != null && type.isNotEmpty) agent.agentType = type;
-
-    switch (event) {
-      case 'SubagentStart':
-        _claim(s, agent);
-      case 'PreToolUse':
-        agent.tools++;
-        s.tools++;
-        agent.status = ClaudeStatus.tool;
-        agent.activeTool = p['tool_name'] as String?;
-        agent.toolStartedAt = DateTime.now();
-        agent.lastToolTarget = _target(p['tool_input']);
-        final target = agent.lastToolTarget;
-        agent.note('${agent.activeTool ?? '?'}${target == null ? '' : '($target)'}');
-      case 'PostToolUse':
-        agent.status = ClaudeStatus.working;
-        agent.activeTool = null;
-        agent.toolStartedAt = null;
-        // Whoever held the pen, the file is what this session produced. A
-        // panel whose forks did all the writing would otherwise show nothing.
-        _touch(s, p);
-      case 'SubagentStop':
-        _finish(agent);
-        final closing = p['last_assistant_message'] as String?;
-        agent.lastMessage = _clip(closing, 90) ?? agent.lastMessage;
-        if (closing != null && closing.trim().isNotEmpty) {
-          agent.lastMessageFull = closing.trim();
-        }
-    }
+  /// Guarda o plano que a sessão acabou de apresentar. Ver [HookState.plans].
+  static void _planned(HookState s, Object? input) {
+    if (input is! Map) return;
+    final text = input['plan'];
+    if (text is! String || text.trim().isEmpty) return;
+    // Reapresentar o mesmo plano -- o que acontece quando você recusa, comenta
+    // e a sessão volta com ele igual -- não é um plano novo.
+    if (s.plans.isNotEmpty && s.plans.last.text == text) return;
+    s.plans.add(PlanNote(text: text));
+    if (s.plans.length > HookState.maxPlans) s.plans.removeAt(0);
   }
 
   /// The tool that asks instead of acting. Named once, because three places
@@ -255,135 +278,19 @@ class HookReducer {
     s.question = header ?? _clip(first['question'] as String?, 60);
   }
 
-  /// An `Agent` call went out. Its description is the only human-readable
-  /// name the fork will ever have, and it arrives one event too early to be
-  /// filed under an id.
-  static void _agentQueued(HookState s, Object? input) {
-    if (input is! Map) return;
-    s.pendingAgents.add(PendingAgent(
-      description: _clip(input['description'] as String?, 60) ?? '',
-      agentType: (input['subagent_type'] as String?) ?? '',
-      prompt: (input['prompt'] as String?)?.trim() ?? '',
-      background: input['run_in_background'] == true,
-    ));
-  }
-
-  /// Give a freshly started fork the description of the call that asked for
-  /// it: the oldest queued one of its own type, or simply the oldest. Two
-  /// forks of the same type started together are matched in the order they
-  /// were launched, which is the order the events arrive in.
-  static void _claim(HookState s, SubagentState agent) {
-    if (s.pendingAgents.isEmpty) return;
-    var i = s.pendingAgents.indexWhere((q) => q.agentType == agent.agentType);
-    if (i < 0) i = 0;
-    final pending = s.pendingAgents.removeAt(i);
-    if (agent.description.isEmpty) agent.description = pending.description;
-    if (agent.prompt.isEmpty) agent.prompt = pending.prompt;
-    agent.background = pending.background;
-  }
-
-  /// The `Agent` tool call came back. This is the one event that names the
-  /// `agent_id` and the description together, so it corrects whatever the
-  /// ordering guess in [_claim] made -- and for a background agent it is the
-  /// launch receipt (`async_launched`), not the result.
-  ///
-  /// A receipt for a fork nobody ever saw start only creates a row when it is
-  /// that launch receipt, which carries the description. A *result* for an
-  /// unknown id is nothing anyone could read -- no errand, no type, no time
-  /// -- so it is dropped rather than drawn as an empty line.
-  static void _agentReturned(HookState s, Map<String, dynamic> p) {
-    final response = p['tool_response'];
-    if (response is! Map) return;
-    final id = response['agentId'] as String?;
-    if (id == null || id.isEmpty) return;
-
-    final launched = response['status'] == 'async_launched';
-    var agent = s.subagents[id];
-    if (agent == null) {
-      if (!launched) return;
-      agent = SubagentState(
-        agentId: id,
-        agentType: (response['agentType'] as String?) ?? '',
-      );
-      s.subagents[id] = agent;
-    }
-
-    final input = p['tool_input'];
-    if (input is Map) {
-      final described = _clip(input['description'] as String?, 60);
-      if (described != null) agent.description = described;
-      final prompt = (input['prompt'] as String?)?.trim();
-      if (prompt != null && prompt.isNotEmpty) agent.prompt = prompt;
-      final type = input['subagent_type'] as String?;
-      if (agent.agentType.isEmpty && type != null) agent.agentType = type;
-      agent.background = input['run_in_background'] == true;
-    }
-    if (launched) {
-      agent.background = true;
-      return;
-    }
-
-    // A zero duration is the tool saying it does not know, not a fork that
-    // ran for no time. Left null, the row times itself instead.
-    final ms = (response['totalDurationMs'] as num?)?.toInt();
-    if (ms != null && ms > 0) agent.durationMs = ms;
-    final tokens = (response['totalTokens'] as num?)?.toInt();
-    if (tokens != null && tokens > 0) agent.tokens = tokens;
-    _finish(agent);
-  }
-
-  /// What `Stop` says is still in flight. A session that goes back to the
-  /// prompt with background agents out reports them here, which is how a
-  /// panel knows the difference between "acabou" and "largou rodando".
-  static void _reconcile(HookState s, Object? tasks) {
-    // A pending call with no `SubagentStart` was denied or never spawned;
-    // carrying it to the next turn would misname the next fork.
-    s.pendingAgents.clear();
-    if (tasks is! List) return;
-    final live = <String>{};
-    for (final task in tasks) {
-      if (task is! Map) continue;
-      if (task['type'] != 'subagent') continue;
-      final id = task['id'] as String?;
-      if (id == null || id.isEmpty) continue;
-      live.add(id);
-      final described = _clip(task['description'] as String?, 60);
-      final named = (task['agent_type'] as String?) ?? '';
-      // A task the session cannot name is not something the sidebar can
-      // draw: a row with no errand and no type is a blank line with a tick.
-      if (!s.subagents.containsKey(id) && described == null && named.isEmpty) continue;
-
-      final agent = s.subagents.putIfAbsent(
-        id,
-        () => SubagentState(agentId: id, agentType: (task['agent_type'] as String?) ?? ''),
-      );
-      if (named.isNotEmpty) agent.agentType = named;
-      agent.background = true;
-      if (agent.description.isEmpty && described != null) agent.description = described;
-    }
-    // Anything we still think is running but the session no longer lists is
-    // one whose `SubagentStop` never landed -- a dropped hook, a killed fork.
-    for (final agent in s.subagents.values) {
-      if (agent.running && agent.background && !live.contains(agent.agentId)) _finish(agent);
-    }
-  }
-
-  static void _finish(SubagentState agent) {
-    if (!agent.running) return;
-    agent.endedAt = DateTime.now();
-    agent.status = ClaudeStatus.idle;
-    agent.activeTool = null;
-    agent.toolStartedAt = null;
-  }
-
   /// Record a file the session just changed. See [HookState.touched].
   ///
-  /// Only the four tools that write, and only on `PostToolUse`: `PreToolUse`
+  /// The four tools that write, and only on `PostToolUse`: `PreToolUse`
   /// announces a call that may still be denied, so a panel that recorded there
-  /// would list files the session never got to touch. `Bash` is left out on
-  /// purpose -- knowing what a command line wrote means interpreting it, and a
-  /// guess in this list is worse than an omission, because the list is read as
-  /// the answer to "what did it do".
+  /// would list files the session never got to touch.
+  ///
+  /// `Bash` counts only for markdown, and only where the command says the path
+  /// out loud -- ver [_shellMarkdown]. Interpretar uma linha de comando é
+  /// adivinhar, e um chute nesta lista é pior que uma omissão, porque ela é
+  /// lida como a resposta de "o que essa sessão fez". A exceção existe porque
+  /// documento é justamente o que se escreve com `cat > x.md <<'EOF'`: sem
+  /// isso, a fita de documentos de uma sessão que trabalha pelo shell fica
+  /// vazia -- o que é o mesmo que não existir.
   static void _touch(HookState s, Map<String, dynamic> p) {
     const writes = {
       'Write': 'file_path',
@@ -391,14 +298,28 @@ class HookReducer {
       'MultiEdit': 'file_path',
       'NotebookEdit': 'notebook_path',
     };
-    final key = writes[(p['tool_name'] as String?) ?? ''];
-    if (key == null) return;
+    final tool = (p['tool_name'] as String?) ?? '';
     final input = p['tool_input'];
     if (input is! Map) return;
+    final cwd = p['cwd'] as String?;
+
+    if (tool == 'Bash') {
+      final command = input['command'];
+      if (command is! String) return;
+      for (final found in _shellMarkdown(command)) {
+        _remember(s, _absolute(found, cwd));
+      }
+      return;
+    }
+
+    final key = writes[tool];
+    if (key == null) return;
     final raw = input[key];
     if (raw is! String || raw.isEmpty) return;
+    _remember(s, _absolute(raw, cwd));
+  }
 
-    final path = _absolute(raw, p['cwd'] as String?);
+  static void _remember(HookState s, String path) {
     // Order is first touch, not last: a list that reshuffled itself every time
     // the agent came back to a file would be unreadable while it worked.
     if (s.touched.contains(path)) return;
@@ -406,10 +327,101 @@ class HookReducer {
     if (s.touched.length > HookState.maxTouched) s.touched.removeAt(0);
   }
 
+  /// Os markdown que uma linha de comando acabou de escrever.
+  ///
+  /// Só as quatro formas em que o caminho está escrito no comando e não sobra
+  /// nada pra interpretar: o alvo de uma redireção (`>`, `>>`), os arquivos de
+  /// um `tee`, os de um `sed -i`, e o destino de um `cp`/`mv`/`install`. Um
+  /// script que escolhe o nome do arquivo sozinho não deixa nada pra ler, e
+  /// ali a omissão continua valendo mais que o palpite.
+  ///
+  /// Caminho com `$`, `~` sem HOME, ou glob fica fora: o que entra nesta lista
+  /// vai virar uma ficha clicável e um `Quick Look`, e um caminho que só o
+  /// shell sabe resolver abriria em nada.
+  static List<String> _shellMarkdown(String command) {
+    final found = <String>[];
+    void keep(String? token) {
+      final path = _plainPath(token);
+      if (path == null || !isMarkdownPath(path)) return;
+      if (!found.contains(path)) found.add(path);
+    }
+
+    for (final segment in _commands(command).split(RegExp(r'[|;\n]|&&'))) {
+      for (final m in _redirect.allMatches(segment)) {
+        keep(m.group(1) ?? m.group(2) ?? m.group(3));
+      }
+
+      final words = segment.trim().split(RegExp(r'\s+'));
+      // `FOO=1 tee ...`: a atribuição na frente não é o comando.
+      final head = words.indexWhere((w) => !RegExp(r'^\w+=').hasMatch(w));
+      if (head < 0) continue;
+      final verb = words[head].split('/').last;
+      final args = words.skip(head + 1);
+      final flags = args.where((w) => w.startsWith('-'));
+      final operands = args.where((w) => !w.startsWith('-')).toList();
+
+      switch (verb) {
+        // Todo operando é um arquivo que acabou de ser escrito.
+        case 'tee':
+          operands.forEach(keep);
+        case 'sed' when flags.any((f) => f.startsWith('-i') || f == '--in-place'):
+          // O primeiro operando de um `sed` é o script (`s/a/b/`) quando não
+          // veio por `-e`; ele não é markdown, então [keep] o descarta sozinho.
+          operands.forEach(keep);
+        // Só o destino: a origem é um arquivo que ninguém mexeu.
+        case 'cp' || 'mv' || 'install':
+          keep(operands.lastOrNull);
+      }
+    }
+    return found;
+  }
+
+  /// O comando sem o corpo dos heredocs.
+  ///
+  /// O corpo é texto, não comando -- e texto de markdown, que é cheio de
+  /// linhas de citação começando em `>`. Sem tirá-lo, um `cat > nota.md` com
+  /// uma citação `> veja o roteiro.md` dentro registraria um "roteiro.md" que
+  /// nunca existiu.
+  static String _commands(String command) {
+    final lines = <String>[];
+    String? delimiter;
+    for (final line in command.split('\n')) {
+      if (delimiter != null) {
+        if (line.trim() == delimiter) delimiter = null;
+        continue;
+      }
+      lines.add(line);
+      final open = _heredoc.firstMatch(line);
+      if (open != null) delimiter = open.group(1) ?? open.group(2) ?? open.group(3);
+    }
+    return lines.join('\n');
+  }
+
+  /// O alvo de uma redireção. `2>&1` não casa: `&` está fora do caminho.
+  static final _redirect = RegExp(r'''\d?>>?\s*(?:'([^']+)'|"([^"]+)"|([^\s'"|;&<>()]+))''');
+
+  static final _heredoc = RegExp(r'''<<-?\s*(?:'([^']+)'|"([^"]+)"|(\w+))''');
+
+  /// O caminho de um token do shell, se ele for um caminho e não uma receita
+  /// pra descobrir um: fora as aspas, e nada de variável ou glob.
+  static String? _plainPath(String? token) {
+    if (token == null) return null;
+    var path = token.trim();
+    if (path.length >= 2 && (path.startsWith("'") || path.startsWith('"'))) {
+      final quote = path[0];
+      if (path.endsWith(quote)) path = path.substring(1, path.length - 1);
+    }
+    if (path.isEmpty || path.contains(RegExp(r'[\$*?`]'))) return null;
+    return path;
+  }
+
   /// Every hook payload carries the session's `cwd`, so a tool called with a
   /// relative path still ends up as something the Finder can open.
   static String _absolute(String path, String? cwd) {
     if (path.startsWith('/')) return path;
+    // Um `~` vindo de uma linha de comando: quem for abrir isto -- o Quick
+    // Look, o leitor -- não expande nada, então quem expande é [expandHome].
+    if (path == '~' || path.startsWith('~/')) return expandHome(path);
     if (cwd == null || cwd.isEmpty) return path;
     final rel = path.startsWith('./') ? path.substring(2) : path;
     final base = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;

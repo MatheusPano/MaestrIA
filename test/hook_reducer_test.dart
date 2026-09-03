@@ -224,13 +224,57 @@ void main() {
       ]);
     });
 
-    // Bash is the one that could write and is left out anyway: reading a
-    // command line means guessing, and a guess here is worse than a gap.
-    test('a bash command contributes nothing, however file-shaped it looks', () {
-      final s = HookState();
-      HookReducer.apply(s, 'PostToolUse',
-          wrote('Bash', {'command': 'mv relatorio.md ~/Documents/relatorio.md'}));
-      expect(s.touched, isEmpty);
+    // Bash entra só pra markdown, e só onde o comando diz o caminho: é assim
+    // que metade dos documentos nasce (`cat > x.md <<'EOF'`), e uma sessão que
+    // trabalha pelo shell tinha a fita de documentos sempre vazia.
+    group('markdown escrito pela linha de comando', () {
+      List<String> touchedBy(String command) {
+        final s = HookState();
+        HookReducer.apply(s, 'PostToolUse', wrote('Bash', {'command': command}));
+        return s.touched;
+      }
+
+      test('o alvo de uma redireção', () {
+        expect(touchedBy('printf "# oi\\n" > notas.md'), ['/repo/notas.md']);
+        expect(touchedBy('echo linha >> docs/DIARIO.md'), ['/repo/docs/DIARIO.md']);
+        expect(touchedBy("cat > 'meu plano.md' <<'EOF'\n# plano\nEOF"), ['/repo/meu plano.md']);
+      });
+
+      test('tee, sed -i, e o destino de um cp/mv', () {
+        expect(touchedBy('cat x | tee resumo.md'), ['/repo/resumo.md']);
+        expect(touchedBy("sed -i '' 's/a/b/' LEIAME.md"), ['/repo/LEIAME.md']);
+        expect(touchedBy('cp modelo.md /tmp/copia.md'), ['/tmp/copia.md']);
+      });
+
+      test('o corpo do heredoc é texto, não comando', () {
+        // A citação de markdown começa com `>` e não é uma redireção. Sem
+        // pular o corpo, esta linha inventava um "inexistente.md".
+        expect(
+          touchedBy("cat > nota.md <<'MD'\n> veja o inexistente.md\nMD"),
+          ['/repo/nota.md'],
+        );
+      });
+
+      test('ler um markdown não é escrevê-lo', () {
+        expect(touchedBy('cat PLANO.md'), isEmpty);
+        expect(touchedBy('grep -n TODO docs/*.md'), isEmpty);
+        expect(touchedBy('mv relatorio.md docs/'), isEmpty);
+      });
+
+      // O que entra na lista vira uma ficha clicável: um caminho que só o
+      // shell sabe resolver abriria em nada.
+      test('o que não é um caminho fica fora', () {
+        expect(touchedBy(r'echo oi > "$OUT/nota.md"'), isEmpty);
+        expect(touchedBy('sed -i "" s/a/b/ *.md'), isEmpty);
+        expect(touchedBy('dart run tool/gen.dart 2>&1'), isEmpty);
+      });
+
+      // O resto do shell continua de fora: adivinhar o que um script escreveu
+      // é pior que a omissão.
+      test('um arquivo que não é markdown continua invisível', () {
+        expect(touchedBy('dart format lib/main.dart > /dev/null'), isEmpty);
+        expect(touchedBy('python3 gera.py > saida.json'), isEmpty);
+      });
     });
 
     // Quick Look is handed this path, and the Finder has no cwd to resolve
@@ -269,69 +313,43 @@ void main() {
     });
   });
 
-  // The payload shapes here are transcripts of real events from Claude Code
-  // 2.1.251, not invented ones: two `Explore` forks in parallel, and one
-  // launched with `run_in_background`.
-  group('HookReducer subagents', () {
-    Map<String, dynamic> agentCall(String description, String type, {bool background = false}) =>
-        ev('PreToolUse', {
-          'tool_name': 'Agent',
-          'tool_use_id': 'toolu_$description',
-          'tool_input': {
-            'description': description,
-            'subagent_type': type,
-            'run_in_background': background,
-          },
-        });
-
-    Map<String, dynamic> fromAgent(String name, String id, String type,
+  // Um fork dispara os hooks do painel que o criou, marcados com `agent_id`.
+  // O painel não mostra mais os forks, mas o que eles fizeram continua sendo
+  // trabalho da sessão -- e o que eles *estão* fazendo continua não sendo o
+  // estado dela.
+  group('eventos vindos de um fork', () {
+    Map<String, dynamic> fromAgent(String name, String id,
             [Map<String, dynamic> extra = const {}]) =>
-        ev(name, {'agent_id': id, 'agent_type': type, ...extra});
+        ev(name, {'agent_id': id, 'agent_type': 'Explore', ...extra});
 
-    test('two forks started together each keep their own errand', () {
+    test("a chamada de ferramenta de um fork não é a do painel", () {
       final s = HookState();
-      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'divide'}));
-
-      HookReducer.apply(s, 'PreToolUse', agentCall('find HookServer', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a03', 'Explore'));
-      HookReducer.apply(s, 'PreToolUse', agentCall('find AgentsWatcher', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a7e', 'Explore'));
-
-      expect(s.subagents.keys, ['a03', 'a7e']);
-      expect(s.subagents['a03']!.title, 'find HookServer');
-      expect(s.subagents['a7e']!.title, 'find AgentsWatcher');
-      expect(s.liveSubagents.length, 2);
-      expect(s.subtitle, '2 agentes rodando');
-    });
-
-    test("a fork's tool call is the fork's, not the panel's", () {
-      final s = HookState();
-      HookReducer.apply(s, 'PreToolUse', agentCall('find HookServer', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a03', 'Explore'));
+      HookReducer.apply(s, 'PreToolUse', ev('PreToolUse', {
+        'tool_name': 'Agent',
+        'tool_input': {'description': 'find HookServer', 'subagent_type': 'Explore'},
+      }));
       final parked = s.activeTool;
 
       HookReducer.apply(
         s,
         'PreToolUse',
-        fromAgent('PreToolUse', 'a03', 'Explore', {
+        fromAgent('PreToolUse', 'a03', {
           'tool_name': 'Grep',
           'tool_input': {'pattern': 'class HookServer'},
         }),
       );
 
-      // The panel is still parked on the `Agent` call it made.
+      // O painel segue parado na chamada `Agent` que ele mesmo fez.
       expect(s.activeTool, parked);
-      expect(s.subagents['a03']!.activeTool, 'Grep');
-      expect(s.subagents['a03']!.subtitle, contains('Grep(class HookServer)'));
+      expect(s.activeTool, 'Agent');
     });
 
-    test('what a fork writes is still what the session produced', () {
+    test('o que um fork escreve ainda é o que a sessão produziu', () {
       final s = HookState();
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a03', 'fork'));
       HookReducer.apply(
         s,
         'PostToolUse',
-        fromAgent('PostToolUse', 'a03', 'fork', {
+        fromAgent('PostToolUse', 'a03', {
           'tool_name': 'Edit',
           'tool_input': {'file_path': '/repo/lib/services/store.dart'},
         }),
@@ -339,269 +357,15 @@ void main() {
       expect(s.touched, ['/repo/lib/services/store.dart']);
     });
 
-    test('the Agent call closes its row with what it cost', () {
+    test('um evento de fork não mexe no status da sessão', () {
       final s = HookState();
-      HookReducer.apply(s, 'PreToolUse', agentCall('find HookServer', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a03', 'Explore'));
-      HookReducer.apply(
-        s,
-        'SubagentStop',
-        fromAgent('SubagentStop', 'a03', 'Explore', {
-          'last_assistant_message': 'HookServer fica em lib/services/hooks.dart',
-        }),
-      );
-      HookReducer.apply(
-        s,
-        'PostToolUse',
-        ev('PostToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': {'description': 'find HookServer', 'subagent_type': 'Explore'},
-          'tool_response': {
-            'status': 'completed',
-            'agentId': 'a03',
-            'agentType': 'Explore',
-            'totalDurationMs': 7895,
-            'totalTokens': 12463,
-          },
-        }),
-      );
-
-      final agent = s.subagents['a03']!;
-      expect(agent.running, isFalse);
-      expect(agent.subtitle, 'Explore · 7s · 12.5k tokens');
-      expect(s.liveSubagents, isEmpty);
-    });
-
-    test('a background fork survives the Stop that sends the panel back to the prompt', () {
-      final s = HookState();
-      HookReducer.apply(s, 'PreToolUse', agentCall('count dart files', 'Explore', background: true));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a71', 'Explore'));
-      HookReducer.apply(
-        s,
-        'PostToolUse',
-        ev('PostToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': {
-            'description': 'count dart files',
-            'subagent_type': 'Explore',
-            'run_in_background': true,
-          },
-          'tool_response': {'status': 'async_launched', 'agentId': 'a71'},
-        }),
-      );
-      HookReducer.apply(
-        s,
-        'Stop',
-        ev('Stop', {
-          'last_assistant_message': 'launched',
-          'background_tasks': [
-            {
-              'id': 'a71',
-              'type': 'subagent',
-              'status': 'running',
-              'description': 'count dart files',
-              'agent_type': 'Explore',
-            },
-          ],
-        }),
-      );
-
-      expect(s.status, ClaudeStatus.idle);
-      expect(s.subagents['a71']!.background, isTrue);
-      expect(s.subagents['a71']!.running, isTrue);
-      // The whole point: the panel does not get to say "pronto" over it.
-      expect(s.subtitle, '1 agente rodando');
-
-      HookReducer.apply(s, 'SubagentStop', fromAgent('SubagentStop', 'a71', 'Explore'));
-      expect(s.liveSubagents, isEmpty);
-      expect(s.subtitle, 'launched');
-    });
-
-    test('a background fork whose stop never lands is closed by the next Stop', () {
-      final s = HookState();
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a71', 'Explore'));
-      HookReducer.apply(
-        s,
-        'Stop',
-        ev('Stop', {
-          'background_tasks': [
-            {'id': 'a71', 'type': 'subagent', 'status': 'running', 'description': 'x'},
-          ],
-        }),
-      );
-      expect(s.subagents['a71']!.running, isTrue);
-
-      HookReducer.apply(s, 'Stop', ev('Stop', {'background_tasks': []}));
-      expect(s.subagents['a71']!.running, isFalse);
-    });
-
-    test('finished forks clear on the next prompt, running ones stay', () {
-      final s = HookState();
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a03', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a71', 'Explore'));
-      HookReducer.apply(s, 'SubagentStop', fromAgent('SubagentStop', 'a03', 'Explore'));
-
-      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'e agora'}));
-      expect(s.subagents.keys, ['a71']);
-    });
-
-    test('an Agent call that never spawned does not misname the next fork', () {
-      final s = HookState();
-      HookReducer.apply(s, 'PreToolUse', agentCall('negado', 'Explore'));
-      HookReducer.apply(s, 'Stop', ev('Stop', {'background_tasks': []}));
-      expect(s.pendingAgents, isEmpty);
-
-      HookReducer.apply(s, 'PreToolUse', agentCall('o certo', 'Explore'));
-      HookReducer.apply(s, 'SubagentStart', fromAgent('SubagentStart', 'a99', 'Explore'));
-      expect(s.subagents['a99']!.title, 'o certo');
-    });
-  });
-
-  // The ghost rows: nameless lines reading "· 0s" that no fork accounted for.
-  group('HookReducer subagents that were never really there', () {
-    test('an event we do not handle never conjures a row', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'Notification',
-        ev('Notification', {'agent_id': 'a99', 'notification_type': 'idle_prompt'}),
-      );
-      HookReducer.apply(s, 'SessionEnd', ev('SessionEnd', {'agent_id': 'a99'}));
-      expect(s.subagents, isEmpty);
-    });
-
-    test('a result for a fork nobody saw start is dropped, not drawn', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'PostToolUse',
-        ev('PostToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': const <String, dynamic>{},
-          'tool_response': {'status': 'completed', 'agentId': 'a99', 'totalDurationMs': 0},
-        }),
-      );
-      expect(s.subagents, isEmpty);
-    });
-
-    test('a launch receipt does create one, because it carries the errand', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'PostToolUse',
-        ev('PostToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': {'description': 'contar arquivos', 'subagent_type': 'Explore'},
-          'tool_response': {'status': 'async_launched', 'agentId': 'a71'},
-        }),
-      );
-      expect(s.subagents['a71']!.title, 'contar arquivos');
-      expect(s.subagents['a71']!.background, isTrue);
-    });
-
-    test('a row always has something to call itself', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'SubagentStart',
-        ev('SubagentStart', {'agent_id': 'a0388a6f018cb508f', 'agent_type': ''}),
-      );
-      expect(s.subagents['a0388a6f018cb508f']!.title, 'subagente a0388a6f');
-      expect(s.subagents['a0388a6f018cb508f']!.subtitle, isNot(startsWith(' · ')));
-    });
-
-    test('a duration the tool did not measure is not reported as zero', () {
-      final s = HookState();
-      HookReducer.apply(s, 'SubagentStart', ev('SubagentStart', {'agent_id': 'a03', 'agent_type': 'Explore'}));
-      HookReducer.apply(
-        s,
-        'PostToolUse',
-        ev('PostToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': {'description': 'x'},
-          'tool_response': {'status': 'completed', 'agentId': 'a03', 'totalDurationMs': 0},
-        }),
-      );
-      expect(s.subagents['a03']!.durationMs, isNull);
-      expect(s.subagents['a03']!.running, isFalse);
-    });
-
-    test('the brief and the trail are what the row cannot show', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'PreToolUse',
-        ev('PreToolUse', {
-          'tool_name': 'Agent',
-          'tool_input': {
-            'description': 'map invite flow',
-            'subagent_type': 'Explore',
-            'prompt': 'Mapeie o fluxo de convite no app. Não mude nada.',
-          },
-        }),
-      );
-      HookReducer.apply(s, 'SubagentStart', ev('SubagentStart', {'agent_id': 'a11', 'agent_type': 'Explore'}));
-      HookReducer.apply(
-        s,
-        'PreToolUse',
-        ev('PreToolUse', {
-          'agent_id': 'a11',
-          'agent_type': 'Explore',
-          'tool_name': 'Grep',
-          'tool_input': {'pattern': 'invite'},
-        }),
-      );
-      HookReducer.apply(
-        s,
-        'PreToolUse',
-        ev('PreToolUse', {
-          'agent_id': 'a11',
-          'agent_type': 'Explore',
-          'tool_name': 'Read',
-          'tool_input': {'file_path': '/repo/lib/invite.dart'},
-        }),
-      );
-
-      final agent = s.subagents['a11']!;
-      expect(agent.prompt, startsWith('Mapeie o fluxo'));
-      expect(agent.trail, ['Grep(invite)', 'Read(invite.dart)']);
-      expect(agent.tools, 2);
-    });
-
-    test('the trail is capped, keeping where it is over where it was', () {
-      final s = HookState();
-      HookReducer.apply(s, 'SubagentStart', ev('SubagentStart', {'agent_id': 'a11', 'agent_type': 'Explore'}));
-      for (var i = 0; i < SubagentState.maxTrail + 3; i++) {
-        HookReducer.apply(
-          s,
-          'PreToolUse',
-          ev('PreToolUse', {
-            'agent_id': 'a11',
-            'agent_type': 'Explore',
-            'tool_name': 'Read',
-            'tool_input': {'file_path': '/repo/f$i.dart'},
-          }),
-        );
-      }
-      final trail = s.subagents['a11']!.trail;
-      expect(trail.length, SubagentState.maxTrail);
-      expect(trail.last, 'Read(f${SubagentState.maxTrail + 2}.dart)');
-    });
-
-    test('a background task the session cannot name is not a row', () {
-      final s = HookState();
-      HookReducer.apply(
-        s,
-        'Stop',
-        ev('Stop', {
-          'background_tasks': [
-            {'id': 'a99', 'type': 'subagent', 'status': 'pending'},
-            {'id': 'a71', 'type': 'subagent', 'status': 'running', 'description': 'contar'},
-            {'id': 'sh1', 'type': 'shell', 'status': 'running', 'command': 'sleep 30'},
-          ],
-        }),
-      );
-      expect(s.subagents.keys, ['a71']);
+      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'divide'}));
+      HookReducer.apply(s, 'PostToolUse', fromAgent('PostToolUse', 'a03', {
+        'tool_name': 'Read',
+        'tool_input': {'file_path': '/repo/lib/models.dart'},
+      }));
+      expect(s.status, ClaudeStatus.working);
+      expect(s.subtitle, 'divide');
     });
   });
 }

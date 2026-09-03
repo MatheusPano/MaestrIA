@@ -3,33 +3,19 @@ import 'package:flutter/material.dart';
 
 /// A repo the user works in. Worktrees of the same repo group under one folder.
 class Folder {
-  Folder({
-    required this.root,
-    required this.name,
-    this.collapsed = false,
-    this.worktreesCollapsed = true,
-  }) : isLoose = false;
+  Folder({required this.root, required this.name, this.collapsed = false}) : isLoose = false;
 
   /// The one folder that is not a folder: the tray panels hang from when
   /// they belong to no repo at all. There is exactly one, it is never written
   /// to the config, and git never looks at it — a session you opened just to
   /// ask something is not a checkout. Its [root] is only the folder a panel
   /// starts in when you do not pick one.
-  Folder.loose(this.root)
-    : name = 'avulsos',
-      isLoose = true,
-      collapsed = false,
-      worktreesCollapsed = true;
+  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false;
 
   /// Main checkout path. Also the identity: worktrees resolve back to it.
   final String root;
   String name;
   bool collapsed;
-
-  /// The worktree folder starts folded, and both fold states are remembered.
-  /// A list of five branches you are not working on right now is reference
-  /// material, not the point of the sidebar.
-  bool worktreesCollapsed;
 
   /// See [Folder.loose]. Everything git-shaped in the UI asks this first.
   final bool isLoose;
@@ -39,18 +25,12 @@ class Folder {
   bool isRepo = false;
   String branch = '';
 
-  Map<String, dynamic> toJson() => {
-    'root': root,
-    'name': name,
-    'collapsed': collapsed,
-    'worktreesCollapsed': worktreesCollapsed,
-  };
+  Map<String, dynamic> toJson() => {'root': root, 'name': name, 'collapsed': collapsed};
 
   static Folder fromJson(Map<String, dynamic> j) => Folder(
     root: j['root'] as String,
     name: j['name'] as String,
     collapsed: (j['collapsed'] as bool?) ?? false,
-    worktreesCollapsed: (j['worktreesCollapsed'] as bool?) ?? true,
   );
 }
 
@@ -77,6 +57,12 @@ class Project {
 
   /// The folder it hangs under. A project never spans two repos: the panels
   /// in it would have nothing to hand each other.
+  ///
+  /// Também é [Folder.loose]`.root` pro projeto da bandeja dos avulsos, que é
+  /// o que a lateral e a store já fazem com os painéis de lá -- um trabalho
+  /// com nome que não mora em repo nenhum ainda é um trabalho com nome. É a
+  /// raiz porque é assim que tudo aqui se pergunta "de que lugar é isto":
+  /// ver `AppStore.projectsOf` e `AppStore.assign`.
   final String folderRoot;
   String name;
 
@@ -106,6 +92,119 @@ class Project {
     brief: (j['brief'] as String?) ?? '',
     collapsed: (j['collapsed'] as bool?) ?? false,
   );
+}
+
+/// Um arranjo de painéis salvo com nome: a grade de três terminais que você
+/// monta toda manhã, guardada pra voltar num clique.
+///
+/// O que ele guarda é a receita do arranjo -- quais painéis, em que pasta, como
+/// cortados e em que proporção --, que é exatamente o que o layout salvo entre
+/// duas execuções do app já guardava (ver `AppStore._writeConfig`). A diferença
+/// é o número: o layout é um só e é o de agora; destes cabem vários, cada um
+/// com nome, e trocar de um pro outro é uma linha na lateral.
+///
+/// Não é um projeto e não é uma pasta. Um projeto diz *para quê* as sessões
+/// existem e as sessões ficam nele; um grupo não é dono de nada -- é uma forma
+/// de dispor na tela painéis que continuam sendo dos seus projetos e das suas
+/// pastas. É por isso que ele não mora dentro de uma pasta: um grid com um
+/// claude num repo e um terminal noutro é um arranjo legítimo, e pendurá-lo em
+/// uma das duas pastas seria mentira.
+class PaneGroup {
+  PaneGroup({required this.id, required this.name, required this.panes, this.tree});
+
+  /// Estável entre execuções, e não o contador de painéis: `tab3` nomearia um
+  /// grupo diferente a cada vez que o app abrisse.
+  final String id;
+  String name;
+
+  /// Uma receita por painel, na ordem em que eles apareciam na tela. Ver
+  /// `MxTab.recipe`: é o mesmo json de um painel do layout salvo, menos o que
+  /// aconteceu dentro dele.
+  final List<Map<String, dynamic>> panes;
+
+  /// Os cortes, do jeito que `Panes.toJson` escreve. As folhas são índices
+  /// desta lista [panes] e não ids de sessão -- um id não sobrevive ao
+  /// fechamento da janela, e um grupo tem que sobreviver a ele.
+  ///
+  /// Null é um arranjo de um painel só: não há corte pra guardar.
+  final Object? tree;
+
+  /// Quantos painéis o grupo abre.
+  int get count => panes.length;
+
+  /// O que a linha do grupo diz embaixo do nome: o que ele abre, contado.
+  ///
+  /// Vem das receitas e não de um campo salvo porque é derivado -- um resumo
+  /// gravado no config seria a mesma informação numa segunda cópia, livre pra
+  /// divergir da primeira.
+  String get summary => summarize(panes);
+
+  /// O mesmo resumo, antes de existir grupo: é com ele que um grupo salvo pelo
+  /// menu do painel se batiza, já que ali ninguém digita nome nenhum. Ver
+  /// `AppStore.groupPanes`.
+  static String summarize(List<Map<String, dynamic>> panes) {
+    final claude = panes.where((p) => p['kind'] == 'claude').length;
+    final shell = panes.where((p) => p['kind'] == 'shell').length;
+    final reader = panes.where((p) => p['kind'] == 'reader').length;
+    final parts = [
+      if (claude > 0) claude == 1 ? 'uma sessão' : '$claude sessões',
+      if (shell > 0) shell == 1 ? 'um terminal' : '$shell terminais',
+      if (reader > 0) reader == 1 ? 'um leitor' : '$reader leitores',
+    ];
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts.first;
+    return '${parts.take(parts.length - 1).join(', ')} e ${parts.last}';
+  }
+
+  /// Onde os painéis dele rodam, sem repetir pasta.
+  ///
+  /// É o que a linha do grupo diz embaixo do nome quando o nome *é* o resumo
+  /// -- um grupo salvo pelo botão direito se chama "3 terminais", e "3
+  /// terminais" outra vez embaixo seria a linha se repetindo. Ver `_GroupRow`.
+  String get where {
+    final seen = <String>[];
+    for (final p in panes) {
+      final root = p['loose'] == true ? 'avulsos' : (p['folderRoot'] as String? ?? '');
+      final parts = root.split('/')..removeWhere((s) => s.isEmpty);
+      final name = parts.isEmpty ? '' : parts.last;
+      if (name.isNotEmpty && !seen.contains(name)) seen.add(name);
+    }
+    return seen.join(' · ');
+  }
+
+  /// A cor do grupo: a mesma em todas as linhas dele, e a mesma amanhã.
+  ///
+  /// Tirada do [id], que é o que está salvo no config -- e por soma de
+  /// caracteres, não por `hashCode`, que a linguagem não promete igual entre
+  /// duas execuções. Não é a posição na lista de propósito: apagar o primeiro
+  /// grupo repintaria todos os outros.
+  Color get color {
+    final tints = Mx.groupTints;
+    final sum = id.codeUnits.fold<int>(0, (a, b) => a + b);
+    return tints[sum % tints.length];
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'panes': panes,
+    if (tree != null) 'tree': tree,
+  };
+
+  /// Devolve null pro registro que não abriria nada -- sem nome, sem id ou sem
+  /// painel. Nulo e não exceção porque quem lê é o carregador do config
+  /// inteiro: um grupo estragado não pode custar as pastas e o layout.
+  static PaneGroup? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final id = (j['id'] as String?) ?? '';
+    final name = ((j['name'] as String?) ?? '').trim();
+    final panes = (j['panes'] as List? ?? const [])
+        .whereType<Map>()
+        .map((p) => p.cast<String, dynamic>())
+        .toList();
+    if (id.isEmpty || name.isEmpty || panes.isEmpty) return null;
+    return PaneGroup(id: id, name: name, panes: panes, tree: j['tree']);
+  }
 }
 
 /// What a panel does the next time its session goes quiet.
@@ -272,124 +371,37 @@ extension ClaudeStatusUi on ClaudeStatus {
   };
 }
 
-/// An `Agent` tool call the panel's Claude spawned: one fork, one row.
+/// Um plano que a sessão escreveu, do jeito que ela escreveu.
 ///
-/// Hooks name a subagent in two halves that never arrive together. The
-/// parent's `PreToolUse` on the `Agent` tool carries what the work *is* --
-/// the description Claude wrote for it -- and the `SubagentStart` that
-/// follows carries the `agent_id` every event the child will ever be stamped
-/// with. The panel holds the first half until the second shows up; the
-/// `Agent` call's own `PostToolUse` later confirms the pairing by id and
-/// closes the row with what it cost.
-class SubagentState {
-  SubagentState({required this.agentId, required this.agentType});
+/// O `ExitPlanMode` carrega o plano inteiro em markdown no `tool_input`, e o
+/// hook já passava por aqui — o texto estava sendo jogado fora. É o documento
+/// mais lido de uma sessão e o único que não existia em lugar nenhum: no
+/// terminal ele é uma parede de texto que rola pra fora da tela, e no disco
+/// ele não está.
+class PlanNote {
+  PlanNote({required this.text, DateTime? at}) : at = at ?? DateTime.now();
 
-  final String agentId;
-  String agentType;
+  final String text;
+  final DateTime at;
 
-  /// Claude's own one-line description of the errand. Empty until the
-  /// `SubagentStart` is paired with the `Agent` call that asked for it.
-  String description = '';
-
-  /// The brief it was actually sent, as written in the `Agent` call. The one
-  /// thing a row cannot show and the only honest answer to "o que ele foi
-  /// fazer" -- the description is a label, this is the instruction.
-  String prompt = '';
-
-  /// Launched with `run_in_background`, so the session went back to the
-  /// prompt instead of blocking on it. The case the sidebar could not say
-  /// anything about at all: a panel reading "ocioso" over two live forks.
-  bool background = false;
-
-  ClaudeStatus status = ClaudeStatus.working;
-  String? activeTool;
-  String? lastToolTarget;
-  DateTime? toolStartedAt;
-  final DateTime startedAt = DateTime.now();
-  DateTime? endedAt;
-  String? lastMessage;
-
-  /// The same closing message, unclipped, for the detail sheet. [lastMessage]
-  /// is a subtitle; this is what the fork actually reported back.
-  String? lastMessageFull;
-  int tools = 0;
-
-  /// What the errand cost, as the `Agent` tool reports it on the way out.
-  /// Null while it runs, and null for a background agent whose `PostToolUse`
-  /// returned the moment it was launched.
-  int? tokens;
-  int? durationMs;
-
-  /// The tools it has called, newest last. Where a fork *is*, in the only
-  /// terms a panel has: a row can show the one it is on, this shows the path
-  /// it took to get there.
-  final List<String> trail = [];
-  static const maxTrail = 14;
-
-  bool get running => endedAt == null;
-
-  /// Short enough to read, long enough to grep the transcript with.
-  String get shortId => agentId.length > 8 ? agentId.substring(0, 8) : agentId;
-
-  Duration get elapsed => durationMs != null && durationMs! > 0
-      ? Duration(milliseconds: durationMs!)
-      : (endedAt ?? DateTime.now()).difference(startedAt);
-
-  /// The description if there is one -- a fork is remembered by its errand,
-  /// not by the pool it came from. The id is the last resort and never
-  /// reached in practice; a row with no name at all is not a row, it is a
-  /// bug wearing one.
-  String get title {
-    if (description.isNotEmpty) return description;
-    if (agentType.isNotEmpty) return agentType;
-    return 'subagente $shortId';
-  }
-
-  String get subtitle {
-    final parts = <String>[if (agentType.isNotEmpty) agentType];
-    if (running && activeTool != null) {
-      final target = lastToolTarget == null ? '' : '(${lastToolTarget!})';
-      parts.add('$activeTool$target');
+  /// A primeira linha de cabeçalho do plano, ou a primeira linha que tenha
+  /// alguma coisa: é como o plano se chama numa ficha de 200px.
+  String get headline {
+    for (final line in text.split('\n')) {
+      final one = line.trim().replaceAll(RegExp(r'^#+\s*'), '');
+      if (one.isNotEmpty) return one.length <= 70 ? one : '${one.substring(0, 70)}…';
     }
-    parts.add(_elapsed(elapsed));
-    if (!running && tokens != null) parts.add('${_thousands(tokens!)} tokens');
-    return parts.join(' · ');
+    return 'plano sem título';
   }
 
-  /// One tool call, recorded as it starts. See [trail].
-  void note(String call) {
-    trail.add(call);
-    if (trail.length > maxTrail) trail.removeAt(0);
+  Map<String, dynamic> toJson() => {'text': text, 'at': at.toIso8601String()};
+
+  static PlanNote? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final text = j['text'] as String?;
+    if (text == null || text.trim().isEmpty) return null;
+    return PlanNote(text: text, at: DateTime.tryParse(j['at'] as String? ?? ''));
   }
-
-  /// The row's colour: a finished fork is history, whatever it was doing.
-  ClaudeStatus get shownStatus => running ? status : ClaudeStatus.idle;
-
-  static String elapsedLabel(Duration d) => _elapsed(d);
-
-  static String _elapsed(Duration d) =>
-      d.inMinutes >= 1 ? '${d.inMinutes}m${d.inSeconds % 60}s' : '${d.inSeconds}s';
-
-  static String _thousands(int n) {
-    if (n < 1000) return '$n';
-    final k = n / 1000;
-    return k >= 100 ? '${k.round()}k' : '${k.toStringAsFixed(1)}k';
-  }
-}
-
-/// An `Agent` call seen going out, still waiting for the `SubagentStart` that
-/// will give it an id. See [SubagentState].
-class PendingAgent {
-  PendingAgent({
-    required this.description,
-    required this.agentType,
-    required this.prompt,
-    required this.background,
-  });
-  final String description;
-  final String agentType;
-  final String prompt;
-  final bool background;
 }
 
 /// Live state of one Claude session, accumulated from hook events.
@@ -440,18 +452,19 @@ class HookState {
   /// list is a leak the config file would have to carry too.
   static const maxTouched = 200;
 
-  /// The forks this session has going, newest last, keyed by `agent_id`.
+  /// Os planos que esta sessão escreveu, na ordem em que escreveu. Ver
+  /// [PlanNote].
   ///
-  /// Finished ones stay until the next prompt: "terminou em 48s" is the
-  /// answer to what the last turn did, and it is gone from the scrollback by
-  /// the time you look. Not persisted -- a subagent belongs to the turn that
-  /// spawned it, and no restored panel has one still running.
-  final Map<String, SubagentState> subagents = {};
+  /// Uma lista e não o último: um turno longo replaneja, e o plano anterior é
+  /// justamente o que se quer reler pra saber o que mudou.
+  final List<PlanNote> plans = [];
 
-  /// `Agent` calls seen going out, not yet matched to a `SubagentStart`.
-  final List<PendingAgent> pendingAgents = [];
+  /// Poucos de propósito. Um plano tem quilobytes, não bytes, e a décima
+  /// versão dele não é mais material de leitura — é histórico.
+  static const maxPlans = 8;
 
-  Iterable<SubagentState> get liveSubagents => subagents.values.where((a) => a.running);
+  /// O plano da vez, que é o que o cabeçalho do painel oferece.
+  PlanNote? get plan => plans.isEmpty ? null : plans.last;
 
   /// The session came up and has nothing to report. Answers false when the
   /// panel had already moved on, so a late caller cannot walk a working
@@ -476,12 +489,6 @@ class HookState {
       return question == null ? 'te faz uma pergunta' : 'pergunta: $question$rest';
     }
     if (status == ClaudeStatus.waitingInput) return lastMessage ?? 'te espera';
-    // A session with forks out is doing exactly one thing worth naming, and
-    // it is not the `Agent` tool call it is parked on. This also covers the
-    // background case, where the session is back at the prompt -- `idle` --
-    // while the work it asked for is still running.
-    final live = liveSubagents.length;
-    if (live > 0) return live == 1 ? '1 agente rodando' : '$live agentes rodando';
     if (status == ClaudeStatus.tool && activeTool != null) {
       final secs = toolStartedAt == null
           ? ''
@@ -532,4 +539,103 @@ class AgentInfo {
     state: j['state'] as String?,
     startedAt: (j['startedAt'] as num?)?.toInt(),
   );
+}
+
+/// O desenho de um [Launcher] na lateral e no menu do +.
+///
+/// Uma lista fechada e não um emoji digitado: o que identifica um programa numa
+/// linha de 26px é a silhueta, e um conjunto pequeno de silhuetas desenhadas
+/// pela mesma mão é o que faz a lateral continuar legível com seis deles. O
+/// [name] é o que vai pro config -- um codepoint de ícone não é estável entre
+/// versões do Flutter, e o dia em que ele mudasse os programas de todo mundo
+/// viriam com o desenho errado.
+enum LauncherIcon {
+  terminal('terminal', Icons.terminal),
+  monitor('monitor', Icons.monitor_heart_outlined),
+  chart('gráfico', Icons.bar_chart),
+  git('git', Icons.call_split),
+  server('servidor', Icons.dns_outlined),
+  database('banco', Icons.storage_outlined),
+  rocket('foguete', Icons.rocket_launch_outlined),
+  bug('bug', Icons.bug_report_outlined),
+  edit('editor', Icons.edit_outlined),
+  box('caixa', Icons.inventory_2_outlined);
+
+  const LauncherIcon(this.label, this.glyph);
+  final String label;
+  final IconData glyph;
+
+  static LauncherIcon byName(String? name) =>
+      values.asNameMap()[name ?? ''] ?? LauncherIcon.terminal;
+}
+
+/// Um programa que o usuário ensinou ao maestria: um nome, um comando e um
+/// desenho.
+///
+/// É a generalização do que "sessão do claude" e "terminal" sempre foram. O
+/// claude nunca foi um tipo de painel de verdade -- é um terminal que já sobe
+/// com um comando digitado --, e a única coisa que o separava de `btop` era
+/// estar escrito no código. Isto é o mesmo mecanismo com o comando vindo do
+/// config: `btop` vira uma linha do menu do +, abre direto no programa e volta
+/// assim depois de fechar a janela.
+///
+/// Não é um atalho de teclado ([MxAction]) e não é um grupo ([PaneGroup]): um
+/// grupo guarda um arranjo de painéis que já existem, este guarda como *abrir*
+/// um. Quatro painéis de `btop` são quatro painéis do mesmo programa.
+class Launcher {
+  Launcher({
+    required this.id,
+    required this.name,
+    required this.command,
+    this.icon = LauncherIcon.terminal,
+  });
+
+  /// Estável entre execuções: os painéis salvos apontam pra cá, e renomear o
+  /// programa não pode fazê-los voltar como terminais quaisquer.
+  final String id;
+
+  /// Como ele se chama no menu, e como o painel dele se chama na lateral.
+  String name;
+
+  /// O que roda no pty, do jeito que você digitaria no terminal --
+  /// `btop`, `lazygit`, `npm run dev`. Vai pro shell de login como está, então
+  /// pipe, aspas e `&&` valem.
+  String command;
+
+  LauncherIcon icon;
+
+  /// A cor do ícone dele, a mesma hoje e amanhã. Mesma conta de
+  /// [PaneGroup.color], e pelo mesmo motivo: sai do [id] salvo, e não da
+  /// posição na lista -- apagar o primeiro programa repintaria todos os
+  /// outros.
+  Color get color {
+    final tints = Mx.groupTints;
+    final sum = id.codeUnits.fold<int>(0, (a, b) => a + b);
+    return tints[sum % tints.length];
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'command': command,
+    'icon': icon.name,
+  };
+
+  /// Null pro registro que não abriria nada -- sem id, sem nome ou sem
+  /// comando. Nulo e não exceção pelo mesmo motivo de [PaneGroup.fromJson]:
+  /// quem lê é o carregador do config inteiro, e um programa estragado não
+  /// pode custar as pastas e o layout.
+  static Launcher? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final id = (j['id'] as String?) ?? '';
+    final name = ((j['name'] as String?) ?? '').trim();
+    final command = ((j['command'] as String?) ?? '').trim();
+    if (id.isEmpty || name.isEmpty || command.isEmpty) return null;
+    return Launcher(
+      id: id,
+      name: name,
+      command: command,
+      icon: LauncherIcon.byName(j['icon'] as String?),
+    );
+  }
 }

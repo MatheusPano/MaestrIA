@@ -1,0 +1,7 @@
+{"type": "custom-title", "customTitle": "maestria_v2", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"type": "agent-name", "agentName": "maestria_v2", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"type": "mode", "mode": "normal", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"type": "permission-mode", "permissionMode": "auto", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"parentUuid": null, "isSidechain": false, "type": "user", "message": {"role": "user", "content": "arruma o cabecalho da lateral pra caber a busca"}, "uuid": "u1", "timestamp": "2026-08-31T20:59:11.581Z", "cwd": "/tmp", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}, "sessionId": "aaaa1111-1111-4111-8111-000000000001"}
+{"type": "ai-title", "aiTitle": "Cabeçalho da lateral com a busca", "sessionId": "aaaa1111-1111-4111-8111-000000000001"}

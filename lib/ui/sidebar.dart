@@ -32,6 +32,10 @@ class Sidebar extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.only(top: 6, bottom: 20),
               children: [
+                // Os arranjos salvos abrem a lista. Uma busca em curso os
+                // esconde: procura-se sessão, e um grupo não é uma.
+                if (store.groups.isNotEmpty && !store.filtering)
+                  _GroupTray(key: const ValueKey('groups'), store: store),
                 if (store.folders.isEmpty && !store.filtering) _NoFolders(),
                 if (store.filtering && store.hits.isEmpty) _NoHits(store: store),
                 // Keyed by what the row *is*, so a list that gains, loses or
@@ -108,13 +112,19 @@ class _Header extends StatelessWidget {
                 tooltip: 'adicionar uma pasta ao cockpit',
                 onPressed: () => showAddFolder(context, store),
               ),
+              // O dia inteiro numa página, ao lado da lateral que o produziu.
+              // Fica aqui e não no menu de um painel porque o relatório não é
+              // de painel nenhum: é da janela.
+              _ReportIcon(store: store),
               _HeaderIcon(
                 icon: Icons.tune,
                 // A tecla vem do mapa e não de um literal: ela é editável agora, e
                 // um tooltip que ensinasse ⌘⇧P a quem trocou por outra estaria
                 // simplesmente errado.
-                tooltip: ['configurações', ...store.keymap[MxAction.settings].map((c) => c.label)]
-                    .join('  '),
+                tooltip: [
+                  'configurações',
+                  ...store.keymap[MxAction.settings].map((c) => c.label),
+                ].join('  '),
                 onPressed: () => showSettings(context, store),
               ),
             ],
@@ -207,9 +217,7 @@ class _SearchFieldState extends State<_SearchField> {
           Expanded(
             child: Shortcuts(
               // Antes do TextField, senão o Esc morre nele.
-              shortcuts: const {
-                SingleActivator(LogicalKeyboardKey.escape): _ClearIntent(),
-              },
+              shortcuts: const {SingleActivator(LogicalKeyboardKey.escape): _ClearIntent()},
               child: Actions(
                 actions: {
                   _ClearIntent: CallbackAction<_ClearIntent>(
@@ -414,6 +422,40 @@ class _HeaderActionState extends State<_HeaderAction> {
 /// The icon-only half of the header: the switches that change how the sidebar
 /// and the panes are *shown*, kept together on the right and sized alike so
 /// the group reads as one control cluster.
+/// O botão do relatório do dia, que é o único do cabeçalho que demora.
+///
+/// Uma volta ao `claude -p` leva dezenas de segundos; um botão que não diz
+/// isso é um botão que parece não ter funcionado, e que se clica de novo.
+class _ReportIcon extends StatelessWidget {
+  const _ReportIcon({required this.store});
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    if (store.writingReport) {
+      return const SizedBox(
+        width: 30,
+        height: 30,
+        child: Center(
+          child: SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(strokeWidth: 1.8),
+          ),
+        ),
+      );
+    }
+    return _HeaderIcon(
+      icon: Icons.summarize_outlined,
+      tooltip: [
+        'relatório do dia',
+        ...store.keymap[MxAction.dailyReport].map((c) => c.label),
+      ].join('  '),
+      onPressed: store.openDailyReport,
+    );
+  }
+}
+
 class _HeaderIcon extends StatelessWidget {
   const _HeaderIcon({required this.icon, required this.tooltip, required this.onPressed});
   final IconData icon;
@@ -455,12 +497,14 @@ class _FolderGroup extends StatelessWidget {
     // Only the repo's own worktrees. Claude Code keeps transient ones under
     // ~/.local/state, and offering to do anything to one of those is offering
     // something that fails: they belong to the session that made them.
-    // As worktrees saem de cena durante uma busca: são o que o repo *é*, não
-    // uma sessão que você esteja procurando, e a lista de resultados não
-    // precisa de uma gaveta de material de referência no meio dela.
-    final worktrees = store.filtering
-        ? const <WorktreeInfo>[]
-        : all.where((w) => w.path.startsWith(folder.root)).toList();
+    //
+    // They are not a row in the tree any more: five branches nobody is
+    // touching right now are reference material, and a drawer of it sat in the
+    // sidebar every day to be opened about once a week. What the repo *has*
+    // lives behind the header now -- right-click, or the ⋯ -- and the tree is
+    // only what is running. So the search no longer has to hide them either.
+    final worktrees = all.where((w) => w.path.startsWith(folder.root)).toList();
+    final ghosts = worktrees.where((w) => w.prunable).length;
     final alerts = store.needingHuman(folder);
     // Dobrada, uma pasta esconderia o que a busca acabou de achar nela. O que
     // você escolheu continua guardado -- só não vale enquanto se procura.
@@ -477,6 +521,10 @@ class _FolderGroup extends StatelessWidget {
         _Hoverable(
           builder: (hovered) => InkWell(
             onTap: () => store.toggleCollapsed(folder),
+            // The whole header is the target the worktrees hang off now, not
+            // just the ⋯ at the end of it.
+            onSecondaryTapDown: (d) =>
+                showFolderMenu(context, store, folder, worktrees, d.globalPosition),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
               child: Row(
@@ -524,6 +572,11 @@ class _FolderGroup extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // The one thing in the worktree list that wants doing stays
+                  // on the surface: registrations git itself would prune. The
+                  // list is behind a menu now, and a warning you only meet by
+                  // opening a menu is a warning that never arrives.
+                  if (ghosts > 0) ...[_GhostChip(count: ghosts), const SizedBox(width: 7)],
                   if (alerts > 0) _Badge(count: alerts),
                   Text('$count', style: TextStyle(color: Mx.fgFaint, fontSize: 11.5)),
                   _AddButton(
@@ -533,7 +586,7 @@ class _FolderGroup extends StatelessWidget {
                     // the only thing left to aim at: it stays out.
                     shown: hovered || store.tabsOf(folder).isEmpty,
                   ),
-                  _FolderMenu(store: store, folder: folder),
+                  _FolderMenu(store: store, folder: folder, worktrees: worktrees),
                 ],
               ),
             ),
@@ -542,12 +595,6 @@ class _FolderGroup extends StatelessWidget {
         if (!collapsed)
           _Nest(
             children: [
-              // Worktrees first, folded, and always in the same place: what a
-              // repo *is* comes before what happens to be running in it. Under
-              // the sessions the line moved every time a panel opened or
-              // closed, so the one row that is meant to be a fixed landmark
-              // was the one row you had to hunt for.
-              _WorktreeFolder(store: store, folder: folder, worktrees: worktrees),
               for (final p in projects)
                 _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
               for (final t in tabs) _TabRow(key: ValueKey(t.id), store: store, tab: t),
@@ -569,6 +616,11 @@ class _FolderGroup extends StatelessWidget {
 /// directory called "avulsos", nothing to fold away into, nothing the rows are
 /// *inside*. What is actually true is only that the folders have run out and
 /// these are what is left, and a divider says that and nothing more.
+///
+/// Os projetos da bandeja são a exceção, e não voltam atrás nisso: um projeto
+/// *é* uma coisa em que os painéis dele estão, então ele traz o próprio
+/// cabeçalho e o próprio degrau. A régua continua não sendo pasta -- ela só
+/// deixou de ser a única forma de arrumar o que está embaixo dela.
 class _LooseTray extends StatelessWidget {
   const _LooseTray({super.key, required this.store});
   final AppStore store;
@@ -576,8 +628,19 @@ class _LooseTray extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final folder = store.loose;
+    // Ver [_FolderGroup]: painel de projeto se desenha dentro dele e não duas
+    // vezes, e projeto sem achado sai da lateral enquanto a busca durar.
+    final projects = store
+        .projectsOf(folder)
+        .where((p) => !store.filtering || store.visible(store.tabsIn(p)).isNotEmpty)
+        .toList();
     final tabs = store.visible(store.tabsOf(folder).where((t) => t.projectId == null));
     final alerts = store.needingHuman(folder);
+    // Tudo que está na bandeja, projetos inclusive -- o número na régua conta
+    // o lugar, e não a lista de linhas soltas que por acaso vem embaixo dela.
+    final count = store.filtering
+        ? store.visible(store.tabsOf(folder)).length
+        : store.tabsOf(folder).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -600,26 +663,35 @@ class _LooseTray extends StatelessWidget {
                 // count -- an empty tray is a divider and a + , and a "0"
                 // beside them is one mark more than the tray is worth.
                 if (alerts > 0) ...[const SizedBox(width: 8), _Badge(count: alerts)],
-                if (tabs.isNotEmpty) ...[
+                if (count > 0) ...[
                   const SizedBox(width: 8),
-                  Text('${tabs.length}', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+                  Text('$count', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
                 ],
                 const SizedBox(width: 6),
-                _AddButton(store: store, folder: folder, shown: hovered || tabs.isEmpty),
+                _AddButton(
+                  store: store,
+                  folder: folder,
+                  shown: hovered || (tabs.isEmpty && projects.isEmpty),
+                ),
                 _LooseMenu(store: store),
               ],
             ),
           ),
         ),
+        // Os projetos primeiro e as linhas soltas depois, como numa pasta: o
+        // que tem nome vem antes do que sobrou.
+        for (final p in projects)
+          _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
         for (final t in tabs) _TabRow(key: ValueKey(t.id), store: store, tab: t),
       ],
     );
   }
 }
 
-/// The one thing you can do to the tray as a whole. A [_FolderMenu] would
-/// have brought a folder's worth of options — rename, remove, git — to a place
-/// where none of them mean anything.
+/// O que se faz com a bandeja inteira. A [_FolderMenu] traria uma pasta de
+/// opções — renomear, remover, git — pra um lugar onde nenhuma delas quer
+/// dizer nada; sobram as duas que querem: nomear um trabalho aqui e limpar o
+/// que já acabou.
 class _LooseMenu extends StatelessWidget {
   const _LooseMenu({required this.store});
   final AppStore store;
@@ -637,6 +709,11 @@ class _LooseMenu extends StatelessWidget {
           position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
           items: const [
             PopupMenuItem(
+              value: 'newproject',
+              height: 34,
+              child: Text('novo projeto…', style: TextStyle(fontSize: 12)),
+            ),
+            PopupMenuItem(
               value: 'sweep',
               height: 34,
               child: Text('limpar encerrados e concluídos', style: TextStyle(fontSize: 12)),
@@ -644,17 +721,166 @@ class _LooseMenu extends StatelessWidget {
           ],
         );
         if (choice == null || !context.mounted) return;
+        if (choice == 'newproject') await showNewProject(context, store, store.loose);
         if (choice == 'sweep') store.closeSettled(store.loose);
       },
     );
   }
 }
 
-/// A named job inside a folder, with its panels under it.
+/// Os arranjos salvos, no alto da lateral. Ver [PaneGroup].
+///
+/// Fora das pastas porque um grupo não é um lugar onde sessões moram -- é uma
+/// vista da tela, e os painéis dele continuam sendo das pastas e dos projetos
+/// deles. E no alto porque é a linha que se clica pra voltar ao trabalho: ela
+/// não pode ficar depois de vinte sessões.
+///
+/// Desenhado como a bandeja dos avulsos -- uma régua com uma palavra e as
+/// linhas embaixo --, e pelo mesmo motivo: não há nada em que dobrar nem nada
+/// dentro de que as linhas estejam.
+///
+/// Agrupar não se faz aqui: isso é o botão direito de um painel da grade. O
+/// que só existe aqui é o que a linha de um painel não consegue oferecer --
+/// abrir um grupo cujos painéis todos saíram da tela (não há linha acesa pra
+/// clicar), renomear e esquecer.
+class _GroupTray extends StatelessWidget {
+  const _GroupTray({super.key, required this.store});
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 17, right: 8, top: 4),
+          child: Row(
+            children: [
+              Text(
+                'grupos',
+                style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
+              ),
+              const SizedBox(width: 9),
+              Expanded(child: Container(height: 1, color: Mx.border)),
+            ],
+          ),
+        ),
+        for (final g in store.groups) _GroupRow(key: ValueKey(g.id), store: store, group: g),
+        // A régua da primeira pasta vem logo abaixo; sem isto as duas se
+        // encostam e a lista lê como uma coisa só.
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+/// Um arranjo salvo, numa linha. Clicar abre os painéis dele como estavam.
+class _GroupRow extends StatelessWidget {
+  const _GroupRow({super.key, required this.store, required this.group});
+  final AppStore store;
+  final PaneGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Row(
+      // Acesa quando a tela é este grupo -- ver [AppStore.activeGroup]. É o
+      // mesmo "está na tela" que acende a linha de uma sessão, e é o que faz
+      // a cor ler como estado e não só como etiqueta.
+      selected: store.showing(group),
+      tint: group.color,
+      // O glifo na cor do grupo é o que amarra esta linha às linhas dos
+      // painéis dele, que estão lavadas da mesma cor lá embaixo.
+      leading: Icon(Icons.grid_view_rounded, size: 17, color: group.color),
+      title: group.name,
+      // O que ele abre, contado: um nome sozinho não diz se aquele grupo é o
+      // dos três terminais ou o do par claude-e-terminal. Quando o nome já é
+      // esse resumo -- um grupo recém-agrupado se chama assim --, a linha diz
+      // em vez disso onde aqueles painéis rodam.
+      subtitle: group.name.toLowerCase() == group.summary.toLowerCase()
+          ? group.where
+          : group.summary,
+      trailing: Row(
+        children: [
+          _CountChip(count: group.count),
+          const SizedBox(width: 2),
+          _GroupMenu(store: store, group: group),
+        ],
+      ),
+      onTap: () => store.openGroup(group),
+      onSecondary: (pos) => showGroupMenu(context, store, group, pos),
+    );
+  }
+}
+
+/// O ⋯ da linha de um grupo. Uma definição, duas entradas: este e o
+/// botão direito da linha abrem o mesmo [showGroupMenu].
+class _GroupMenu extends StatelessWidget {
+  const _GroupMenu({required this.store, required this.group});
+  final AppStore store;
+  final PaneGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    return _RowButton(
+      tooltip: 'o que fazer com esse grupo',
+      icon: Icons.more_horiz,
+      onTap: (anchor) => showGroupMenu(context, store, group, anchor),
+    );
+  }
+}
+
+/// Tudo que se faz a um grupo. Abrir não está aqui: abrir é a linha.
+Future<void> showGroupMenu(
+  BuildContext context,
+  AppStore store,
+  PaneGroup group,
+  Offset anchor,
+) async {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final choice = await showMenu<String>(
+    context: context,
+    color: Mx.bgActive,
+    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+    items: [
+      _folderItem('update', 'guardar a tela de agora aqui'),
+      _folderItem('rename', 'renomear'),
+      _folderItem('remove', 'esquecer o grupo'),
+    ],
+  );
+  if (choice == null || !context.mounted) return;
+
+  switch (choice) {
+    case 'update':
+      // O mesmo caminho de salvar, com o nome que já existe: quem atualiza o
+      // grupo no lugar é o próprio [AppStore.saveGroup].
+      final saved = store.saveGroup(group.name);
+      store.showBanner(
+        saved == null
+            ? 'não há nada na tela pra guardar no grupo "${group.name}"'
+            : 'grupo "${saved.name}" agora é ${saved.summary}',
+      );
+    case 'rename':
+      final name = await promptText(
+        context,
+        title: 'renomear grupo',
+        initial: group.name,
+        label: 'nome',
+      );
+      if (name != null) store.renameGroup(group, name);
+    case 'remove':
+      // Sem confirmação: esquecer o arranjo não fecha painel nenhum, e o que
+      // se perde é a disposição -- que se salva de novo em dois cliques.
+      store.removeGroup(group);
+  }
+}
+
+/// A named job — inside a folder, or in the loose tray — with its panels
+/// under it.
 ///
 /// It looks like the worktree folder one level down and behaves like the
 /// folder one level up, which is the point: the sidebar is now three deep —
-/// where the code is, what it is for, and who is working on it.
+/// where the code is, what it is for, and who is working on it. Na bandeja o
+/// primeiro degrau não existe, e é a mesma linha sem nada por cima.
 class _ProjectGroup extends StatelessWidget {
   const _ProjectGroup({
     super.key,
@@ -811,16 +1037,30 @@ class _TabRow extends StatelessWidget {
     // Which pane has the keyboard, so four selected rows are still readable.
     final focused = selected && store.focusedPaneId == tab.id;
     final index = store.tabs.indexWhere((t) => t.id == tab.id);
+    // O grupo a que este painel pertence, que é o que dá a cor da linha e o
+    // que o clique nela faz. Ver [AppStore.groupOf].
+    final group = store.groupOf(tab);
     final row = _Row(
       selected: selected,
       focused: focused,
+      tint: group?.color,
       // Concluída, a linha recua um passo: título apagado, marca apagada. Ela
       // continua ali — é uma sessão que você guardou de propósito — mas para
       // de disputar o olho com as que ainda estão trabalhando.
       dim: tab.done,
-      leading: tab.kind == TabKind.claude
-          ? ClaudeAvatar(status: tab.status, size: 26, dim: tab.done)
-          : Icon(Icons.chevron_right, size: 19, color: Mx.fgDim),
+      leading: switch (tab.kind) {
+        TabKind.claude => ClaudeAvatar(status: tab.status, size: 26, dim: tab.done),
+        // Um leitor na lista se distingue pelo que é: uma folha, não um
+        // prompt esperando comando.
+        TabKind.reader => Icon(Icons.article_outlined, size: 18, color: Mx.fgDim),
+        // O terminal que subiu dentro de um programa se anuncia como o
+        // programa: o chevron é o prompt esperando comando, e ali não há
+        // prompt nenhum -- há um btop rodando.
+        TabKind.shell => switch (tab.launcher) {
+          final l? => Icon(l.icon.glyph, size: 17, color: l.color),
+          null => Icon(Icons.chevron_right, size: 19, color: Mx.fgDim),
+        },
+      },
       title: tab.title,
       subtitle: tab.subtitle,
       trailing: Row(
@@ -860,134 +1100,15 @@ class _TabRow extends StatelessWidget {
           if (tab.kind == TabKind.shell) StatusDot(status: tab.status, size: 9),
         ],
       ),
-      onTap: () => store.select(tab),
+      // A linha de um painel agrupado abre o grupo inteiro, e não ela mesma:
+      // é o que "se clicar em algum do grupo, abre o grupo" quer dizer -- e é
+      // a volta do caminho que o clique numa linha de fora faz (ver
+      // [AppStore.select], que desmancha a grade nesse caso).
+      onTap: () => group == null ? store.select(tab) : store.openGroup(group),
       onClose: () => store.closeTab(tab),
       onSecondary: (pos) => showPanelMenu(context, store, tab, pos),
     );
-    final dragging = _PanelDrag(store: store, tab: tab, child: row);
-
-    // Forks hang off the panel that spawned them, the way panels hang off a
-    // project: the same rail, one level in. They sit outside the drag wrapper
-    // because they are not a thing you can pick up -- a subagent belongs to
-    // its session and goes where the session goes.
-    final fleet = tab.hooks.subagents.values.toList();
-    if (fleet.isEmpty) return dragging;
-    final collapsed = tab.fleetCollapsed;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        dragging,
-        _Nest(
-          rail: 35,
-          children: [
-            _FleetHeader(store: store, tab: tab, fleet: fleet),
-            if (!collapsed)
-              for (final agent in fleet)
-                _SubagentRow(key: ValueKey(agent.agentId), tab: tab, agent: agent),
-          ],
-        ),
-        const SizedBox(height: 3),
-      ],
-    );
-  }
-}
-
-/// The fold, with the count that makes folding it safe: collapsed, this line
-/// is the only thing left saying the forks are there.
-class _FleetHeader extends StatelessWidget {
-  const _FleetHeader({required this.store, required this.tab, required this.fleet});
-
-  final AppStore store;
-  final MxTab tab;
-  final List<SubagentState> fleet;
-
-  @override
-  Widget build(BuildContext context) {
-    final live = fleet.where((a) => a.running).length;
-    final collapsed = tab.fleetCollapsed;
-    final label = live > 0
-        ? '${fleet.length} ${fleet.length == 1 ? 'agente' : 'agentes'} · $live rodando'
-        : '${fleet.length} ${fleet.length == 1 ? 'agente' : 'agentes'}';
-
-    return InkWell(
-      onTap: () => store.toggleFleet(tab),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(6, 5, 9, 5),
-        child: Row(
-          children: [
-            Icon(collapsed ? Icons.chevron_right : Icons.expand_more, size: 14, color: Mx.fgDim),
-            const SizedBox(width: 3),
-            Text(label, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// One fork under its panel: what it was sent to do, and how it is going.
-///
-/// Deliberately not a [_Row]. A subagent is not somewhere you can go -- there
-/// is no pane to open, nothing to close, no shortcut to press -- so it gets a
-/// line, not a target.
-class _SubagentRow extends StatelessWidget {
-  const _SubagentRow({super.key, required this.tab, required this.agent});
-
-  final MxTab tab;
-  final SubagentState agent;
-
-  @override
-  Widget build(BuildContext context) {
-    final done = !agent.running;
-    return InkWell(
-      onTap: () => showSubagent(context, tab, agent),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 4, 9, 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Icon(
-                done ? Icons.check : Icons.call_split,
-                size: 12,
-                color: done ? Mx.fgFaint : agent.shownStatus.color,
-              ),
-            ),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    agent.title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: done ? Mx.fgDim : Mx.fg),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    agent.subtitle,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                    style: TextStyle(fontSize: 11, color: Mx.fgFaint),
-                  ),
-                ],
-              ),
-            ),
-            // Only worth saying when it changes what the panel's own status
-            // means: the session went back to the prompt, this did not stop.
-            if (agent.background && !done)
-              Padding(
-                padding: const EdgeInsets.only(left: 6, top: 1),
-                child: Text(
-                  'bg',
-                  style: TextStyle(fontFamily: Mx.mono, fontSize: 9.5, color: Mx.fgFaint),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
+    return _PanelDrag(store: store, tab: tab, child: row);
   }
 }
 
@@ -1149,134 +1270,9 @@ class RepoGlyph extends StatelessWidget {
   }
 }
 
-/// The repo's worktrees, in a folder of their own that folds shut.
-///
-/// Loose in the tree they outnumbered the sessions and there was no way to
-/// dismiss them — five branches nobody is touching right now are reference
-/// material, not the point of the sidebar. Folded is the default, and
-/// [Folder.worktreesCollapsed] remembers what you chose.
-///
-/// It sits at the top of the folder, above the sessions: it is the one row in
-/// there whose place never changes, and a landmark that drifts down the list
-/// as panels come and go is not a landmark.
-///
-/// Folded, this one line is the whole feature, so it has to earn the click it
-/// asks for. It used to ask with a generic folder glyph — the same mark the
-/// repo above already carries, saying "directory" where the truth is
-/// "branches" — a bare digit floating beside the word, and no answer at all to
-/// the pointer. Now the branch mark says what is inside, the count rides in a
-/// chip, and the strip lights up under the pointer the way the rows below it
-/// do.
-class _WorktreeFolder extends StatefulWidget {
-  const _WorktreeFolder({required this.store, required this.folder, required this.worktrees});
-  final AppStore store;
-  final Folder folder;
-  final List<WorktreeInfo> worktrees;
-
-  @override
-  State<_WorktreeFolder> createState() => _WorktreeFolderState();
-}
-
-class _WorktreeFolderState extends State<_WorktreeFolder> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final worktrees = widget.worktrees;
-    if (worktrees.isEmpty) return const SizedBox.shrink();
-    final collapsed = widget.folder.worktreesCollapsed;
-    final ghosts = worktrees.where((w) => w.prunable).length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: InkWell(
-            onTap: () => widget.store.toggleWorktrees(widget.folder),
-            borderRadius: BorderRadius.circular(8),
-            // The fill below already answers the pointer; a wash on top of it
-            // would only mud the colour.
-            hoverColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            // Not animated, and neither is anything on the line: the tiles
-            // right below it snap between their fills, and a header that faded
-            // where they snap was the odd one out.
-            child: Container(
-              // Inset a step less than the tiles below so the fill still
-              // clears their rail. The chevron lands on x=7 and is 16 wide,
-              // which is what puts that rail at 15.
-              margin: const EdgeInsets.fromLTRB(4, 3, 7, 3),
-              padding: const EdgeInsets.fromLTRB(3, 6, 8, 6),
-              decoration: BoxDecoration(
-                color: _hover ? Mx.bgHover : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  // One chevron that turns, rather than two that swap: folding
-                  // is a state of this line, not a different line.
-                  AnimatedRotation(
-                    turns: collapsed ? 0 : 0.25,
-                    duration: const Duration(milliseconds: 140),
-                    curve: Curves.easeOut,
-                    child: Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: _hover ? Mx.fgDim : Mx.fgFaint,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  // The same mark every worktree row wears, one level up: what
-                  // is folded away in here is branches, not files.
-                  Icon(Icons.call_split, size: 13, color: _hover ? Mx.fgDim : Mx.fgFaint),
-                  const SizedBox(width: 7),
-                  Text(
-                    'worktrees',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      letterSpacing: 0.2,
-                      color: _hover ? Mx.fg : Mx.fgDim,
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  _CountChip(count: worktrees.length),
-                  const Spacer(),
-                  // Registrations git itself calls prunable. Worth its own
-                  // chip on the folded line: it is the one thing in here that
-                  // wants doing.
-                  if (ghosts > 0) _GhostChip(count: ghosts),
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (!collapsed) ...[
-          _Nest(
-            rail: 15,
-            children: [
-              for (final w in worktrees)
-                _WorktreeRow(store: widget.store, folder: widget.folder, worktree: w),
-            ],
-          ),
-          // Where the rail ends and the sessions start. Opened, the last
-          // worktree used to sit as close to the first panel as it did to the
-          // worktree above it, and the two lists read as one.
-          const SizedBox(height: 5),
-        ],
-      ],
-    );
-  }
-}
-
-/// How many worktrees are folded away, in a chip. Loose beside the label the
-/// digit read as a stray character of it; boxed, it reads as a quantity.
-///
-/// One fill, and it is the surface *above* the one hover puts under it: a chip
-/// that answered the pointer too crossed the line's own fill on the way, and
-/// for a frame in the middle the two colours were the same and the chip
-/// blinked out.
+/// How many worktrees are behind the "worktrees" line, in a chip. Loose beside
+/// the label the digit read as a stray character of it; boxed, it reads as a
+/// quantity.
 class _CountChip extends StatelessWidget {
   const _CountChip({required this.count});
   final int count;
@@ -1294,6 +1290,10 @@ class _CountChip extends StatelessWidget {
 /// The worktrees git would prune: a folder that is gone and a registration
 /// that is not. Yellow on a tint of itself rather than a loose icon and a
 /// loose number, so it reads as one mark — a warning with a count on it.
+///
+/// It rides on the repo header, and again on the line that opens the list: it
+/// is the only part of the worktrees that asks for anything, so it is the only
+/// part that did not go behind the menu.
 class _GhostChip extends StatelessWidget {
   const _GhostChip({required this.count});
   final int count;
@@ -1320,69 +1320,6 @@ class _GhostChip extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _WorktreeRow extends StatelessWidget {
-  const _WorktreeRow({required this.store, required this.folder, required this.worktree});
-  final AppStore store;
-  final Folder folder;
-  final WorktreeInfo worktree;
-
-  @override
-  Widget build(BuildContext context) {
-    final ghost = worktree.prunable;
-    final open = store.tabAt(worktree.path);
-
-    return _Row(
-      selected: false,
-      dim: true,
-      leading: Icon(
-        ghost
-            ? Icons.link_off
-            : worktree.isMain
-            ? Icons.home_outlined
-            : Icons.call_split,
-        size: 18,
-        color: ghost ? Mx.yellow : Mx.fgFaint,
-      ),
-      title: worktree.isMain ? folder.name : worktree.shortLabel,
-      subtitle: ghost
-          ? 'a pasta não existe mais — só o registro no git'
-          : open != null
-          ? '${worktree.branch} · sessão aberta'
-          : worktree.branch,
-      trailing: Row(
-        children: [
-          if (!ghost)
-            _RowButton(
-              tooltip: open == null ? 'nova sessão do claude aqui' : 'ir pro painel',
-              icon: open == null ? Icons.play_arrow_rounded : Icons.arrow_forward_rounded,
-              onTap: (_) {
-                if (open != null) {
-                  store.select(open);
-                } else {
-                  store.openClaude(
-                    folder,
-                    cwd: worktree.path,
-                    label: worktree.isMain ? null : worktree.shortLabel,
-                  );
-                }
-              },
-            ),
-          _RowButton(
-            tooltip: 'o que fazer com essa worktree',
-            icon: Icons.more_horiz,
-            onTap: (anchor) => showWorktreeMenu(context, store, folder, worktree, anchor),
-          ),
-        ],
-      ),
-      // A worktree is a folder before it is anything else, so the row itself
-      // hands it to the editor. Starting a session in it is the ▶, and deleting
-      // it lives behind the ⋯ — which is where a destructive thing belongs.
-      onTap: ghost ? null : () => store.openInEditor(worktree.path),
-      onSecondary: (pos) => showWorktreeMenu(context, store, folder, worktree, pos),
     );
   }
 }
@@ -1493,7 +1430,14 @@ class _AddButton extends StatelessWidget {
 
 /// What the + offers, written down once. The same three things the chip strip
 /// used to spell out, minus the ones that would mean nothing where the menu
-/// opened: a project cannot hold a project, and neither can the loose tray.
+/// opened: a project cannot hold a project -- mais os programas que o usuário
+/// ensinou, que são a mesma oferta com o comando vindo do config em vez do
+/// código. Ver [Launcher].
+///
+/// A bandeja dos avulsos oferece projeto como qualquer pasta. Ela não é uma
+/// pasta, mas um projeto não é uma pasta tampouco: ele diz *para quê* as
+/// sessões existem, e trabalho com nome que não mora em repo nenhum -- ler um
+/// contrato, arrumar a máquina -- é exatamente o que cai ali.
 Future<void> _showAddMenu(
   BuildContext context,
   AppStore store,
@@ -1510,8 +1454,26 @@ Future<void> _showAddMenu(
       // The session first: it is what you are almost always here for, and the
       // chip strip's left-to-right order was never that.
       _addItem('claude', const ClaudeMark(size: 13), 'sessão do claude'),
+      // Retomar uma conversa é abrir uma sessão -- a diferença é que ela já
+      // tem passado --, então é aqui que a porta fica, um degrau abaixo da
+      // sessão nova. Ver [showChatHistory].
+      _addItem('retomar', Icon(Icons.history, size: 14, color: Mx.fgDim), 'retomar conversa…'),
       _addItem('shell', Icon(Icons.terminal, size: 14, color: Mx.fgDim), 'terminal'),
-      if (project == null && !folder.isLoose)
+      // Embaixo do terminal porque é o que eles são: terminais com um comando
+      // já digitado. Na ordem em que foram criados -- é a ordem da lista das
+      // configurações, e a lateral não tem por que discordar dela.
+      for (final launcher in store.launchers)
+        _addItem(
+          'launcher:${launcher.id}',
+          Icon(launcher.icon.glyph, size: 14, color: launcher.color),
+          launcher.name,
+        ),
+      _addItem(
+        'novo',
+        Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
+        store.launchers.isEmpty ? 'criar um programa…' : 'outro programa…',
+      ),
+      if (project == null)
         _addItem('projeto', Icon(Icons.workspaces_outline, size: 14, color: Mx.purple), 'projeto…'),
     ],
   );
@@ -1520,10 +1482,24 @@ Future<void> _showAddMenu(
   switch (choice) {
     case 'claude':
       store.openClaude(folder, cwd: folder.root, project: project);
+    case 'retomar':
+      await showChatHistory(context, store, folder, project: project);
     case 'shell':
       store.openShell(folder, project: project);
     case 'projeto':
       await showNewProject(context, store, folder);
+    case 'novo':
+      // Criar e abrir de uma vez: você veio ao + pra abrir um painel, e um
+      // programa que nasce sem estrear obrigaria a voltar aqui pra usá-lo.
+      final launcher = await showNewLauncher(context, store);
+      if (launcher != null) {
+        store.openLauncher(launcher, folder, cwd: folder.root, project: project);
+      }
+    default:
+      final launcher = store.launcherById(choice.split(':').last);
+      if (launcher != null) {
+        store.openLauncher(launcher, folder, cwd: folder.root, project: project);
+      }
   }
 }
 
@@ -1541,84 +1517,222 @@ PopupMenuItem<String> _addItem(String value, Widget glyph, String label) => Popu
   ),
 );
 
+/// The ⋯ on a repo header. One definition, two ways in: this and the header's
+/// right-click both open [showFolderMenu], anchored where you clicked.
 class _FolderMenu extends StatelessWidget {
-  const _FolderMenu({required this.store, required this.folder});
+  const _FolderMenu({required this.store, required this.folder, required this.worktrees});
   final AppStore store;
   final Folder folder;
+  final List<WorktreeInfo> worktrees;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: '',
-      iconSize: 16,
-      padding: EdgeInsets.zero,
-      color: Mx.bgActive,
-      icon: Icon(Icons.more_horiz, color: Mx.fgFaint),
-      onSelected: (v) async {
-        switch (v) {
-          case 'rename':
-            final name = await promptText(
-              context,
-              title: 'renomear pasta',
-              initial: folder.name,
-              label: 'nome',
-            );
-            if (name != null && name.trim().isNotEmpty) {
-              store.renameFolder(folder, name.trim());
-            }
-          case 'task':
-            await showNewTask(context, store, folder);
-          case 'newproject':
-            await showNewProject(context, store, folder);
-          case 'refresh':
-            await store.refreshGit();
-          case 'prune':
-            await store.pruneWorktrees(folder);
-          case 'sweep':
-            store.closeSettled(folder);
-          case 'remove':
-            await store.removeFolder(folder);
-        }
-      },
-      itemBuilder: (_) => const [
+    return _RowButton(
+      tooltip: 'o que fazer com essa pasta',
+      icon: Icons.more_horiz,
+      onTap: (anchor) => showFolderMenu(context, store, folder, worktrees, anchor),
+    );
+  }
+}
+
+/// Everything you can do to a folder — and the way in to its worktrees.
+///
+/// The worktrees used to be a folded row inside the tree. Folded is where they
+/// spent their life, so that row was a permanent line of sidebar paying for a
+/// click almost nobody made; opened, five branches sat on top of the sessions.
+/// Here the list costs nothing until it is asked for, and asking is the
+/// gesture you already use on a folder.
+Future<void> showFolderMenu(
+  BuildContext context,
+  AppStore store,
+  Folder folder,
+  List<WorktreeInfo> worktrees,
+  Offset anchor,
+) async {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final ghosts = worktrees.where((w) => w.prunable).length;
+  // Every repo has a main checkout, so a repo with nothing else has a list of
+  // one thing -- the folder you just right-clicked. The line only appears once
+  // there is something in there you could not already see.
+  final branched = worktrees.any((w) => !w.isMain);
+  final choice = await showMenu<String>(
+    context: context,
+    color: Mx.bgActive,
+    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+    items: [
+      // First, and the only line here that opens onto more: what the repo *is*
+      // reads before the things you can do to it.
+      if (branched) ...[
         PopupMenuItem(
-          value: 'task',
+          value: 'worktrees',
           height: 34,
-          child: Text('nova task…', style: TextStyle(fontSize: 12)),
+          child: Row(
+            children: [
+              Icon(Icons.call_split, size: 14, color: Mx.fgDim),
+              const SizedBox(width: 9),
+              const Text('worktrees', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 8),
+              _CountChip(count: worktrees.length),
+              if (ghosts > 0) ...[const SizedBox(width: 6), _GhostChip(count: ghosts)],
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, size: 14, color: Mx.fgFaint),
+            ],
+          ),
         ),
+        const PopupMenuDivider(height: 9),
+      ],
+      // Junto do que o repo *é*, e não junto do que se faz com ele: o
+      // histórico é uma coisa que a pasta tem, como as worktrees. A outra
+      // porta é o + da mesma linha, onde retomar fica ao lado de abrir.
+      _folderItem('chats', 'conversas de antes…'),
+      const PopupMenuDivider(height: 9),
+      _folderItem('task', 'nova task…'),
+      _folderItem('newproject', 'novo projeto…'),
+      _folderItem('rename', 'renomear'),
+      _folderItem('refresh', 'atualizar git'),
+      _folderItem('sweep', 'limpar encerrados e concluídos'),
+      _folderItem('remove', 'remover pasta'),
+    ],
+  );
+  if (choice == null || !context.mounted) return;
+
+  switch (choice) {
+    case 'worktrees':
+      await showWorktreesMenu(context, store, folder, worktrees, anchor);
+    case 'chats':
+      await showChatHistory(context, store, folder);
+    case 'task':
+      await showNewTask(context, store, folder);
+    case 'newproject':
+      await showNewProject(context, store, folder);
+    case 'rename':
+      final name = await promptText(
+        context,
+        title: 'renomear pasta',
+        initial: folder.name,
+        label: 'nome',
+      );
+      if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
+    case 'refresh':
+      await store.refreshGit();
+    case 'sweep':
+      store.closeSettled(folder);
+    case 'remove':
+      await store.removeFolder(folder);
+  }
+}
+
+/// A plain line of a sidebar menu: no glyph, because none of these needs one
+/// to be told apart from its neighbours.
+PopupMenuItem<String> _folderItem(String value, String label) => PopupMenuItem(
+  value: value,
+  height: 34,
+  child: Text(label, style: const TextStyle(fontSize: 12)),
+);
+
+/// The repo's worktrees, listed only when asked for: pick one and its own menu
+/// opens where you picked it.
+///
+/// A picker rather than a set of actions, because there are four things you
+/// might want from a worktree and [showWorktreeMenu] already spells them out —
+/// including the one that deletes it, which is not something a list you are
+/// only browsing should be one stray click away from.
+///
+/// Ghosts are the exception: cleaning them up is about the list, not about any
+/// one row in it, so it sits at the bottom of the list itself.
+Future<void> showWorktreesMenu(
+  BuildContext context,
+  AppStore store,
+  Folder folder,
+  List<WorktreeInfo> worktrees,
+  Offset anchor,
+) async {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final ghosts = worktrees.where((w) => w.prunable).length;
+  final choice = await showMenu<String>(
+    context: context,
+    color: Mx.bgActive,
+    // Stepped off the line that opened it, so the second menu does not land on
+    // top of the first and read as the same one redrawn.
+    position: RelativeRect.fromRect(
+      (anchor + const Offset(14, 6)) & Size.zero,
+      Offset.zero & overlay.size,
+    ),
+    items: [
+      for (final w in worktrees)
         PopupMenuItem(
-          value: 'newproject',
-          height: 34,
-          child: Text('novo projeto…', style: TextStyle(fontSize: 12)),
+          // The path is the identity: two worktrees can sit on branches with
+          // the same short label, never in the same folder.
+          value: w.path,
+          // Two lines, because a menu is only about 250 wide and a label beside
+          // `feature/TASK#47730` does not fit on one — the branch is the half
+          // that would have been cut, and it is the half that identifies the
+          // worktree.
+          height: 44,
+          child: Row(
+            children: [
+              Icon(
+                w.prunable
+                    ? Icons.link_off
+                    : w.isMain
+                    ? Icons.home_outlined
+                    : Icons.call_split,
+                size: 14,
+                color: w.prunable ? Mx.yellow : Mx.fgFaint,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      w.isMain ? folder.name : w.shortLabel,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, height: 1.2),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      w.prunable
+                          ? 'sem pasta no disco'
+                          : store.tabAt(w.path) != null
+                          ? '${w.branch} · sessão aberta'
+                          : w.branch,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: Mx.mono,
+                        fontSize: 10.5,
+                        height: 1.2,
+                        color: w.prunable ? Mx.yellow : Mx.fgFaint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        PopupMenuItem(
-          value: 'rename',
-          height: 34,
-          child: Text('renomear', style: TextStyle(fontSize: 12)),
-        ),
-        PopupMenuItem(
-          value: 'refresh',
-          height: 34,
-          child: Text('atualizar git', style: TextStyle(fontSize: 12)),
-        ),
+      if (ghosts > 0) ...[
+        const PopupMenuDivider(height: 9),
         PopupMenuItem(
           value: 'prune',
           height: 34,
-          child: Text('limpar worktrees fantasmas', style: TextStyle(fontSize: 12)),
-        ),
-        PopupMenuItem(
-          value: 'sweep',
-          height: 34,
-          child: Text('limpar encerrados e concluídos', style: TextStyle(fontSize: 12)),
-        ),
-        PopupMenuItem(
-          value: 'remove',
-          height: 34,
-          child: Text('remover pasta', style: TextStyle(fontSize: 12)),
+          child: Text(
+            'limpar worktrees fantasmas',
+            style: TextStyle(fontSize: 12, color: Mx.yellow),
+          ),
         ),
       ],
-    );
+    ],
+  );
+  if (choice == null || !context.mounted) return;
+
+  if (choice == 'prune') {
+    await store.pruneWorktrees(folder);
+    return;
   }
+  final picked = worktrees.firstWhere((w) => w.path == choice);
+  await showWorktreeMenu(context, store, folder, picked, anchor + const Offset(28, 12));
 }
 
 /// Everything that lives under a folder row: stepped in, and hung off a rail
@@ -1662,11 +1776,16 @@ class _Row extends StatefulWidget {
     this.onSecondary,
     this.onClose,
     this.dim = false,
+    this.tint,
   });
 
   final bool selected;
   final bool focused;
   final bool dim;
+
+  /// A cor do grupo a que esta linha pertence, quando pertence a um. Ver
+  /// [_TabRow] e `PaneGroup.color`.
+  final Color? tint;
   final Widget leading;
   final String title;
   final String subtitle;
@@ -1694,9 +1813,24 @@ class _RowState extends State<_Row> {
     // No stripe: which pane holds the keyboard is said by how lit the row is.
     // Selected-and-focused sits on the active surface, its twin in the other
     // pane a step darker — the same two steps hover already uses.
-    final background = widget.selected
+    final grey = widget.selected
         ? (widget.focused ? Mx.bgActive : Mx.bgHover)
         : (_hovered ? Mx.bgHover : Colors.transparent);
+    // A cor do grupo entra como banho por cima desse cinza, e não no lugar
+    // dele: os três degraus de aceso continuam sendo os três degraus, e o que
+    // muda é o *tom* de todos eles -- que é o que faz três linhas espalhadas
+    // por duas pastas lerem como um conjunto. Nenhum outro canal da linha é
+    // colorido, então o fundo é o único lugar onde uma cor de etiqueta não
+    // rouba o sentido de um estado: o tique de concluída, o ponto de dirty e
+    // o badge de pendência continuam dizendo o que diziam.
+    final background = widget.tint == null
+        ? grey
+        : Color.alphaBlend(
+            widget.tint!.withValues(alpha: widget.selected ? 0.2 : 0.11),
+            // Transparente não se mistura: sobre uma linha apagada o banho
+            // vai por cima do fundo da lateral, que é o que está atrás dela.
+            grey == Colors.transparent ? Mx.bgSidebar : grey,
+          );
     final showClose = widget.onClose != null && _hovered;
 
     return MouseRegion(

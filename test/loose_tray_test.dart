@@ -108,11 +108,11 @@ void main() {
 
       expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
-      // The tray stops at those two: there is nothing for a project to be in.
-      expect(find.text('projeto…'), findsNothing);
+      // Projeto inclusive: nomear um trabalho não pede repo nenhum.
+      expect(find.text('projeto…'), findsOneWidget);
     });
 
-    testWidgets("and a folder's + adds the project the tray cannot", (tester) async {
+    testWidgets("and a folder's + offers the same project line", (tester) async {
       final store = storeWithFolder();
       await pumpSidebar(tester, store);
 

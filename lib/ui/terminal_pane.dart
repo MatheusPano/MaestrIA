@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
 import '../models.dart';
+import '../services/links.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../theme.dart';
@@ -92,6 +93,10 @@ class _TerminalPaneState extends State<TerminalPane> {
                 focused: widget.focused,
               ),
             ),
+            // Colada no rodapé do terminal, e sem clique nenhum: o documento
+            // que a sessão acabou de escrever é a coisa que ela produziu, e
+            // ficava só no parágrafo que a anunciou -- que rola pra fora.
+            if (DocBar.has(widget.tab)) DocBar(store: widget.store, tab: widget.tab),
             // Costs the layout nothing until the session has written
             // something, which is the state half the panels are in.
             if (_resultOpen && produced > 0)
@@ -127,13 +132,39 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   /// Sem ele o único jeito de um painel pegar o teclado era o `autofocus`, que
   /// só vale no primeiro quadro: trocar de painel pelo teclado (⌃⇥, ⌘⌥↑↓)
   /// acendia o anel num painel e continuava digitando no outro. Com o nó na
-  /// mão, quem passa a estar em foco pede o teclado — ver [didUpdateWidget].
+  /// mão, quem passa a estar em foco pede o teclado — ver [didUpdateWidget]
+  /// e [initState].
   final _focus = FocusNode(debugLabel: 'terminal');
 
   /// Wheel movement that has not yet added up to a line.
   double _pending = 0;
 
+  /// Onde o botão desceu, pra saber se o que aconteceu foi um clique — ver
+  /// [_clicked]. Null quando não foi o botão principal.
+  Offset? _pressedAt;
+
   Terminal get _terminal => widget.tab.term.terminal;
+
+  /// Um painel recém-aberto já nasce com o teclado.
+  ///
+  /// O `autofocus` sozinho não dava conta: ele só vale quando ninguém no
+  /// escopo está em foco (ver `_Autofocus.applyIfValid`), e uma sessão é
+  /// aberta justamente por gestos que deixam o foco em outro lugar — a busca
+  /// da lateral, que fica com o cursor, e os diálogos de "nova task" e "abrir
+  /// pasta", que ao fechar devolvem o teclado a quem o tinha antes deles. O
+  /// painel novo acendia o anel e a primeira linha do prompt ia pra busca.
+  ///
+  /// Depois do quadro porque é só quando o [TerminalView] monta que o nó
+  /// ganha contexto; e depois da devolução do diálogo, que é o que faz este
+  /// pedido ser o último a falar.
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.focused) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.focused) _focus.requestFocus();
+    });
+  }
 
   @override
   void didUpdateWidget(_TerminalSurface old) {
@@ -162,27 +193,63 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       // the opposite sign of a wheel that scrolls down.
       onPointerPanZoomStart: (_) => _pending = 0,
       onPointerPanZoomUpdate: (e) => _scrolled(-e.panDelta.dy, e.position),
+      // O clique, pelo mesmo motivo do wheel: ver [_clicked].
+      onPointerDown: (e) => _pressedAt = e.buttons == kPrimaryButton ? e.position : null,
+      onPointerUp: _clicked,
       child: TerminalView(
         _terminal,
         key: _view,
         controller: widget.tab.term.controller,
         focusNode: _focus,
-        autofocus: widget.focused,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         // The pty paints in the app's palette, so a theme change
         // reaches the scrollback and not just the chrome around it.
         theme: Mx.terminal,
-        textStyle: const TerminalStyle(
-          fontSize: Mx.terminalFontSize,
-          height: Mx.terminalLineHeight,
-          fontFamily: Mx.mono,
-        ),
+        // O corpo é o da tela de configurações mais o ⌘+ deste painel: ver
+        // [Mx.ptyStyle], que é também quem guarda a instância entre rebuilds.
+        textStyle: Mx.ptyStyle(widget.tab.zoom),
         simulateScroll: false,
         onKeyEvent: _onKeyEvent,
         onSecondaryTapDown: (d, _) => showTerminalMenu(context, widget.tab, d.globalPosition),
       ),
     );
   }
+
+  /// Um link do Claude, clicado.
+  ///
+  /// No terminal ninguém marca onde um link começa: quem reconhece um é a
+  /// forma do que estava debaixo do dedo — ver [linkAtCell]. Um clique que não
+  /// pegou link nenhum continua sendo só o clique que dá o teclado ao painel.
+  ///
+  /// Ouvido no ponteiro, e não no `onTapUp` do [TerminalView]: aquele callback
+  /// existe na assinatura e não existe na prática — o xterm 4.0.0 o repassa ao
+  /// seu detector de gestos, que só chama o `onSingleTapUp`, e esse o
+  /// TerminalView nunca preenche. Como o Listener não entra na arena de
+  /// gestos, a seleção de texto continua sendo do xterm.
+  ///
+  /// A pasta da sessão é a base porque é contra ela que o Claude escreve um
+  /// caminho: o `lib/services/store.dart:42` que ele cita é o do repositório
+  /// em que ele está rodando.
+  void _clicked(PointerUpEvent event) {
+    final from = _pressedAt;
+    _pressedAt = null;
+    // Arrastar pra selecionar também acaba num ponteiro levantado, e não é um
+    // clique em link nenhum.
+    if (from == null || (event.position - from).distance > _clickSlop) return;
+
+    final render = _view.currentState?.renderTerminal;
+    if (render == null) return;
+    final href = linkAtCell(
+      _terminal,
+      render.getCellOffset(render.globalToLocal(event.position)),
+      base: widget.tab.cwd,
+    );
+    if (href == null) return;
+    widget.store.followLink(href, from: widget.tab);
+  }
+
+  /// O quanto o ponteiro pode ter andado e a coisa ainda ser um clique.
+  static const _clickSlop = 4.0;
 
   /// Turns pixels of wheel into notches and reports each one.
   ///
@@ -346,6 +413,20 @@ class _PaneHeader extends StatelessWidget {
                   ),
                 ),
               ),
+              // O programa que saiu, com o botão de subir de novo onde a
+              // pessoa está olhando: um painel de `btop` sem btop é uma
+              // moldura vazia, e fechar e refazer o caminho do menu é caro
+              // demais pra um `q` apertado sem querer. Ver [AppStore.relaunch].
+              if (tab.launcher != null && tab.exited)
+                IconButton(
+                  tooltip: 'rodar ${tab.launcher!.command} de novo',
+                  iconSize: 16,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                  style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                  onPressed: () => store.relaunch(tab),
+                  icon: Icon(Icons.refresh, color: tab.launcher!.color),
+                ),
               if (tab.agentName != null || tab.sessionId != null)
                 _AgentHandle(store: store, tab: tab),
               // O tique fica antes do x porque é a outra forma de acabar com

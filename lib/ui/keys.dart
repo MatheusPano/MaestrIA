@@ -67,6 +67,25 @@ class MxKeys {
         // A lateral é uma, e o campo dela sabe se dizer onde está: ver
         // [SidebarSearch]. Nada aqui precisa saber se ele está montado.
         SidebarSearch.reveal();
+      case MxAction.openMarkdown:
+        store.openMarkdown();
+      case MxAction.readPlan:
+        // Sem sessão em foco não há plano de quem: o leitor não é um lugar
+        // onde se escolhe um plano, é onde um plano é lido.
+        final tab = store.focusedTab;
+        if (tab == null || tab.kind != TabKind.claude) {
+          store.showBanner('o painel em foco não é uma sessão do claude');
+          return;
+        }
+        store.showPlan(tab);
+      case MxAction.zoomIn:
+        store.zoomFocused(1);
+      case MxAction.zoomOut:
+        store.zoomFocused(-1);
+      case MxAction.zoomReset:
+        store.resetZoomFocused();
+      case MxAction.dailyReport:
+        store.openDailyReport();
       case MxAction.refreshGit:
         store.refreshGit();
       case MxAction.settings:

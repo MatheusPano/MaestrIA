@@ -963,6 +963,193 @@ class MxThemes {
   static MxPalette byId(String? id) => all.where((p) => p.id == id).firstOrNull ?? maestria;
 }
 
+/// Uma face monoespaçada que a tela de configurações oferece.
+///
+/// [bundled] é a única que não precisa existir na máquina pra aparecer na
+/// lista: ela vem dentro do app (ver `pubspec.yaml`). O resto é do sistema, e
+/// "está instalada?" não é uma pergunta que o Flutter responda — ver
+/// [MxFaces.resolves].
+@immutable
+class MxFace {
+  const MxFace(this.family, {this.note, this.bundled = false});
+
+  final String family;
+
+  /// O que a face é, pra quem não a reconhece pelo nome.
+  final String? note;
+
+  final bool bundled;
+}
+
+/// As monoespaçadas oferecidas, e a descoberta de quais delas existem aqui.
+class MxFaces {
+  const MxFaces._();
+
+  static const hack = MxFace('Hack', note: 'vem no app', bundled: true);
+
+  /// A lista, na ordem em que a tela a mostra.
+  ///
+  /// Sem ramo por plataforma de propósito: Menlo não existe no Linux e a
+  /// DejaVu não existe no mac, e é [resolves] que descobre isso — pela mesma
+  /// medida com que descobre a JetBrains Mono de quem foi instalá-la.
+  /// Longa de propósito: como só as que existem são desenhadas, um nome a mais
+  /// na lista é uma chance a mais de a tela oferecer justamente a fonte que a
+  /// pessoa já usa no terminal dela — e custa duas medidas, uma vez.
+  ///
+  /// As Nerd Font vêm primeiro pela razão de sempre: o que roda nestes painéis
+  /// é uma TUI, e o prompt de quem instalou uma delas desenha glifos que só
+  /// ela tem.
+  static const all = <MxFace>[
+    hack,
+    MxFace('Hack Nerd Font', note: 'com os glifos do prompt'),
+    MxFace('JetBrainsMono Nerd Font'),
+    MxFace('FiraCode Nerd Font'),
+    MxFace('MesloLGS NF'),
+    MxFace('SF Mono', note: 'a do Terminal.app'),
+    MxFace('Menlo', note: 'a do macOS'),
+    MxFace('Monaco'),
+    MxFace('JetBrains Mono'),
+    MxFace('Fira Code'),
+    MxFace('IBM Plex Mono'),
+    MxFace('Source Code Pro'),
+    MxFace('Roboto Mono'),
+    MxFace('Inconsolata'),
+    MxFace('Cascadia Code'),
+    MxFace('Cascadia Mono'),
+    MxFace('Iosevka'),
+    MxFace('Berkeley Mono'),
+    MxFace('Geist Mono'),
+    MxFace('Commit Mono'),
+    MxFace('Maple Mono'),
+    MxFace('Monaspace Neon'),
+    MxFace('Victor Mono'),
+    MxFace('Anonymous Pro'),
+    MxFace('DejaVu Sans Mono'),
+    MxFace('Liberation Mono'),
+    MxFace('Noto Sans Mono'),
+    MxFace('Ubuntu Mono'),
+    MxFace('Andale Mono'),
+    MxFace('PT Mono'),
+    MxFace('Courier New'),
+  ];
+
+  /// As que esta máquina tem — a lista que a tela desenha.
+  static List<MxFace> get installed => all.where(available).toList();
+
+  static bool available(MxFace face) => face.bundled || resolves(face.family);
+
+  /// A face chamada [family], ou a padrão quando esse nome não existe aqui.
+  ///
+  /// É o que faz um config trazido de outra máquina — ou de uma fonte
+  /// desinstalada desde a última vez — abrir na Hack, em vez de abrir na
+  /// proporcional do sistema, que é onde o motor cai calado.
+  static MxFace byFamily(String? family) =>
+      all.firstWhereOrNull((f) => f.family == family && available(f)) ?? hack;
+
+  static final Map<String, bool> _resolved = {};
+
+  /// Se [family] existe nesta máquina.
+  ///
+  /// Não há API pra listar as fontes instaladas, então a pergunta é feita do
+  /// único jeito que sobra: medindo. Uma família que o motor não resolve cai
+  /// na fonte padrão da plataforma, que é proporcional — de modo que `iiii` e
+  /// `MMMM` saírem com a mesma largura é a prova de que ela resolveu.
+  ///
+  /// Uma face que vem no app não passa por aqui: o asset pode ainda não estar
+  /// carregado na primeira medida, e a resposta seria um "não" falso.
+  static bool resolves(String family) => _resolved.putIfAbsent(family, () {
+    double advance(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: TextStyle(fontSize: 40, fontFamily: family)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
+    final narrow = advance('iiiiiiii');
+    return narrow > 0 && (narrow - advance('MMMMMMMM')).abs() < 0.5;
+  });
+}
+
+/// A tipografia do pty: a face, o corpo e a entrelinha.
+///
+/// Três constantes, até virarem escolha. Moram juntas porque é junto que elas
+/// se decidem — uma face mais estreita pede um corpo maior, um corpo maior
+/// pede menos entrelinha — e porque é junto que elas vão pro config.
+@immutable
+class MxType {
+  const MxType._(this.mono, this.size, this.line);
+
+  /// Normaliza na entrada, e não no uso: um corpo de 400 ou uma face que
+  /// ninguém tem chegam de um config editado à mão, e o lugar de descobrir
+  /// isso é aqui, uma vez — não em cada frame do pty.
+  factory MxType({String? mono, double? size, double? line}) => MxType._(
+    MxFaces.byFamily(mono ?? standard.mono).family,
+    _round((size ?? standard.size).clamp(minSize, maxSize)),
+    _round((line ?? standard.line).clamp(minLine, maxLine)),
+  );
+
+  /// O pty como sempre foi: Hack, nos 13px do Warp sobre uma linha de 1.2.
+  static const standard = MxType._('Hack', 13.0, 1.2);
+
+  final String mono;
+  final double size;
+  final double line;
+
+  static const minSize = 9.0;
+  static const maxSize = 24.0;
+  static const minLine = 1.0;
+  static const maxLine = 1.8;
+
+  /// De quanto em quanto o ⌘+ e os steppers da tela andam.
+  static const sizeStep = 1.0;
+  static const lineStep = 0.1;
+
+  /// O zoom de um painel, contido pelo que a base deixa.
+  ///
+  /// Sem o teto, dez ⌘+ além do limite viram dez ⌘− pra voltar de um tamanho
+  /// que nunca mudou. E é por guardar passos, e não tamanho, que trocar a base
+  /// aqui leva todo painel junto sem apagar a diferença que cada um pediu.
+  int clampZoom(int zoom) => zoom.clamp((minSize - size).ceil(), (maxSize - size).floor());
+
+  double sizeAt(int zoom) => size + clampZoom(zoom);
+
+  MxType copyWith({String? mono, double? size, double? line}) =>
+      MxType(mono: mono ?? this.mono, size: size ?? this.size, line: line ?? this.line);
+
+  /// Só o que difere do padrão vai pro disco, pelo mesmo motivo dos atalhos:
+  /// um padrão que mude numa versão futura chega em quem já tem config.
+  Map<String, dynamic> toJson() => {
+    if (mono != standard.mono) 'mono': mono,
+    if (size != standard.size) 'size': size,
+    if (line != standard.line) 'line': line,
+  };
+
+  static MxType fromJson(Object? json) => json is! Map
+      ? standard
+      : MxType(
+          mono: json['mono'] as String?,
+          size: (json['size'] as num?)?.toDouble(),
+          line: (json['line'] as num?)?.toDouble(),
+        );
+
+  /// 1.2000000000000002 não é uma entrelinha, é 0.1 somado três vezes.
+  /// Arredondar na entrada mantém o config legível e a igualdade útil.
+  static double _round(double value) => (value * 100).roundToDouble() / 100;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MxType && other.mono == mono && other.size == size && other.line == line;
+
+  @override
+  int get hashCode => Object.hash(mono, size, line);
+
+  @override
+  String toString() => '$mono ${size}px/$line';
+}
+
 /// The palette in force, plus the geometry every panel shares.
 ///
 /// Reads as a bag of constants at the call sites — `Mx.fg`, `Mx.border` — but
@@ -980,6 +1167,18 @@ class Mx {
   static void apply(MxPalette p) => current.value = p;
 
   static void applyId(String? id) => current.value = MxThemes.byId(id);
+
+  /// A tipografia em vigor, pelo mesmo desenho da paleta: um notifier só, e
+  /// getters onde antes havia constantes. Ver [MxType].
+  static final ValueNotifier<MxType> typography = ValueNotifier(MxType.standard);
+
+  static MxType get type => typography.value;
+
+  static void applyType(MxType t) => typography.value = t;
+
+  /// O que repinta a janela. Escutado acima do [MaterialApp] (ver
+  /// `main.dart`), porque nem a paleta nem a tipografia são de uma região só.
+  static final Listenable chrome = Listenable.merge([current, typography]);
 
   static Color get canvas => palette.canvas;
   static Color get bg => palette.bg;
@@ -1000,6 +1199,29 @@ class Mx {
   /// What the pty paints with. Follows the theme like everything else.
   static TerminalTheme get terminal => palette.terminal;
 
+  /// As cores com que um grupo de painéis se marca. Ver `PaneGroup.color`.
+  ///
+  /// Saem do ansi da paleta, e não dos cinco acentos da interface: accent,
+  /// verde, amarelo, vermelho e roxo já são os estados de uma sessão (ver
+  /// `ClaudeStatusUi.color`), e um grupo não é um estado -- é uma etiqueta.
+  /// O ansi existe em toda paleta, é escolhido pra ficar legível sobre o fundo
+  /// dela e no chrome ainda não significa nada, então é a família de cor que
+  /// dá pra gastar sem tirar sentido de outra.
+  ///
+  /// Quatro, e não uma por grupo: o que a cor precisa dizer é "estes três são
+  /// um conjunto", não "este é o grupo número onze" -- e uma paleta de doze
+  /// tons ninguém distingue. O quinto grupo repete a cor do primeiro.
+  ///
+  /// Vermelho fica de fora de propósito: é a única cor que o app reserva pro
+  /// que tem risco (ver [ClaudeStatus.waitingPermission]), e uma linha lavada
+  /// de vermelho leria como alarme em vez de etiqueta.
+  static List<Color> get groupTints => [
+    palette.ansi.cyan,
+    palette.ansi.magenta,
+    palette.ansi.blue,
+    palette.ansi.brightGreen,
+  ];
+
   /// Anthropic's orange. Reserved for the Claude mark itself — a session's
   /// *state* is said by the badge on it, never by recolouring the logo — and
   /// so the one colour a theme does not get to touch.
@@ -1009,15 +1231,68 @@ class Mx {
   /// the pane header, the result strip, a branch name in the sidebar. Two
   /// different monos inside the same card read as a bug, so there is one.
   ///
-  /// Hack, bundled (see `pubspec.yaml`). Its advance is 1233/2048 em, the same
-  /// as Menlo's, so nothing that used to fit stopped fitting.
-  static const mono = 'Hack';
+  /// Hack, bundled (see `pubspec.yaml`), até alguém escolher outra. Seu avanço
+  /// é 1233/2048 em, o mesmo do Menlo — é por isso que a face sempre foi
+  /// trocável sem nada que caiba hoje deixar de caber.
+  static String get mono => type.mono;
 
   /// The pty's own text, Warp's defaults: 13px on a 1.2 line. Bigger than the
   /// 12.5 the panes used to be, and the extra leading is what makes a wall of
-  /// tool output scannable instead of a block.
-  static const terminalFontSize = 13.0;
-  static const terminalLineHeight = 1.2;
+  /// tool output scannable instead of a block. Agora só o ponto de partida:
+  /// cada painel anda a partir daqui com ⌘+ e ⌘− (ver [MxType.sizeAt]).
+  static double get terminalFontSize => type.size;
+  static double get terminalLineHeight => type.line;
+
+  /// O estilo que o pty recebe, com [zoom] passos de ⌘+ somados — uma
+  /// instância por combinação, e a mesma em todo rebuild.
+  ///
+  /// A memória é o ponto. [TerminalStyle] não tem igualdade de valor, então o
+  /// painter do xterm compara por identidade: uma instância nova por build faz
+  /// ele remedir a célula e remarcar o layout de todo painel a cada tique do
+  /// relógio da lateral. Era o que o `const` de antes garantia de graça.
+  static TerminalStyle ptyStyle([int zoom = 0]) {
+    final key = (type.mono, type.sizeAt(zoom), type.line);
+    return _ptyStyles.putIfAbsent(
+      key,
+      () => TerminalStyle(
+        fontFamily: key.$1,
+        fontSize: key.$2,
+        height: key.$3,
+        fontFamilyFallback: _ptyFallback,
+      ),
+    );
+  }
+
+  /// Não esvazia: são no máximo umas dezenas de combinações — uma face, um
+  /// corpo e uma entrelinha por vez, mais um punhado de zooms de painel.
+  static final Map<(String, double, double), TerminalStyle> _ptyStyles = {};
+
+  /// A cascata pros glifos que a face do terminal não tem.
+  ///
+  /// A Hack não tem `⏺`, `✽`, `⎿`, `⏱` nem `☒` — medido, e é justamente o
+  /// alfabeto de marcadores do Claude Code —, então sem uma cascata que os
+  /// cubra o painel desenha o quadradinho do `.notdef` no lugar do ponto.
+  ///
+  /// É a lista de fábrica do xterm com as fontes de símbolo empurradas pra
+  /// frente: no macOS a `STIX Two Math` tem todos eles menos o `✻`, que está
+  /// na Menlo; no Linux do `.deb` quem cobre é a Noto de símbolos ou a DejaVu.
+  /// Família que não está instalada é ignorada, então a mesma lista serve pros
+  /// dois — e a face escolhida continua vindo primeiro: a cascata só entra no
+  /// caractere que falta.
+  static const _ptyFallback = [
+    'Menlo',
+    'Monaco',
+    'STIX Two Math',
+    'Apple Symbols',
+    'Noto Sans Symbols 2',
+    'Noto Sans Symbols',
+    'DejaVu Sans',
+    'Noto Color Emoji',
+    'Liberation Mono',
+    'Courier New',
+    'monospace',
+    'sans-serif',
+  ];
 
   /// Panel geometry: the gutter between two panels, and their corner radius.
   /// Shared so the sidebar, the panes and the status bar line up.

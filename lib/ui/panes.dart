@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/layout.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'doc_pane.dart';
 import 'terminal_pane.dart';
 
 /// Onde o mouse está, reconstruído do que o [DragTarget] entrega.
@@ -164,18 +165,30 @@ class _PaneSlotState extends State<_PaneSlot> {
       builder: (context, _, _) => Stack(
         fit: StackFit.expand,
         children: [
-          TerminalPane(
-            store: store,
-            tab: widget.tab,
-            // Pelo [AppStore.focusedTab], não pelo id cru: com um foco que
-            // aponta pra uma sessão que já saiu da tela, nenhum painel
-            // acenderia o anel e o teclado pareceria não estar em lugar nenhum.
-            focused: store.focusedTab?.id == widget.tab.id,
-            // Um painel sozinho não precisa dizer que está em foco: não há
-            // outro pra ele estar em foco em vez de.
-            showFocus: store.paneCount > 1,
-            onFocus: () => store.focusPane(widget.tab),
-          ),
+          // Duas coisas cabem num painel: um terminal e um documento. O resto
+          // -- o corte, o drop, o anel de foco, o arraste -- não sabe a
+          // diferença, e é por isso que um leitor se comporta como um painel.
+          // Pelo [AppStore.focusedTab], não pelo id cru: com um foco que
+          // aponta pra uma sessão que já saiu da tela, nenhum painel
+          // acenderia o anel e o teclado pareceria não estar em lugar nenhum.
+          if (widget.tab.isReader)
+            DocPane(
+              store: store,
+              tab: widget.tab,
+              focused: store.focusedTab?.id == widget.tab.id,
+              showFocus: store.paneCount > 1,
+              onFocus: () => store.focusPane(widget.tab),
+            )
+          else
+            TerminalPane(
+              store: store,
+              tab: widget.tab,
+              focused: store.focusedTab?.id == widget.tab.id,
+              // Um painel sozinho não precisa dizer que está em foco: não há
+              // outro pra ele estar em foco em vez de.
+              showFocus: store.paneCount > 1,
+              onFocus: () => store.focusPane(widget.tab),
+            ),
           if (_side case final side?) IgnorePointer(child: _DropHint(side: side)),
         ],
       ),

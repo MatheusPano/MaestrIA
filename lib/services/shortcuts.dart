@@ -248,6 +248,7 @@ class MxChord {
 enum MxGroup {
   sessions('sessões'),
   navigation('navegação'),
+  view('exibição'),
   window('janela');
 
   const MxGroup(this.label);
@@ -334,12 +335,59 @@ enum MxAction {
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
   ),
+  openMarkdown(
+    id: 'markdown',
+    label: 'abrir um markdown…',
+    hint: 'escolhe um arquivo e o desenha num painel de leitura',
+    group: MxGroup.sessions,
+    defaults: [MxChord(LogicalKeyboardKey.keyO, meta: true)],
+  ),
+  readPlan(
+    id: 'plan',
+    label: 'ver o plano da sessão em foco',
+    hint: 'abre o último plano num painel de leitura, ao lado dela',
+    group: MxGroup.sessions,
+    defaults: [MxChord(LogicalKeyboardKey.keyL, meta: true, shift: true)],
+  ),
   refreshGit(
     id: 'refresh',
     label: 'reler o git',
     hint: 'worktrees e branches, sem esperar os dez segundos',
     group: MxGroup.window,
     defaults: [MxChord(LogicalKeyboardKey.keyR, meta: true)],
+  ),
+  dailyReport(
+    id: 'report',
+    label: 'relatório do dia',
+    hint: 'reúne o dia e pede a prosa ao claude, num painel de leitura',
+    group: MxGroup.window,
+    defaults: [MxChord(LogicalKeyboardKey.keyR, meta: true, shift: true)],
+  ),
+  zoomIn(
+    id: 'zoom-in',
+    label: 'aumentar o corpo do painel',
+    hint: 'só o painel em foco; a base de todos está em aparência',
+    group: MxGroup.view,
+    // Duas por padrão porque ⌘+ *é* ⌘⇧= no teclado: quem pensa "mais" segura
+    // o shift sem perceber, e quem pensa "⌘=" não segura. As duas são a mesma
+    // tecla física, e recusar uma delas seria recusar metade das mãos.
+    defaults: [
+      MxChord(LogicalKeyboardKey.equal, meta: true),
+      MxChord(LogicalKeyboardKey.equal, meta: true, shift: true),
+    ],
+  ),
+  zoomOut(
+    id: 'zoom-out',
+    label: 'diminuir o corpo do painel',
+    group: MxGroup.view,
+    defaults: [MxChord(LogicalKeyboardKey.minus, meta: true)],
+  ),
+  zoomReset(
+    id: 'zoom-reset',
+    label: 'voltar o painel ao corpo base',
+    hint: '⌘0 fica livre: ⌘1 a ⌘9 são as nove sessões da lateral',
+    group: MxGroup.view,
+    defaults: [MxChord(LogicalKeyboardKey.digit0, meta: true)],
   ),
   settings(
     id: 'settings',
