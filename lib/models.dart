@@ -3,14 +3,19 @@ import 'package:flutter/material.dart';
 
 /// A repo the user works in. Worktrees of the same repo group under one folder.
 class Folder {
-  Folder({required this.root, required this.name, this.collapsed = false}) : isLoose = false;
+  Folder({required this.root, required this.name, this.collapsed = false, this.workspace})
+    : isLoose = false;
 
   /// The one folder that is not a folder: the tray panels hang from when
   /// they belong to no repo at all. There is exactly one, it is never written
   /// to the config, and git never looks at it — a session you opened just to
   /// ask something is not a checkout. Its [root] is only the folder a panel
   /// starts in when you do not pick one.
-  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false;
+  Folder.loose(this.root)
+    : name = 'avulsos',
+      isLoose = true,
+      collapsed = false,
+      workspace = null;
 
   /// Main checkout path. Also the identity: worktrees resolve back to it.
   final String root;
@@ -20,17 +25,39 @@ class Folder {
   /// See [Folder.loose]. Everything git-shaped in the UI asks this first.
   final bool isLoose;
 
+  /// O `.code-workspace` de onde ela veio, quando veio de um. É o caminho do
+  /// arquivo, que é também a identidade do [Workspace] -- é assim que a lateral
+  /// sabe quais pastas desenhar juntas.
+  ///
+  /// Serve a duas coisas, e as duas são o mesmo fato dito pra públicos
+  /// diferentes: a seção que junta as pastas na lateral, e o
+  /// `AppStore.openFolderInEditor` -- pro VS Code esta pasta é um terço de um
+  /// arranjo de três, e abri-la sozinha no editor é abrir um terço do que a
+  /// pessoa chama de projeto.
+  ///
+  /// Fica na pasta e não numa lista dentro do [Workspace] porque a pergunta
+  /// que se faz o tempo todo é "de que workspace é esta pasta", uma vez por
+  /// linha desenhada; e porque uma pasta pertence a um só -- ver
+  /// `AppStore.importWorkspace`, que não rouba a pasta de um arquivo anterior.
+  String? workspace;
+
   /// Filled in by `AppStore.refreshGit` from `git worktree list`: whether the
   /// folder turned out to be a repo at all, and what the main checkout is on.
   bool isRepo = false;
   String branch = '';
 
-  Map<String, dynamic> toJson() => {'root': root, 'name': name, 'collapsed': collapsed};
+  Map<String, dynamic> toJson() => {
+    'root': root,
+    'name': name,
+    'collapsed': collapsed,
+    if (workspace != null) 'workspace': workspace,
+  };
 
   static Folder fromJson(Map<String, dynamic> j) => Folder(
     root: j['root'] as String,
     name: j['name'] as String,
     collapsed: (j['collapsed'] as bool?) ?? false,
+    workspace: j['workspace'] as String?,
   );
 }
 
@@ -92,6 +119,56 @@ class Project {
     brief: (j['brief'] as String?) ?? '',
     collapsed: (j['collapsed'] as bool?) ?? false,
   );
+}
+
+/// Um workspace do VS Code, do jeito que ele existe aqui: um nome, e as pastas
+/// que apontam pra ele por [Folder.workspace].
+///
+/// Não é dono de nada, e é o que o separa de uma pasta. As pastas continuam
+/// sendo pastas -- com os projetos, as worktrees e as sessões delas, no lugar
+/// onde sempre estiveram --, e dissolver isto devolve todas pra raiz da
+/// lateral sem fechar um painel. O que ele acrescenta é uma linha que dobra:
+/// as sete pastas de um cliente eram sete linhas permanentes, e o que se quer
+/// da metade delas na maior parte dos dias é não vê-las.
+///
+/// Também não é um projeto e não é um grupo. Um projeto diz *para quê* as
+/// sessões existem e mora dentro de uma pasta; um grupo é um arranjo de
+/// painéis na tela. Este é o único que responde "que pastas se trabalham
+/// juntas" -- e a resposta não é nossa: está escrita num arquivo que o VS Code
+/// mantém. Ver [CodeWorkspace], que é o arquivo, e `AppStore.importWorkspace`,
+/// que é quem cria isto.
+class Workspace {
+  Workspace({required this.path, required this.name, this.collapsed = false});
+
+  /// O arquivo. Também a identidade: é isto que as pastas guardam, e é por
+  /// isso que ele não muda -- mover o `.code-workspace` de lugar é, aqui, um
+  /// outro workspace.
+  final String path;
+
+  /// Como ele se chama na linha. Sai do nome do arquivo (ver
+  /// [CodeWorkspace.name]) e fica guardado, e não recalculado a cada leitura:
+  /// o dia em que der pra renomear, é este campo que guarda a escolha.
+  String name;
+
+  bool collapsed;
+
+  Map<String, dynamic> toJson() => {
+    'path': path,
+    'name': name,
+    if (collapsed) 'collapsed': true,
+  };
+
+  /// Null pro registro que não desenharia nada -- sem caminho ou sem nome.
+  /// Nulo e não exceção pelo mesmo motivo de [PaneGroup.fromJson]: quem lê é o
+  /// carregador do config inteiro, e um registro estragado não pode custar as
+  /// pastas e o layout.
+  static Workspace? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final path = ((j['path'] as String?) ?? '').trim();
+    final name = ((j['name'] as String?) ?? '').trim();
+    if (path.isEmpty || name.isEmpty) return null;
+    return Workspace(path: path, name: name, collapsed: (j['collapsed'] as bool?) ?? false);
+  }
 }
 
 /// Um arranjo de painéis salvo com nome: a grade de três terminais que você
@@ -234,12 +311,50 @@ extension FollowUpKindUi on FollowUpKind {
     FollowUpKind.handoff => 'passar pra outro painel',
   };
 
+  /// O nome do tamanho de uma ficha. O [label] é uma frase -- serve pra linha
+  /// de um menu e pro que a fila diz de si mesma; dentro do editor, onde o
+  /// cartão inteiro já explica o passo, o que cabe é o substantivo.
+  String get short => switch (this) {
+    FollowUpKind.keepGoing => 'continuar',
+    FollowUpKind.newSession => 'outra sessão',
+    FollowUpKind.command => 'comando',
+    FollowUpKind.handoff => 'passar a bola',
+  };
+
   IconData get icon => switch (this) {
     FollowUpKind.keepGoing => Icons.subdirectory_arrow_right,
     FollowUpKind.newSession => Icons.add_comment_outlined,
     FollowUpKind.command => Icons.terminal,
     FollowUpKind.handoff => Icons.swap_horiz,
   };
+
+  /// Uma linha sobre o que o passo faz, pro cartão dele no editor: os quatro
+  /// se parecem demais na lista de nomes, e a diferença entre eles é
+  /// justamente *onde* o texto que você digita vai parar.
+  String get blurb => switch (this) {
+    FollowUpKind.keepGoing => 'manda o texto de volta pra esta mesma sessão',
+    FollowUpKind.newSession => 'abre uma sessão nova na mesma pasta, já com esse prompt',
+    FollowUpKind.command => 'sobe um terminal rodando a linha abaixo',
+    FollowUpKind.handoff => 'entrega o recado final desta sessão a outro painel',
+  };
+
+  /// O que o campo de texto do passo sugere quando está vazio.
+  String get hint => switch (this) {
+    FollowUpKind.keepGoing => 'o que mandar pra ela em seguida',
+    FollowUpKind.newSession => 'o prompt com que a sessão nova abre',
+    FollowUpKind.command => 'flutter analyze && flutter test',
+    FollowUpKind.handoff => 'o recado que vai junto com a última mensagem dela',
+  };
+
+  /// O passo devolve o turno pra sessão de onde ele saiu?
+  ///
+  /// Só [keepGoing] devolve. Os outros três acontecem *fora* dela -- num
+  /// terminal, numa sessão nova, no prompt de outro painel -- e deixam a
+  /// sessão de origem exatamente como estava: parada. É isso que decide se o
+  /// passo seguinte espera outro turno ou sai logo atrás deste, e sem a
+  /// distinção um fluxo que começasse por um comando ficaria esperando pra
+  /// sempre um turno que não vinha mais.
+  bool get handsBack => this == FollowUpKind.keepGoing;
 }
 
 /// One step of a panel's queue. See [FollowUpKind].
@@ -268,6 +383,34 @@ class FollowUp {
       targetTabId: j['target'] as String?,
     );
   }
+}
+
+/// Por que um passo armado ainda não saiu. Ver [FollowUp] e o `holdFor` do
+/// store, que é quem responde isto a cada segundo.
+enum FlowHold {
+  /// Nada mais segura: o próximo passo sai agora.
+  go,
+
+  /// A sessão está no meio de um turno.
+  working,
+
+  /// O turno acabou, os agentes que ela disparou não. É o caso que fazia o
+  /// fluxo sair cedo: dois `Agent` em segundo plano e a sessão já ociosa,
+  /// parada esperando por eles.
+  forks,
+
+  /// Acabou de acontecer alguma coisa. Ficar ocioso por um instante entre
+  /// duas ferramentas não é ter terminado.
+  quiet,
+}
+
+extension FlowHoldUi on FlowHold {
+  String get label => switch (this) {
+    FlowHold.go => 'disparando',
+    FlowHold.working => 'a sessão ainda está trabalhando',
+    FlowHold.forks => 'esperando os agentes que ela abriu',
+    FlowHold.quiet => 'confirmando que ela parou mesmo',
+  };
 }
 
 class WorktreeInfo {
@@ -356,6 +499,18 @@ extension ClaudeStatusUi on ClaudeStatus {
     _ => Mx.fgFaint,
   };
 
+  /// A sessão está parada no prompt, sem nada pendente com você. É o estado
+  /// em que um passo de fluxo pode sair.
+  ///
+  /// [ClaudeStatus.waitingInput] entra junto com [ClaudeStatus.idle] porque é
+  /// o mesmo lugar visto mais tarde: o aviso de ociosidade chega um minuto
+  /// depois do `Stop` e reescreve o estado por cima dele. Sem ele aqui, uma
+  /// fila que estivesse esperando os agentes da sessão terminar ficava presa
+  /// pra sempre -- o estado mudou embaixo dela enquanto ela esperava. As duas
+  /// esperas que ficam de fora são as que têm uma decisão sua no meio:
+  /// escrever no prompt de quem está pedindo permissão é responder por você.
+  bool get atRest => this == ClaudeStatus.idle || this == ClaudeStatus.waitingInput;
+
   /// Does this state want the human? That is what earns a badge in the sidebar.
   bool get needsHuman =>
       this == ClaudeStatus.waitingInput ||
@@ -404,6 +559,24 @@ class PlanNote {
   }
 }
 
+/// Há quanto tempo, do jeito que cabe ao lado de um subtítulo.
+///
+/// Mais seco que o `ago` do histórico de propósito: lá a idade é a informação
+/// da linha e tem a linha inteira pra ela; aqui divide 200 e poucos pixels com
+/// um subtítulo que já está sendo cortado, então o "há " e o espaço antes da
+/// unidade são a primeira coisa a sair.
+///
+/// Passada uma semana a data diz mais que a contagem -- "8d" é uma conta que
+/// ninguém faz de cabeça.
+String shortAgo(DateTime at, {DateTime? now}) {
+  final since = (now ?? DateTime.now()).difference(at);
+  if (since.inSeconds < 60) return 'agora';
+  if (since.inMinutes < 60) return '${since.inMinutes}min';
+  if (since.inHours < 24) return '${since.inHours}h';
+  if (since.inDays < 7) return '${since.inDays}d';
+  return '${at.day}/${at.month}';
+}
+
 /// Live state of one Claude session, accumulated from hook events.
 class HookState {
   ClaudeStatus status = ClaudeStatus.starting;
@@ -435,6 +608,31 @@ class HookState {
   int prompts = 0;
   int tools = 0;
   DateTime? lastEventAt;
+
+  /// Quantos subagentes esta sessão largou por aí e ainda não viu terminar.
+  ///
+  /// A pergunta que isto responde não é decorativa: é a diferença entre "o
+  /// turno acabou" e "o trabalho acabou". Uma sessão que dispara dois agentes
+  /// em segundo plano encerra o turno na hora -- manda o `Stop`, fica
+  /// [ClaudeStatus.idle] -- enquanto os dois seguem trabalhando por minutos.
+  /// Um fluxo que confiasse só no `Stop` dispararia a revisão sobre um diff
+  /// que ainda estava sendo escrito.
+  ///
+  /// Sobe no `Task`/`Agent` que a própria sessão chama e desce no
+  /// `SubagentStop` correspondente. Ver [forkIds] pro caso do fork que
+  /// aparece sem que a chamada dele tenha sido vista.
+  int forksOut = 0;
+
+  /// Os `agent_id` dos forks que já deram sinal e ainda não pararam.
+  ///
+  /// Todo evento de subagente chega carimbado com um deles (ver
+  /// [HookReducer.apply]), então esta lista é a contagem *observada* -- a que
+  /// vale quando o `PreToolUse` do `Task` se perdeu, e a que dá o número que
+  /// o painel mostra.
+  final Set<String> forkIds = {};
+
+  /// Está esperando alguém além dela mesma?
+  bool get busyForks => forksOut > 0;
 
   /// The files this session wrote to, in the order it first touched them.
   ///

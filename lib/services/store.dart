@@ -8,6 +8,9 @@ import 'package:flutter/foundation.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'agents.dart';
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`.
+// import 'dictation.dart';
 import 'docs.dart';
 import 'editor.dart';
 import 'git.dart';
@@ -21,6 +24,7 @@ import 'pty.dart';
 import 'report.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
+import 'workspace.dart';
 
 /// O que um painel é.
 ///
@@ -78,10 +82,24 @@ class MxTab {
   /// projects existed, and still the right one for a one-off session.
   String? projectId;
 
-  /// The step waiting out [AppStore.followUpDelay]. Held so that closing the
-  /// panel -- or the window -- takes it with it, instead of letting it fire
-  /// into a session nobody is watching any more.
-  Timer? pendingFollowUp;
+  /// De qual painel este nasceu, quando ele nasceu de um passo de fluxo.
+  ///
+  /// Um fluxo produz painéis -- a sessão de revisão, o terminal do comando --
+  /// e eles chegavam na lateral como linhas soltas, sem nada dizendo que eram
+  /// a mesma coisa acontecendo. Isto é o fio que a lateral segue pra pendurar
+  /// a ninhada em quem a abriu.
+  ///
+  /// Só em memória, como a própria fila (ver [followUps]): o id de um painel
+  /// é desta execução, e um painel restaurado amanhã não é o mesmo painel.
+  String? bornOf;
+
+  /// A fila deste painel está esperando a hora de sair?
+  ///
+  /// Ligada quando o turno acaba com passo na fila, desligada quando o passo
+  /// sai -- e quando o painel fecha, ou a sessão é marcada como concluída.
+  /// Entre uma coisa e outra quem decide a hora é [AppStore.holdFor]: um
+  /// turno que acaba não é, sozinho, trabalho que acabou.
+  bool armed = false;
 
   /// What happens the next time this session goes quiet, in order.
   ///
@@ -136,6 +154,38 @@ class MxTab {
   /// its session id, so the answer is still on screen and the conversation is
   /// still resumable. What it stops being is *pending*.
   bool done = false;
+
+  /// Quando esta sessão parou de trabalhar: o instante da virada pra repouso,
+  /// não o do último evento.
+  ///
+  /// A diferença importa. [HookState.lastEventAt] anda a cada sinal, inclusive
+  /// o de um fork que reporta depois do turno ter acabado -- e uma sessão que
+  /// rejuvenesce sozinha não responde "terminou quando".
+  ///
+  /// Null enquanto ela trabalha, e null de novo no próximo prompt: a idade é
+  /// deste repouso, não da última vez que ela esteve parada. Fora do [toJson]
+  /// pelo mesmo motivo da fila -- um painel restaurado retoma a conversa de
+  /// ontem, mas não é uma sessão que acabou de parar.
+  DateTime? restedAt;
+
+  /// Parou sem você ver.
+  ///
+  /// A pergunta que faltava. Cinco painéis parados dizem todos "pronto", e
+  /// entre "esse eu já li" e "esse terminou enquanto eu estava em outra
+  /// janela" o app não tinha nada -- nem a idade resolve, porque meia hora
+  /// fora envelhece os cinco junto.
+  ///
+  /// Ligado na virada pra repouso quando você não estava olhando pra ele (ver
+  /// [AppStore.watching]), desligado quando você olha. Como o tique de
+  /// [done], é sobre o que *você* já viu -- só que este o app consegue
+  /// observar sozinho.
+  bool unseen = false;
+
+  /// Parada, com uma parada carimbada. Ver [restedAt].
+  bool get rested => restedAt != null && !exited && status.atRest;
+
+  /// A idade deste repouso, pra quem desenha a linha. Ver [shortAgo].
+  String? get restedAgo => rested ? shortAgo(restedAt!) : null;
 
   /// The panel title, in the order of what a human would actually recognise:
   /// what you named it, then the branch's task id, then the folder.
@@ -310,11 +360,35 @@ enum MxFilter {
 }
 
 class AppStore extends ChangeNotifier {
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // Sem o ditado o construtor não tem mais o que ligar.
+  // /// [dictation] entra pela porta porque é a única peça daqui que um teste não
+  // /// tem como exercitar: não há microfone numa suíte, e não há whisper.cpp na
+  // /// máquina que roda a CI. Todo o resto do ditado -- o que é colado, em que
+  // /// painel, e o que acontece quando não se ouviu nada -- é lógica deste
+  // /// store, e é o que o teste alcança trocando só as duas pontas de IO.
+  // AppStore({Dictation? dictation}) : dictation = dictation ?? Dictation() {
+    // // No construtor e não no [init]: quem desenha painel escuta o store, não o
+    // // ditado, então sem esta ponte o cabeçalho nunca fica sabendo que o
+    // // microfone abriu. O [init] sobe servidor, timer e git -- coisas que um
+    // // teste não quer --, e uma ligação em memória não tem por que morar lá.
+    // this.dictation.addListener(notifyListeners);
+  // }
+  AppStore();
+
   final HookServer hooks = HookServer();
   final AgentsWatcher agents = AgentsWatcher();
   final Notifier notifier = Notifier();
 
   final List<Folder> folders = [];
+
+  /// Os workspaces do VS Code que viraram seção na lateral. Ver [Workspace] --
+  /// as pastas apontam pra cá por [Folder.workspace], e é a lateral que aninha
+  /// (o mesmo arranjo de [projects] dentro de [folders]).
+  ///
+  /// Um workspace sem nenhuma pasta apontando pra ele não existe: seria um
+  /// cabeçalho sobre coisa nenhuma. Quem garante isso é [reconcileWorkspaces].
+  final List<Workspace> workspaces = [];
 
   /// The named jobs inside those folders. Flat, keyed back to a folder by
   /// [Project.folderRoot] -- the sidebar is what nests them.
@@ -353,6 +427,19 @@ class AppStore extends ChangeNotifier {
   /// Qual painel o teclado está escutando, pelo id da sessão que ele mostra.
   String? focusedPaneId;
 
+  /// A janela está na frente?
+  ///
+  /// Quem conta é o `AppLifecycleListener` do `main.dart`; começa em true
+  /// porque um app que acabou de abrir está na frente, e porque um teste que
+  /// não tem janela nenhuma não deve ver o mundo inteiro como não visto.
+  ///
+  /// Existe por uma razão só: "parou sem você ver" precisa saber se você
+  /// estava aqui. Ver [MxTab.unseen] e [watching].
+  bool windowActive = true;
+
+  /// Desde quando você está em outra janela. Null enquanto está nesta.
+  DateTime? _awaySince;
+
   String? banner;
 
   /// How wide the sidebar is, in logical pixels. Dragged by the gutter between
@@ -371,8 +458,23 @@ class AppStore extends ChangeNotifier {
   /// é uma escolha que a janela lembra. Quem lê é `ui/keys.dart`.
   final MxKeymap keymap = MxKeymap();
 
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // /// O microfone. Aqui e não no painel porque só há um microfone na máquina:
+  // /// dois painéis gravando ao mesmo tempo é um estado que não existe, e é este
+  // /// campo único que o torna impossível de representar. Ver [toggleDictation].
+  // final Dictation dictation;
+
   int _seq = 0;
   bool _restoring = false;
+
+  /// A janela já foi embora?
+  ///
+  /// Um passo de fluxo tem espera dentro dele -- colar um texto no prompt de
+  /// outra sessão leva um quarto de segundo, ver [TermSession.submit] -- e o
+  /// app pode fechar nesse intervalo. Voltar da espera pra avisar uma tela que
+  /// não existe mais é um erro de verdade (`A AppStore was used after being
+  /// disposed`), e ele não é do passo: é de continuar falando depois do fim.
+  bool _gone = false;
   Timer? _saveDebounce;
 
   /// Alerts already fired, keyed per session, so a state that stays put does
@@ -406,10 +508,24 @@ class AppStore extends ChangeNotifier {
     await _loadConfig();
     agents.start();
     Timer.periodic(const Duration(seconds: 1), (_) {
+      // O relógio da fila: um passo só sai quando a sessão está parada há um
+      // tempo, e "há um tempo" é uma condição que ninguém avisa -- ela chega
+      // pela ausência de eventos, então alguém tem que ir olhar.
+      pumpFlows();
+      // Um segundo parado em cima de um painel conta como tê-lo lido. Avisa
+      // por conta própria quando de fato apaga uma marca.
+      seeFocused();
       // Only the elapsed-seconds readouts need this cadence.
-      if (tabs.any((t) => t.status == ClaudeStatus.tool)) notifyListeners();
+      if (tabs.any((t) => t.status == ClaudeStatus.tool || t.armed)) notifyListeners();
     });
     Timer.periodic(const Duration(seconds: 10), (_) => refreshGit());
+    // A idade de um repouso envelhece sozinha: ninguém manda evento avisando
+    // que "agora" virou "1min". Num relógio próprio e lento de propósito --
+    // pendurar isso no de um segundo redesenharia a janela inteira a cada
+    // segundo pra mexer num número que anda de minuto em minuto.
+    Timer.periodic(const Duration(seconds: 20), (_) {
+      if (tabs.any((t) => t.rested)) notifyListeners();
+    });
     notifyListeners();
   }
 
@@ -441,6 +557,10 @@ class AppStore extends ChangeNotifier {
           projects.add(Project.fromJson(p as Map<String, dynamic>));
         }
       }
+      for (final w in (j['workspaces'] as List? ?? const [])) {
+        if (Workspace.fromJson(w) case final workspace?) workspaces.add(workspace);
+      }
+      reconcileWorkspaces();
       for (final g in (j['groups'] as List? ?? const [])) {
         if (PaneGroup.fromJson(g) case final group?) groups.add(group);
       }
@@ -452,9 +572,12 @@ class AppStore extends ChangeNotifier {
       }
       final w = (j['sidebarWidth'] as num?)?.toDouble();
       if (w != null) sidebarWidth = w.clamp(minSidebar, maxSidebar);
+      groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       Mx.applyId(j['theme'] as String?);
       Mx.applyType(MxType.fromJson(j['type']));
       keymap.load(j['shortcuts']);
+      // --- ditado (vocalização) — fora desta versão --------------------------
+      // dictation.config = DictationConfig.fromJson(j['dictation']);
       await refreshGit();
       await _restoreLayout(j['layout'] as Map<String, dynamic>?);
     } catch (_) {}
@@ -507,7 +630,9 @@ class AppStore extends ChangeNotifier {
           : PaneSplit(PaneAxis.row, [PaneLeaf(left.id), PaneLeaf(right.id)], [0.5, 0.5]);
     }
     focusedPaneId = at(layout['focused'] as int?)?.id ?? Panes.order(panes).firstOrNull;
-    banner = '$count painéis restaurados da última sessão';
+    // Nenhum recado aqui. "13 painéis restaurados da última sessão" contava o
+    // que já estava desenhado na lateral, e ficava na tela até alguém clicar
+    // no x — a faixa que mais se via era a que menos dizia.
     notifyListeners();
   }
 
@@ -565,7 +690,7 @@ class AppStore extends ChangeNotifier {
   }
 
   void _save() {
-    if (_restoring) return;
+    if (_restoring || _gone) return;
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 400), _writeConfig);
   }
@@ -579,9 +704,25 @@ class AppStore extends ChangeNotifier {
       // sai do pty e continua rodando, e era esse id que fazia falta na volta.
       final open = tabs.where((t) => !t.exited || t.resumable).toList();
       final tree = Panes.toJson(panes, (id) => open.indexWhere((t) => t.id == id));
-      await _configFile.writeAsString(
+      // Escrito ao lado e movido pra cima, em vez de escrito em cima: um
+      // `writeAsString` direto cria o arquivo, trunca e só depois escreve, e
+      // quem ler nessa fresta acha zero byte. Ler o config é o [_loadConfig],
+      // que engole a exceção do `jsonDecode` -- ou seja, a janela abriria sem
+      // pasta, sem projeto e sem layout por causa de uma leitura que caiu no
+      // milissegundo errado. O `rename` dentro da mesma pasta é atômico: quem
+      // ler acha o config velho inteiro ou o novo inteiro, nunca a metade.
+      //
+      // O pid no nome do temporário é por causa da segunda janela: duas
+      // maestrias guardam no mesmo config, e com um nome fixo elas escreveriam
+      // uma dentro do rascunho da outra.
+      final temp = File('${_configFile.path}.$pid.tmp');
+      await temp.writeAsString(
         jsonEncode({
           'folders': folders.map((f) => f.toJson()).toList(),
+          // Ao lado das pastas porque é delas que ele fala: a seção é um jeito
+          // de desenhar um punhado delas junto. Ver [Workspace].
+          if (workspaces.isNotEmpty)
+            'workspaces': workspaces.map((w) => w.toJson()).toList(),
           'projects': projects.map((p) => p.toJson()).toList(),
           // Ao lado do layout e escritos com o mesmo json que ele: um grupo é
           // um layout guardado com nome. Ver [PaneGroup].
@@ -589,9 +730,14 @@ class AppStore extends ChangeNotifier {
           if (launchers.isNotEmpty)
             'launchers': launchers.map((l) => l.toJson()).toList(),
           'sidebarWidth': sidebarWidth,
+          if (groupsCollapsed) 'groupsCollapsed': true,
           'theme': Mx.palette.id,
           if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
+          // --- ditado (vocalização) — fora desta versão ----------------------
+          // Sai do arquivo no próximo save, junto com o resto: é config de uma
+          // feature que ainda não estreou, então não há o que preservar.
+          // if (dictation.config.toJson() case final d when d.isNotEmpty) 'dictation': d,
           'layout': {
             'panes': open.map((t) => t.toJson()).toList(),
             if (tree != null) 'tree': tree,
@@ -599,6 +745,7 @@ class AppStore extends ChangeNotifier {
           },
         }),
       );
+      await temp.rename(_configFile.path);
     } catch (_) {}
   }
 
@@ -664,6 +811,60 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // void setDictation(DictationConfig config) {
+    // if (config == dictation.config) return;
+    // dictation.config = config;
+    // _save();
+    // notifyListeners();
+  // }
+
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // /// Falar em vez de digitar, no painel em foco.
+  // ///
+  // /// Um atalho e não dois porque é um gesto: aperta, fala, aperta. Push-to-talk
+  // /// -- segurar a tecla -- seria mais natural e não cabe no mapa de atalhos,
+  // /// que é feito de [MxChord] e só sabe da tecla descendo.
+  // ///
+  // /// O texto é *colado*, nunca enviado, a menos que se peça -- ver
+  // /// [DictationConfig.submit]. E vai pro painel em que o ditado começou, não
+  // /// pro que está em foco no fim: quem fala trinta segundos pode ter clicado
+  // /// em outro painel no meio, e a fala continua sendo daquele.
+  // Future<void> toggleDictation() async {
+    // if (dictation.phase == DictationPhase.transcribing) return;
+    // if (dictation.busy) {
+      // final into = _byId(dictation.target);
+      // final heard = await dictation.end();
+      // if (heard.problem case final why?) {
+        // showBanner(why, sticky: true);
+        // return;
+      // }
+      // final text = heard.text ?? '';
+      // if (text.isEmpty) {
+        // showBanner('não entendi nada — nada foi colado');
+        // return;
+      // }
+      // if (into == null || into.exited) {
+        // showBanner('o painel que estava ouvindo não está mais aí: "$text"', sticky: true);
+        // return;
+      // }
+      // if (dictation.config.submit) {
+        // await into.term.submit(text);
+      // } else {
+        // into.term.terminal.paste(text);
+      // }
+      // return;
+    // }
+    // final tab = focusedTab;
+    // // Um leitor não tem prompt pra receber texto, e um painel cujo processo
+    // // saiu não tem quem o leia.
+    // if (tab == null || tab.isReader || tab.exited) {
+      // showBanner('o ditado precisa de um painel com processo vivo em foco');
+      // return;
+    // }
+    // if (await dictation.begin(tab.id) case final why?) showBanner(why, sticky: true);
+  // }
+
   /// Called on every drag frame, so it bails when the clamp swallowed the
   /// delta — otherwise dragging past the end keeps repainting for nothing.
   void setSidebarWidth(double width) {
@@ -677,6 +878,29 @@ class AppStore extends ChangeNotifier {
   // --- folders -----------------------------------------------------------
 
   Future<Folder?> addFolder(String rawPath) async {
+    final outcome = await _adoptFolder(rawPath);
+    if (outcome.folder == null) {
+      showBanner('pasta não encontrada: ${expandHome(rawPath)}', sticky: true);
+      return null;
+    }
+    if (!outcome.created) return outcome.folder;
+    _save();
+    await refreshGit();
+    notifyListeners();
+    return outcome.folder;
+  }
+
+  /// A pasta adotada, e se ela é nova.
+  ///
+  /// Separado de [addFolder] por causa de [importWorkspace], que adota várias
+  /// de uma vez: gravar o config e varrer o git a cada uma seria N gravações e
+  /// N `git worktree list` pra um gesto só. E o `created` é o que os dois
+  /// chamadores não conseguem descobrir sozinhos depois -- uma pasta devolvida
+  /// é uma pasta devolvida, tenha ela acabado de entrar ou estado ali desde
+  /// ontem.
+  ///
+  /// Não fala com o usuário e não notifica: quem chama é que sabe o que dizer.
+  Future<({Folder? folder, bool created})> _adoptFolder(String rawPath) async {
     // O caminho vem de um campo de texto, e num campo de texto se digita `~/`
     // -- ver [expandHome]. Aqui em cima porque tudo abaixo (o `git` da pasta, o
     // `existsSync`, o que vai pro config) já tem que estar falando do lugar de
@@ -685,17 +909,77 @@ class AppStore extends ChangeNotifier {
     final root = await Git.mainRoot(path);
     final resolved = root ?? path;
     final existing = folders.firstWhereOrNull((p) => p.root == resolved);
-    if (existing != null) return existing;
-    if (!Directory(resolved).existsSync()) {
-      showBanner('pasta não encontrada: $path');
-      return null;
-    }
+    if (existing != null) return (folder: existing, created: false);
+    if (!Directory(resolved).existsSync()) return (folder: null, created: false);
     final folder = Folder(root: resolved, name: resolved.split('/').last);
     folders.add(folder);
+    return (folder: folder, created: true);
+  }
+
+  /// Um `.code-workspace` do VS Code, aberto como o que ele é aqui: as pastas
+  /// dele, todas de uma vez.
+  ///
+  /// Nada de novo fica no config além das pastas -- ver [CodeWorkspace]. O
+  /// arquivo é um jeito de adicionar pasta, e o que ele evita é justamente o
+  /// que ele parece pouco: adicionar uma a uma, no dedo, uma lista que já
+  /// existe escrita em algum lugar.
+  ///
+  /// O resumo devolvido importa mais do que parece. Duas pastas do mesmo
+  /// monorepo resolvem pro mesmo checkout principal e viram uma só na lateral
+  /// (ver `Git.mainRoot`), e sem alguém contando isso o botão engoliria uma
+  /// pasta em silêncio -- ver [WorkspaceImport].
+  Future<WorkspaceImport?> importWorkspace(String rawPath) async {
+    final ws = await CodeWorkspace.read(rawPath);
+    if (ws == null) {
+      showBanner('não consegui ler esse workspace: ${expandHome(rawPath.trim())}', sticky: true);
+      return null;
+    }
+    if (ws.folders.isEmpty) {
+      showBanner('o workspace "${ws.name}" não lista nenhuma pasta', sticky: true);
+      return null;
+    }
+    final added = <Folder>[];
+    final already = <Folder>[];
+    final missing = <String>[];
+    for (final entry in ws.folders) {
+      final outcome = await _adoptFolder(entry.path);
+      final folder = outcome.folder;
+      if (folder == null) {
+        missing.add(entry.path);
+        continue;
+      }
+      // Só quando não tem dono: uma pasta que já veio de outro workspace
+      // continua daquele. O arquivo mais recente não é mais verdadeiro que o
+      // primeiro, e trocar por baixo mudaria o que o "abrir no vscode" dela faz.
+      folder.workspace ??= ws.path;
+      if (!outcome.created) {
+        already.add(folder);
+        continue;
+      }
+      // O apelido do workspace só vale pra pasta que ele de fato nomeia: se o
+      // git subiu daqui pro checkout principal, o nome escolhido era do
+      // subdiretório e pendurá-lo no repo inteiro seria uma etiqueta errada.
+      if (entry.name != null && folder.root == entry.path) folder.name = entry.name!;
+      added.add(folder);
+    }
+    // A seção só existe se alguma pasta de fato aponta pra ela: um arquivo
+    // cujas pastas todas sumiram do disco -- ou que só listava pastas que já
+    // eram de outro workspace -- não vira um cabeçalho vazio na lateral.
+    final mine = folders.any((f) => f.workspace == ws.path);
+    if (mine && !workspaces.any((w) => w.path == ws.path)) {
+      workspaces.add(Workspace(path: ws.path, name: ws.name));
+    }
     _save();
-    await refreshGit();
+    if (added.isNotEmpty) await refreshGit();
+    final result = WorkspaceImport(
+      workspace: ws,
+      added: added,
+      already: already,
+      missing: missing,
+    );
+    showBanner(result.summary, sticky: result.sticky);
     notifyListeners();
-    return folder;
+    return result;
   }
 
   void renameFolder(Folder p, String name) {
@@ -712,6 +996,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> removeFolder(Folder p) async {
     folders.remove(p);
+    reconcileWorkspaces();
     projects.removeWhere((pr) => pr.folderRoot == p.root);
     for (final t in tabs.where((t) => t.folderRoot == p.root).toList()) {
       closeTab(t);
@@ -719,6 +1004,97 @@ class AppStore extends ChangeNotifier {
     _save();
     notifyListeners();
   }
+
+  // --- workspaces ---------------------------------------------------------
+
+  /// As pastas de um workspace, na ordem em que a lateral as desenharia.
+  List<Folder> foldersOf(Workspace w) =>
+      folders.where((f) => f.workspace == w.path).toList();
+
+  /// O workspace de uma pasta, se ela tem um.
+  Workspace? workspaceOf(Folder f) => f.workspace == null
+      ? null
+      : workspaces.firstWhereOrNull((w) => w.path == f.workspace);
+
+  /// O que a lateral desenha, de cima pra baixo: um [Workspace] ou uma
+  /// [Folder] solta, na ordem de [folders].
+  ///
+  /// Um workspace entra no lugar da *primeira* pasta dele e leva as outras
+  /// junto -- é o que faz as sete pastas de um cliente aparecerem em bloco sem
+  /// reordenar nada por baixo. A lista de pastas continua sendo a ordem
+  /// verdadeira; isto é só como ela é lida.
+  List<Object> get sidebarRows {
+    final rows = <Object>[];
+    final seen = <String>{};
+    for (final f in folders) {
+      final w = workspaceOf(f);
+      if (w == null) {
+        rows.add(f);
+      } else if (seen.add(w.path)) {
+        rows.add(w);
+      }
+    }
+    return rows;
+  }
+
+  /// Fecha um workspace: as pastas dele saem da lateral, e a seção sai com
+  /// elas.
+  ///
+  /// É a volta exata do import, e o import só adicionou pastas -- nada aqui
+  /// toca o disco. O `.code-workspace` continua onde estava, os repos também,
+  /// e reabrir é o mesmo "adicionar pasta" de antes.
+  ///
+  /// Fechar é o verbo do VS Code, e é o certo: uma pasta *removida* uma a uma
+  /// pelo menu dela é a mesma operação, mas ninguém remove sete pastas
+  /// querendo remover sete pastas -- quer parar de trabalhar naquele cliente.
+  /// Os painéis das pastas fecham junto, como fecham em [removeFolder]; quem
+  /// confirma sabe quantos são, porque o diálogo conta antes.
+  Future<void> closeWorkspace(Workspace w) async {
+    final name = w.name;
+    final going = foldersOf(w);
+    for (final f in going) {
+      await removeFolder(f);
+    }
+    // A seção já saiu junto com a última pasta -- ver [reconcileWorkspaces].
+    showBanner(
+      going.length == 1
+          ? 'workspace "$name" fechado — 1 pasta saiu da lateral'
+          : 'workspace "$name" fechado — ${going.length} pastas saíram da lateral',
+    );
+  }
+
+  void toggleWorkspaceCollapsed(Workspace w) {
+    w.collapsed = !w.collapsed;
+    _save();
+    notifyListeners();
+  }
+
+  /// Acerta as duas metades da ligação entre pasta e seção: toda pasta
+  /// carimbada tem uma seção, e toda seção tem pelo menos uma pasta.
+  ///
+  /// A primeira metade é migração. Uma pasta carimbada por uma build anterior
+  /// à seção -- ou por um config que perdeu a lista -- não tem onde se
+  /// pendurar, e a seção nasce dela com o nome do arquivo; sem isso, quem
+  /// importou um workspace ontem teria que importar de novo pra ver o bloco.
+  ///
+  /// A segunda é limpeza: uma seção vazia não é uma seção, é um cabeçalho
+  /// sobre coisa nenhuma, que nem dobrar dobraria.
+  ///
+  /// Idempotente de propósito -- roda ao ler o config e a cada pasta removida,
+  /// que são os dois momentos em que a ligação pode ter ficado torta.
+  @visibleForTesting
+  void reconcileWorkspaces() {
+    for (final f in folders) {
+      final path = f.workspace;
+      if (path == null || workspaces.any((w) => w.path == path)) continue;
+      workspaces.add(Workspace(path: path, name: CodeWorkspace.nameOf(path)));
+    }
+    workspaces.removeWhere((w) => !folders.any((f) => f.workspace == w.path));
+  }
+
+  /// Se a busca achou alguma coisa nesta seção -- numa sessão de qualquer
+  /// pasta dela.
+  bool hasHitsInWorkspace(Workspace w) => foldersOf(w).any(hasHits);
 
   Future<void> refreshGit() async {
     for (final p in folders) {
@@ -1070,15 +1446,26 @@ class AppStore extends ChangeNotifier {
   /// Da pasta *e das worktrees dela*, porque uma conversa é da worktree em que
   /// aconteceu -- e o trabalho aqui mora em worktree: filtrar só pelo checkout
   /// principal esconderia justamente as conversas de task. A bandeja dos
-  /// avulsos é a exceção e recebe o histórico inteiro: ela é onde se vai
-  /// quando nenhuma das pastas de cima é a resposta, e uma conversa que se
-  /// procura sem saber mais onde rodou é esse caso.
-  Future<List<ChatEntry>> chatsIn(Folder folder) => ChatHistory.read(
-    root: chatHome,
-    cwds: folder.isLoose
-        ? null
-        : [folder.root, ...?worktrees[folder.root]?.map((w) => w.path)],
-  );
+  /// avulsos é a exceção e recebe [allChats]: ela é onde se vai quando nenhuma
+  /// das pastas de cima é a resposta.
+  Future<List<ChatEntry>> chatsIn(Folder folder) => folder.isLoose
+      ? allChats()
+      : ChatHistory.read(
+          root: chatHome,
+          cwds: [folder.root, ...?worktrees[folder.root]?.map((w) => w.path)],
+        );
+
+  /// Todas as conversas, de qualquer pasta.
+  ///
+  /// Não é a soma das [chatsIn] das pastas da lateral: o `~/.claude/projects`
+  /// guarda uma pasta por caminho em que o claude já rodou, e a maior parte
+  /// deles nunca foi adicionada aqui. É essa a pergunta que isto responde --
+  /// "aquela conversa de sexta", sem lembrar em que repo ela foi --, e é por
+  /// isso que ela é da janela e não de uma pasta.
+  ///
+  /// Quem retoma uma delas cai na pasta pelo caminho da própria conversa, e
+  /// nos avulsos quando ele não é de nenhuma das de cima: ver [resumeChat].
+  Future<List<ChatEntry>> allChats() => ChatHistory.read(root: chatHome);
 
   /// De onde as conversas são lidas. Sob teste, as fixtures -- pela mesma
   /// razão de [stateHome]: um `flutter test` que fosse ao `~/.claude` de
@@ -1119,6 +1506,7 @@ class AppStore extends ChangeNotifier {
         showBanner(
           '"${chat.label}" ainda está rodando fora do maestria — '
           'o claude só retoma uma conversa depois que ela sai',
+          sticky: true,
         );
         return null;
       case ChatStanding.gone:
@@ -1126,6 +1514,7 @@ class AppStore extends ChangeNotifier {
           chat.cwd.isEmpty
               ? 'não sei em que pasta "${chat.label}" rodou'
               : 'a pasta dessa conversa não existe mais: ${chat.cwd}',
+          sticky: true,
         );
         return null;
       case ChatStanding.fresh:
@@ -1160,7 +1549,14 @@ class AppStore extends ChangeNotifier {
   /// não picar a janela em quatro. Sem nenhum aberto, o documento entra ao
   /// lado do painel de onde saiu e não em cima dele: quem clica em "ver o
   /// plano" quer o plano *e* a sessão que o escreveu.
-  MxTab showDoc(MxDoc doc, {MxTab? from}) {
+  ///
+  /// [folder] é o lugar de onde o documento veio, quando quem o pediu foi um
+  /// lugar e não um painel -- o botão direito de uma pasta, de um projeto, de
+  /// uma worktree. Sem ele o leitor herdaria a pasta do painel em foco, e um
+  /// `.md` aberto pelo menu de uma pasta apareceria na lateral debaixo de
+  /// outra. [cwd] é a pasta exata quando o lugar não é a raiz dela -- o
+  /// checkout de uma worktree --, e sem ele é a raiz.
+  MxTab showDoc(MxDoc doc, {MxTab? from, Folder? folder, String? cwd, Project? project}) {
     final source = from ?? focusedTab;
     // O que está na tela primeiro; depois um que tenha saído dela -- um leitor
     // que alguém tirou do painel continua sendo *o* leitor, e abrir o próximo
@@ -1178,11 +1574,15 @@ class AppStore extends ChangeNotifier {
       notifyListeners();
       return reading;
     }
+    // O lugar dito manda; sem nenhum, o painel de onde o documento saiu. Nos
+    // dois casos ele entra ao lado do que está em foco -- onde o leitor
+    // *aparece* é uma coisa, de quem ele é é outra.
+    final place = folder != null;
     final tab = _newReader(
       doc,
-      folder: source?.folder ?? focusedFolder,
-      cwd: source?.cwd,
-      project: source == null ? null : projectOf(source),
+      folder: folder ?? source?.folder ?? focusedFolder,
+      cwd: place ? cwd : source?.cwd,
+      project: place ? project : (source == null ? null : projectOf(source)),
     );
     _placeBeside(tab, source);
     _save();
@@ -1232,12 +1632,18 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Um `.md` do disco. O painel relê sozinho enquanto estiver aberto.
-  MxTab? showFile(String path, {MxTab? from}) {
+  MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, Project? project}) {
     if (!File(path).existsSync()) {
-      showBanner('esse arquivo não está mais lá: $path');
+      showBanner('esse arquivo não está mais lá: $path', sticky: true);
       return null;
     }
-    return showDoc(MxDoc.file(path, origin: from?.title), from: from);
+    return showDoc(
+      MxDoc.file(path, origin: from?.title),
+      from: from,
+      folder: folder,
+      cwd: cwd,
+      project: project,
+    );
   }
 
   /// Um link, seguido.
@@ -1256,7 +1662,7 @@ class AppStore extends ChangeNotifier {
     final uri = Uri.tryParse(href);
     if (uri != null && const {'http', 'https', 'mailto'}.contains(uri.scheme)) {
       final ok = await Notifier.openLink(href);
-      if (!ok) showBanner('não consegui abrir $href');
+      if (!ok) showBanner('não consegui abrir $href', sticky: true);
       return;
     }
     // Só a parte que é caminho: a âncora depois do # não é um arquivo, e o
@@ -1265,7 +1671,7 @@ class AppStore extends ChangeNotifier {
     if (path.isEmpty) return;
     final target = resolveLinkPath(path, base: base ?? from?.cwd);
     if (!File(target).existsSync()) {
-      showBanner('esse link aponta pra um arquivo que não existe: $target');
+      showBanner('esse link aponta pra um arquivo que não existe: $target', sticky: true);
       return;
     }
     if (readable(target)) {
@@ -1286,11 +1692,20 @@ class AppStore extends ChangeNotifier {
   ///
   /// Não filtra por extensão de propósito: o painel nativo já só oferece texto,
   /// e um `.txt` que alguém escolheu é um `.txt` que alguém quis ler.
-  Future<void> openMarkdown({MxTab? from}) async {
-    final tab = from ?? focusedTab;
-    final picked = await Notifier.chooseMarkdown(startIn: tab?.cwd ?? focusedFolder.root);
+  ///
+  /// Quem pede é um *lugar*: o botão direito de uma pasta, de um projeto, de
+  /// uma worktree -- ver `openHereItems`. Um markdown mora numa pasta, e era o
+  /// menu do painel que oferecia isso: o painel nativo abria na pasta da
+  /// sessão em que você clicou, que quase nunca é a do arquivo que se quer
+  /// ler. Sem lugar dito -- pelo atalho de teclado -- ainda é o painel em foco
+  /// quem diz onde procurar, porque ali não há outro lugar a que se referir.
+  Future<void> openMarkdown({Folder? folder, String? cwd, Project? project}) async {
+    final tab = folder == null ? focusedTab : null;
+    final picked = await Notifier.chooseMarkdown(
+      startIn: cwd ?? folder?.root ?? tab?.cwd ?? focusedFolder.root,
+    );
     if (picked == null) return;
-    showFile(picked, from: tab);
+    showFile(picked, from: tab, folder: folder, cwd: cwd, project: project);
   }
 
   /// O documento que o leitor está mostrando agora, se há um leitor na tela.
@@ -1337,38 +1752,55 @@ class AppStore extends ChangeNotifier {
   bool get writingReport => _writingReport;
   bool _writingReport = false;
 
-  /// O dia, reunido e contado de volta, num painel de leitura.
+  /// Um dia, reunido e contado de volta, num painel de leitura.
   ///
   /// O material é levantado aqui -- commits, worktrees sujas, as sessões desta
   /// janela -- e só a prosa é pedida ao Claude; ver [DailyReport]. Quando não
   /// dá, o painel abre com o material bruto e o motivo em cima dele: um
   /// resumo que não deu pra escrever ainda tem o dia inteiro dentro.
-  Future<void> openDailyReport() async {
+  ///
+  /// Sem [day] é hoje. Com um dia que já passou o material muda de fonte: os
+  /// painéis desta janela não são de lá, então o que rodou vem dos transcripts
+  /// que o próprio Claude Code arquiva -- ver [ChatHistory.read] --, e o que
+  /// estava sem commitar naquele dia não vem, porque não existe onde procurar.
+  Future<void> openDailyReport({DateTime? day}) async {
     if (_writingReport) return;
+    final at = DateTime.now();
+    final which = day ?? at;
+    final today = DailyReport.sameDay(which, at);
+    final named = DailyReport.label(which, now: at);
     _writingReport = true;
-    showBanner('relatório do dia: reunindo o material e pedindo a prosa ao claude…');
+    showBanner('relatório $named: reunindo o material e pedindo a prosa ao claude…');
     try {
       final material = await DailyReport.material(
         folders: folders,
         worktrees: worktrees,
         projects: projects,
+        day: which,
+        now: at,
         // Um leitor não é uma sessão: não rodou nada, não mexeu em nada e não
         // tem o que reportar sobre o dia.
+        //
+        // Num relatório de outro dia sobram os painéis abertos *naquele* dia
+        // -- raro, mas honesto: uma sessão de sexta que ainda está de pé é uma
+        // sessão de sexta. Os de hoje não entram num relatório de ontem.
         sessions: [
           for (final t in tabs)
-            if (!t.isReader) _noteOf(t),
+            if (!t.isReader && (today || DailyReport.sameDay(t.startedAt, which))) _noteOf(t),
         ],
+        chats: today ? const [] : await _chatsOn(which),
       );
-      final outcome = await DailyReport.ask(material);
+      final outcome = await DailyReport.ask(material, day: which, now: at);
       showBanner(
         outcome.ok
-            ? 'relatório do dia pronto'
+            ? 'relatório $named pronto'
             : 'não deu pra escrever o relatório — abri o material bruto',
+        sticky: !outcome.ok,
       );
       showDoc(
         MxDoc(
           source: DocSource.report,
-          title: 'relatório do dia',
+          title: 'relatório $named',
           text: outcome.ok
               ? outcome.text
               : '# o relatório não saiu\n\n${outcome.text}\n\n---\n\n${outcome.material}',
@@ -1379,6 +1811,15 @@ class AppStore extends ChangeNotifier {
       _writingReport = false;
       notifyListeners();
     }
+  }
+
+  /// As conversas daquele dia, achatadas no que o relatório sabe ler.
+  Future<List<ArchivedChat>> _chatsOn(DateTime day) async {
+    final chats = await ChatHistory.read(on: day);
+    return [
+      for (final c in chats)
+        ArchivedChat(title: c.title, folder: c.where, at: c.at, size: c.size),
+    ];
   }
 
   /// Um painel, achatado no que o relatório sabe ler.
@@ -1420,7 +1861,7 @@ class AppStore extends ChangeNotifier {
       branch: branch,
       baseRef: base,
     );
-    showBanner(outcome.message);
+    showBanner(outcome.message, sticky: !outcome.ok);
     if (!outcome.ok) return null;
 
     if (setupCommand != null && setupCommand.trim().isNotEmpty) {
@@ -1438,9 +1879,21 @@ class AppStore extends ChangeNotifier {
   /// session is one you go back to, not one you open twice.
   MxTab? tabAt(String path) => tabs.firstWhereOrNull((t) => t.cwd == path && !t.exited);
 
+  /// O que abrir no vscode quando o alvo é uma pasta da lateral: o workspace
+  /// Uma pasta -- ou o `.code-workspace` de uma, que é um arquivo.
+  ///
+  /// Só o caminho: havia um `openFolderInEditor` que, dada uma pasta importada
+  /// de um workspace, abria o arranjo inteiro em vez do terço dela. Ele tinha
+  /// uma porta só -- a linha 'abrir no vscode' do menu da pasta --, e a linha
+  /// saiu do menu. Ver [Folder.workspace], que é o que sobrou do assunto.
   Future<void> openInEditor(String path) async {
-    if (!Directory(path).existsSync()) {
-      showBanner('essa pasta não existe mais: $path');
+    if (!Directory(path).existsSync() && !File(path).existsSync()) {
+      showBanner(
+        CodeWorkspace.looksLikeOne(path)
+            ? 'esse workspace não está mais lá: $path'
+            : 'essa pasta não existe mais: $path',
+        sticky: true,
+      );
       return;
     }
     final ok = await Editor.open(path);
@@ -1448,6 +1901,7 @@ class AppStore extends ChangeNotifier {
       ok
           ? 'aberto no vscode: ${path.split('/').last}'
           : 'não achei o vscode — nem o `code` no PATH, nem o app',
+      sticky: !ok,
     );
   }
 
@@ -1463,7 +1917,7 @@ class AppStore extends ChangeNotifier {
     bool deleteBranch = false,
   }) async {
     if (tabAt(w.path) != null) {
-      showBanner('feche o painel que está nessa worktree antes de excluí-la');
+      showBanner('feche o painel que está nessa worktree antes de excluí-la', sticky: true);
       return;
     }
     final outcome = await Git.removeWorktree(
@@ -1472,13 +1926,13 @@ class AppStore extends ChangeNotifier {
       force: force,
       deleteBranch: deleteBranch,
     );
-    showBanner(outcome.message);
+    showBanner(outcome.message, sticky: !outcome.ok);
     await refreshGit();
   }
 
   Future<void> pruneWorktrees(Folder p) async {
     final outcome = await Git.prune(p.root);
-    showBanner(outcome.message);
+    showBanner(outcome.message, sticky: !outcome.ok);
     await refreshGit();
   }
 
@@ -1492,9 +1946,11 @@ class AppStore extends ChangeNotifier {
       // own buffer.
       final alive = DateTime.now().difference(tab.startedAt);
       if (tab.kind == TabKind.claude && alive.inSeconds < 5) {
-        banner =
-            '${tab.title}: o claude saiu na largada '
-            '(código ${tab.term.exitCode ?? '?'}) — abra o painel pra ver o motivo';
+        showBanner(
+          '${tab.title}: o claude saiu na largada '
+          '(código ${tab.term.exitCode ?? '?'}) — abra o painel pra ver o motivo',
+          sticky: true,
+        );
       }
       _save();
       notifyListeners();
@@ -1573,7 +2029,7 @@ class AppStore extends ChangeNotifier {
   /// Encerra: mata o processo e apaga o painel da lateral. Para só limpar a
   /// tela, [dismiss].
   void closeTab(MxTab tab) {
-    tab.pendingFollowUp?.cancel();
+    tab.armed = false;
     // Sem await de propósito: [TermSession.kill] espera o hangup ser atendido
     // antes de escalar, e a tela não tem nada a ganhar parada esperando por
     // isso. O painel sai da lateral agora; o processo termina de morrer
@@ -1594,20 +2050,33 @@ class AppStore extends ChangeNotifier {
     if (tab != null) closeTab(tab);
   }
 
-  /// Fecha de uma vez o que já não pede nada de você: o painel cujo processo
-  /// saiu -- que empilha rápido enquanto se experimenta coisas -- e o que você
-  /// marcou como concluído.
+  /// Fecha de uma vez o que você declarou resolvido: os concluídos, e só.
   ///
   /// [MxTab.done] sozinho nunca fecha nada -- marcar é um juízo, não um
   /// descarte, e o painel fica com o scrollback e a sessão pra reler ou
   /// retomar. Mas quando você pede a varrida, está dizendo justamente que
   /// terminou com essa leva; deixar de fora os concluídos obrigaria a fechar
   /// um por um exatamente os painéis que você já declarou resolvidos.
-  void closeSettled(Folder p) {
-    for (final t in tabsOf(p).where((t) => t.exited || t.done).toList()) {
+  ///
+  /// O painel encerrado já foi junto e não vai mais. Ele empilha rápido, o que
+  /// era o argumento -- mas um processo que saiu não é um trabalho acabado, é
+  /// um `q` apertado sem querer ou um comando que morreu, e desde que o
+  /// cabeçalho ganhou o botão de subir de novo ([relaunch]) ele é justamente
+  /// um painel *esperando* pra rodar outra vez. Varrer isso é uma vassoura que
+  /// leva o que você ia usar. Fechar continua a um clique no x da linha.
+  ///
+  /// Devolve quantos fechou, pro chamador poder dizer o que a varrida levou.
+  int closeSettled(Folder p) {
+    final settled = tabsOf(p).where((t) => t.done).toList();
+    for (final t in settled) {
       closeTab(t);
     }
+    return settled.length;
   }
+
+  /// Quantos painéis de [p] a varrida levaria: é o que decide se o "limpar"
+  /// da régua tem o que fazer. Ver [closeSettled].
+  int settledIn(Folder p) => tabsOf(p).where((t) => t.done).length;
 
   void renameTab(MxTab tab, String label) {
     tab.customLabel = label;
@@ -1632,8 +2101,7 @@ class AppStore extends ChangeNotifier {
     tab.done = done;
     var dropped = 0;
     if (done) {
-      tab.pendingFollowUp?.cancel();
-      tab.pendingFollowUp = null;
+      tab.armed = false;
       dropped = tab.followUps.length;
       tab.followUps.clear();
     }
@@ -1667,6 +2135,20 @@ class AppStore extends ChangeNotifier {
   }
 
   // --- grupos de painéis --------------------------------------------------
+
+  /// Se a régua dos grupos está dobrada, escondendo as linhas dela.
+  ///
+  /// Mora aqui e não numa [Folder] porque a bandeja dos grupos não é pasta
+  /// nenhuma -- ver [PaneGroup] --, e é lembrada pelo mesmo motivo que
+  /// [sidebarWidth]: é uma escolha de como a janela fica arrumada, e quem a
+  /// fez uma vez a fez pra valer.
+  bool groupsCollapsed = false;
+
+  void toggleGroupsCollapsed() {
+    groupsCollapsed = !groupsCollapsed;
+    _save();
+    notifyListeners();
+  }
 
   /// Guarda o arranjo que está na tela como um grupo chamado [name]. Ver
   /// [PaneGroup].
@@ -1865,6 +2347,27 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Esquece todos os grupos de uma vez -- o "limpar" da régua dos grupos.
+  ///
+  /// Não fecha nem move painel nenhum, como [removeGroup]: o que se apaga é a
+  /// lista de arranjos guardados, e a tela de agora continua exatamente como
+  /// está. As marcas saem junto, como no [ungroup]: um painel lavado da cor de
+  /// um grupo que já não existe seria uma cor que não aponta pra lugar nenhum.
+  ///
+  /// Devolve quantos foram esquecidos, que é o que a janela tem pra dizer:
+  /// nada mais mudou de lugar pra mostrar o que aconteceu.
+  int clearGroups() {
+    final gone = groups.length;
+    if (gone == 0) return 0;
+    for (final g in groups) {
+      _stamp(g, const []);
+    }
+    groups.clear();
+    _save();
+    notifyListeners();
+    return gone;
+  }
+
   /// Põe o arranjo do grupo na tela: os painéis dele, cortados como estavam.
   ///
   /// O que estava na tela e não está no grupo sai dela sem morrer, que é o que
@@ -1889,7 +2392,7 @@ class AppStore extends ChangeNotifier {
 
     final first = panels.nonNulls.firstOrNull;
     if (first == null) {
-      showBanner('o grupo "${group.name}" não tem mais nenhum painel pra abrir');
+      showBanner('o grupo "${group.name}" não tem mais nenhum painel pra abrir', sticky: true);
       return;
     }
     panes =
@@ -1979,6 +2482,61 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Você está olhando pra [tab] agora?
+  ///
+  /// As três condições são as três de verdade: a janela na frente, o painel na
+  /// tela, e o teclado nele. Numa grade de cinco todos estão na tela, e é o
+  /// foco que separa o que você está lendo dos quatro no canto do olho -- sem
+  /// ele, voltar pra janela marcaria os cinco como vistos de uma vez, que é
+  /// exatamente o estado de que [MxTab.unseen] veio nos tirar.
+  bool watching(MxTab tab) =>
+      windowActive && focusedPaneId == tab.id && Panes.has(panes, tab.id);
+
+  /// Dá por visto o painel em foco. Chamado pelo relógio de um segundo.
+  ///
+  /// Pelo relógio, e não de dentro de cada lugar que mexe no foco, por duas
+  /// razões: `focusedPaneId` é escrito em oito lugares e um deles vai ser
+  /// esquecido, e um segundo parado em cima do painel é uma definição mais
+  /// honesta de "vi" do que um ⌘→ que passou por ele a caminho do próximo.
+  @visibleForTesting
+  bool seeFocused() {
+    final tab = _byId(focusedPaneId);
+    if (tab == null || !tab.unseen || !watching(tab)) return false;
+    tab.unseen = false;
+    notifyListeners();
+    return true;
+  }
+
+  /// A janela ganhou ou perdeu a frente.
+  ///
+  /// A volta é o momento da pergunta que isto tudo responde -- "o que mudou
+  /// enquanto eu estava fora" --, e ela tem resposta exata: os painéis que
+  /// pararam depois de você sair. Só esses entram na conta, senão a faixa
+  /// viraria um lembrete de pendência velha toda vez que você troca de app.
+  void setWindowActive(bool active) {
+    if (windowActive == active) return;
+    windowActive = active;
+    if (!active) {
+      _awaySince = DateTime.now();
+      notifyListeners();
+      return;
+    }
+    final since = _awaySince;
+    _awaySince = null;
+    final landed = since == null
+        ? const <MxTab>[]
+        : [
+            for (final t in tabs)
+              if (t.unseen && t.restedAt != null && t.restedAt!.isAfter(since)) t,
+          ];
+    if (landed.length == 1) {
+      showBanner('${landed.first.title} terminou enquanto você estava fora');
+    } else if (landed.length > 1) {
+      showBanner('${landed.length} painéis terminaram enquanto você estava fora');
+    }
+    notifyListeners();
+  }
+
   /// Passa o foco pro painel seguinte na tela, ou pro anterior.
   void cyclePane(int delta) {
     final order = Panes.order(panes);
@@ -2015,12 +2573,30 @@ class AppStore extends ChangeNotifier {
 
   int needingHuman(Folder p) => tabsOf(p).where((t) => !t.done && t.status.needsHuman).length;
 
-  void showBanner(String text) {
+  /// Quanto tempo um recado fica na tela antes de sair sozinho.
+  ///
+  /// Longo o bastante pra ser lido sem pressa, curto o bastante pra não virar
+  /// mobília: a faixa some antes que você pare de notar que ela está lá.
+  static const bannerLife = Duration(seconds: 6);
+
+  Timer? _bannerTimer;
+
+  /// Um recado na faixa flutuante, por [bannerLife].
+  ///
+  /// [sticky] é pra quando o recado é a única notícia de uma coisa que deu
+  /// errado: um arquivo que sumiu, uma sessão que morreu na largada. Esses
+  /// esperam o clique — some sozinho o que só confirma o que você acabou de
+  /// mandar fazer.
+  void showBanner(String text, {bool sticky = false}) {
     banner = text;
+    _bannerTimer?.cancel();
+    _bannerTimer = sticky ? null : Timer(bannerLife, clearBanner);
     notifyListeners();
   }
 
   void clearBanner() {
+    _bannerTimer?.cancel();
+    _bannerTimer = null;
     banner = null;
     notifyListeners();
   }
@@ -2053,9 +2629,19 @@ class AppStore extends ChangeNotifier {
     if (tab.hooks.touched.length != producedBefore) _save();
     // The edge, not the state: `Stop` is the only event that reaches idle, but
     // a second one arriving while the panel is already idle must not spend
-    // another step.
-    if (before != ClaudeStatus.idle && tab.hooks.status == ClaudeStatus.idle) {
-      advance(tab);
+    // another step. Armar não é disparar -- quem escolhe a hora é [pumpFlows],
+    // e o fim do turno é só o primeiro dos requisitos dela.
+    if (!before.atRest && tab.hooks.status.atRest) {
+      if (tab.followUps.isNotEmpty) tab.armed = true;
+      // A mesma virada responde "terminou quando" e "você viu?". Ver
+      // [MxTab.restedAt] e [MxTab.unseen].
+      tab.restedAt = DateTime.now();
+      tab.unseen = !watching(tab);
+    } else if (before.atRest && !tab.hooks.status.atRest) {
+      // Voltou a trabalhar: a parada de antes deixou de ser a parada dela, e
+      // uma novidade que você não viu não pode sobreviver ao turno seguinte.
+      tab.restedAt = null;
+      tab.unseen = false;
     }
     _checkAlerts();
     notifyListeners();
@@ -2065,11 +2651,137 @@ class AppStore extends ChangeNotifier {
 
   /// Arm [tab] with what to do when it next goes quiet, replacing whatever
   /// was queued.
-  void queue(MxTab tab, List<FollowUp> steps) {
+  ///
+  /// [now] é pra fila armada sobre uma sessão que *já* está parada: sem ela o
+  /// primeiro passo esperaria um turno que talvez não venha mais, porque o
+  /// gatilho é a *virada* pra ocioso e ela já passou. É o que separa "arma
+  /// isso pra quando ela terminar" de "toca isso agora".
+  void queue(MxTab tab, List<FollowUp> steps, {bool now = false}) {
     tab.followUps
       ..clear()
       ..addAll(steps);
+    tab.armed = steps.isNotEmpty && (now || tab.armed);
     notifyListeners();
+  }
+
+  /// Abre uma sessão já com um fluxo pendurado nela.
+  ///
+  /// O fluxo que não precisa de painel nenhum pra existir: o primeiro passo é
+  /// a própria sessão -- o prompt com que ela nasce --, e a fila fica armada
+  /// desde antes de ela dar o primeiro sinal de vida. Sem isto todo fluxo
+  /// começava por um painel que você tinha que abrir e mandar trabalhar à
+  /// mão, o que é justamente a parte que não precisava de você.
+  MxTab startFlow({
+    required Folder folder,
+    required String prompt,
+    required List<FollowUp> steps,
+    String? cwd,
+    String? label,
+    Project? project,
+  }) {
+    final tab = openClaude(
+      folder,
+      cwd: cwd ?? folder.root,
+      label: label,
+      project: project,
+      prompt: prompt,
+    );
+    queue(tab, steps);
+    showBanner(
+      steps.isEmpty
+          ? '${tab.title}: sessão aberta'
+          : '${tab.title}: fluxo de ${steps.length} '
+                '${steps.length == 1 ? 'passo' : 'passos'} armado',
+    );
+    return tab;
+  }
+
+  /// [tab] nasceu de [root], ou de algo que nasceu dele? Ver [MxTab.bornOf].
+  bool descendsFrom(MxTab tab, MxTab root) {
+    var up = _byId(tab.bornOf);
+    // Um fluxo que abre uma sessão que abre outra é uma linhagem, não um
+    // ciclo -- mas o teto é mais barato que a confiança.
+    for (var depth = 0; up != null && depth < 8; depth++) {
+      if (up.id == root.id) return true;
+      up = _byId(up.bornOf);
+    }
+    return false;
+  }
+
+  /// Pendura [child] em [parent]: o painel que um passo de fluxo abriu é filho
+  /// da sessão de onde o passo saiu.
+  ///
+  /// Mexer na lista é parte do vínculo, não enfeite: ela é a ordem da lateral
+  /// *e* a numeração do ⌘1..9, e um filho nascido no fim dela apareceria a
+  /// cinco linhas de quem o abriu. Ele entra atrás dos irmãos que já nasceram,
+  /// que é a ordem em que o fluxo os produziu.
+  void _descend(MxTab child, MxTab parent) {
+    child.bornOf = parent.id;
+    var at = tabs.indexOf(parent);
+    final from = tabs.indexOf(child);
+    if (at < 0 || from < 0) return;
+    while (at + 1 < tabs.length && at + 1 != from && descendsFrom(tabs[at + 1], parent)) {
+      at++;
+    }
+    if (from != at + 1) {
+      tabs.removeAt(from);
+      tabs.insert(at + 1, child);
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// O que ainda segura o próximo passo de [tab]. [FlowHold.go] é "nada".
+  ///
+  /// O fim do turno era o critério inteiro, e ele é fraco por duas razões que
+  /// custaram fluxo disparado cedo:
+  ///
+  ///  * uma sessão que larga dois agentes em segundo plano manda `Stop` na
+  ///    hora e fica ociosa enquanto eles trabalham -- ver [HookState.forksOut];
+  ///  * ociosa por um instante entre duas coisas continua sendo ociosa, e o
+  ///    `Stop` não distingue o fim do trabalho de uma pausa dentro dele.
+  ///
+  /// Daí as duas condições além do turno: nenhum fork em aberto, e
+  /// [flowQuiet] de silêncio -- silêncio de tudo, porque evento de fork
+  /// também passa por aqui e adia a conta. [flowPatience] é a válvula: um
+  /// fork que nunca avisa que terminou não pode segurar a fila pra sempre.
+  ///
+  /// Público porque o editor de fluxo mostra a resposta: uma fila que está
+  /// esperando é indistinguível de uma que não vai disparar, e a diferença
+  /// entre as duas é a única coisa que se quer saber ali.
+  FlowHold holdFor(MxTab tab, {DateTime? at}) {
+    if (tab.exited || !tab.status.atRest) return FlowHold.working;
+    final last = tab.hooks.lastEventAt;
+    final silence = last == null
+        ? flowPatience
+        : (at ?? DateTime.now()).difference(last);
+    if (silence >= flowPatience) return FlowHold.go;
+    if (tab.hooks.busyForks) return FlowHold.forks;
+    return silence >= flowQuiet ? FlowHold.go : FlowHold.quiet;
+  }
+
+  /// Quanto tempo sem sinal nenhum -- da sessão ou dos agentes dela -- conta
+  /// como ter parado de verdade.
+  @visibleForTesting
+  static const flowQuiet = Duration(seconds: 5);
+
+  /// Até quando esperar um agente que não avisou que terminou.
+  ///
+  /// Uma fila que não dispara é pior que uma que dispara tarde: ela some sem
+  /// dizer nada. Passado isto o passo sai, e o aviso diz que saiu sem a
+  /// confirmação de todo mundo.
+  @visibleForTesting
+  static const flowPatience = Duration(minutes: 3);
+
+  /// Um passo de cada painel armado que já pode dar o próximo. O relógio de um
+  /// segundo de [init] é quem chama.
+  @visibleForTesting
+  void pumpFlows() {
+    for (final tab in [...tabs]) {
+      if (!tab.armed || tab.exited || tab.followUps.isEmpty) continue;
+      if (holdFor(tab) != FlowHold.go) continue;
+      advance(tab);
+    }
   }
 
   /// Spend the next queued step, if there is one.
@@ -2081,22 +2793,41 @@ class AppStore extends ChangeNotifier {
   void advance(MxTab tab) {
     if (tab.exited || tab.followUps.isEmpty) return;
     final step = tab.followUps.removeAt(0);
-    // `Stop` fires when the turn ends, which is a beat before the prompt is
-    // back and taking input. Handing it text in that gap loses the text.
-    tab.pendingFollowUp?.cancel();
-    tab.pendingFollowUp = Timer(followUpDelay, () => runFollowUp(step, from: tab));
+    // Só o passo que devolve o turno pra esta sessão faz o seguinte esperar
+    // outro: os outros três acontecem fora dela e a deixam parada do mesmo
+    // jeito, então a fila segue andando sozinha -- ver [FollowUpKindUi.handsBack].
+    // Sem isso um fluxo que começasse por um comando parava no primeiro passo,
+    // esperando pra sempre um turno que não vinha mais.
+    tab.armed = !step.kind.handsBack && tab.followUps.isNotEmpty;
+    // Chegar aqui com fork em aberto é a paciência tendo estourado (ver
+    // [holdFor]): a conta é dada por perdida, senão o resto da fila sairia
+    // avisando de novo, passo a passo, do mesmo agente que não respondeu. Um
+    // que volte a dar sinal segura o próximo passo outra vez, que é o certo.
+    final late = tab.hooks.busyForks;
+    if (late) {
+      tab.hooks.forkIds.clear();
+      tab.hooks.forksOut = 0;
+    }
+    unawaited(runFollowUp(step, from: tab, late: late));
     notifyListeners();
   }
 
-  /// How long after a session goes quiet a queued step is delivered.
-  @visibleForTesting
-  static const followUpDelay = Duration(milliseconds: 700);
-
   /// Carry out one step. See [FollowUpKind] for what each one means.
+  ///
+  /// [late] diz que a paciência com os agentes em aberto acabou antes de eles
+  /// terminarem: o passo sai mesmo assim, e o aviso conta isso -- é a única
+  /// chance de você saber que o fluxo pode ter visto trabalho pela metade.
   @visibleForTesting
-  Future<void> runFollowUp(FollowUp step, {required MxTab from}) async {
+  Future<void> runFollowUp(FollowUp step, {required MxTab from, bool late = false}) async {
     if (!tabs.contains(from)) return;
     final project = projectOf(from);
+    if (late) {
+      showBanner(
+        '${from.title}: os agentes dela não avisaram que terminaram — '
+        'o fluxo seguiu assim mesmo',
+        sticky: true,
+      );
+    }
 
     switch (step.kind) {
       case FollowUpKind.keepGoing:
@@ -2112,11 +2843,16 @@ class AppStore extends ChangeNotifier {
           project: project,
           prompt: step.text,
         );
+        _descend(tab, from);
         showBanner('${from.title} terminou — abri ${tab.title} em seguida');
 
       case FollowUpKind.command:
         final shell = openShell(from.folder, cwd: from.cwd, command: step.text, project: project);
-        shell.customLabel = '${from.title} ▸ depois';
+        // O comando, e não "X ▸ depois": dois passos de comando do mesmo fluxo
+        // viravam duas linhas com o nome idêntico, e de onde elas vieram agora
+        // quem diz é a lateral, que as pendura embaixo de quem as abriu.
+        shell.customLabel = shellLabel(step.text);
+        _descend(shell, from);
         showBanner('${from.title} terminou — rodando ${step.text}');
 
       case FollowUpKind.handoff:
@@ -2125,12 +2861,22 @@ class AppStore extends ChangeNotifier {
         // worth saying, because a handoff quietly not happening is the one
         // failure you would never notice.
         if (target == null || target.exited) {
-          showBanner('${from.title} terminou, mas o painel que ia receber não está mais aberto');
+          showBanner(
+            '${from.title} terminou, mas o painel que ia receber não está mais aberto',
+            sticky: true,
+          );
           return;
         }
         await target.term.submit(handoffText(from, step.text));
         showBanner('${from.title} passou a bola pra ${target.title}');
     }
+  }
+
+  /// O nome do painel que roda um comando: o comando, numa linha.
+  @visibleForTesting
+  static String shellLabel(String command) {
+    final one = command.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return one.length <= 28 ? one : '${one.substring(0, 27).trimRight()}…';
   }
 
   /// What one panel says to the next.
@@ -2228,19 +2974,29 @@ class AppStore extends ChangeNotifier {
 
   /// Cancela o que a sessão ainda ia fazer e desliga a linha.
   Future<void> _end(MxTab tab) {
-    tab.pendingFollowUp?.cancel();
+    tab.armed = false;
     return tab.term.kill();
+  }
+
+  /// Depois do fim, ninguém mais é avisado -- ver [_gone]. O `super` estoura
+  /// nesse caso, e quem chegou atrasado não tem como saber que chegou.
+  @override
+  void notifyListeners() {
+    if (_gone) return;
+    super.notifyListeners();
   }
 
   @override
   void dispose() {
+    _gone = true;
     // A write that was still waiting out its debounce has nothing left to
     // write about: the panels it would describe are being killed right here.
     _saveDebounce?.cancel();
+    _bannerTimer?.cancel();
     agents.stop();
     hooks.stop();
     for (final t in tabs) {
-      t.pendingFollowUp?.cancel();
+      t.armed = false;
       // Nada de await aqui: este é o caminho sem futuro nenhum pra rodar
       // depois dele. O hangup sai; quem escala é [shutdown].
       t.term.hangUp();

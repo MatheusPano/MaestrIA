@@ -7,12 +7,18 @@ import 'package:flutter/material.dart';
 
 import 'services/store.dart';
 import 'theme.dart';
+import 'ui/icons.dart';
 import 'ui/keys.dart';
 import 'ui/panel.dart';
 import 'ui/panes.dart';
 import 'ui/sidebar.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Compila os svgs antes do primeiro quadro. Sem isto a marca do claude, que
+  // é o desenho mais repetido da lista, chega um quadro depois da linha em que
+  // mora -- e a lista inteira pisca ao abrir. Ver [MxIcon.warm].
+  MxIcon.warm();
   runApp(const MaestriaApp());
 }
 
@@ -39,7 +45,14 @@ class _MaestriaAppState extends State<MaestriaApp> {
     // `TermSession.kill`) e nada manda o hangup por nós. Sem isto, todo
     // painel que estava aberto ao sair vira um `claude` órfão rodando pra
     // sempre, um por vez que o app foi usado.
-    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
+    // O foco da janela, que é a outra metade de "parou sem você ver": um
+    // painel que termina com a janela atrás do navegador é notícia, e o mesmo
+    // painel terminando na sua frente não é. Ver [AppStore.setWindowActive].
+    _lifecycle = AppLifecycleListener(
+      onExitRequested: _onExitRequested,
+      onResume: () => store.setWindowActive(true),
+      onInactive: () => store.setWindowActive(false),
+    );
     store.init();
   }
 
@@ -79,36 +92,54 @@ class _MaestriaAppState extends State<MaestriaApp> {
                 // window shows is a card on the canvas; this is the canvas.
                 child: Padding(
                   padding: const EdgeInsets.all(Mx.gap),
-                  child: Column(
-                    // The banner spans the whole window; only the row of
-                    // panels above it is split.
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: LayoutBuilder(
-                          // The stored width is a wish, not a promise: a window
-                          // narrow enough would otherwise leave the panes with
-                          // negative space to lay out in.
-                          builder: (context, box) => Row(
+                  child: LayoutBuilder(
+                    // The stored width is a wish, not a promise: a window
+                    // narrow enough would otherwise leave the panes with
+                    // negative space to lay out in.
+                    builder: (context, box) => Row(
+                      children: [
+                        SizedBox(
+                          width: store.sidebarWidth.clamp(
+                            AppStore.minSidebar,
+                            (box.maxWidth - 280).clamp(AppStore.minSidebar, double.infinity),
+                          ),
+                          child: Sidebar(store: store),
+                        ),
+                        _SidebarGrip(store: store),
+                        Expanded(
+                          // O recado flutua por cima dos painéis em vez de ser
+                          // uma faixa embaixo deles. Como filho da Column ele
+                          // roubava altura da fileira inteira ao aparecer, e
+                          // `terminal.onResize` manda isso pro pty: um
+                          // "caminho copiado" reformatava treze sessões, e
+                          // reformatava de novo ao sumir.
+                          child: Stack(
                             children: [
-                              SizedBox(
-                                width: store.sidebarWidth.clamp(
-                                  AppStore.minSidebar,
-                                  (box.maxWidth - 280).clamp(AppStore.minSidebar, double.infinity),
+                              PaneArea(store: store),
+                              if (store.banner != null)
+                                Positioned(
+                                  // Os dois lados presos: um Positioned só com
+                                  // `right` deixa a largura sem teto, e um
+                                  // Text sem teto não sabe onde quebrar.
+                                  left: Mx.gap,
+                                  right: Mx.gap,
+                                  bottom: Mx.gap,
+                                  child: Align(
+                                    alignment: Alignment.bottomRight,
+                                    child: _Banner(
+                                      // A chave é o texto: recado novo é
+                                      // widget novo, e a entrada roda de novo
+                                      // em vez de trocar as letras em silêncio.
+                                      key: ValueKey(store.banner),
+                                      store: store,
+                                    ),
+                                  ),
                                 ),
-                                child: Sidebar(store: store),
-                              ),
-                              _SidebarGrip(store: store),
-                              Expanded(child: PaneArea(store: store)),
                             ],
                           ),
                         ),
-                      ),
-                      if (store.banner != null) ...[
-                        const SizedBox(height: Mx.gap),
-                        _Banner(store: store),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -199,29 +230,51 @@ class _Keys extends StatelessWidget {
   }
 }
 
+/// O recado da janela: um cartão no canto de baixo, por [AppStore.bannerLife].
+///
+/// Encolhe pro tamanho do texto — `mainAxisSize.min` — porque um "caminho
+/// copiado" numa faixa de ponta a ponta era uma barra de status anunciando um
+/// clique. O teto de 460 é onde as frases longas quebram em duas linhas em vez
+/// de atravessar a área de painéis.
 class _Banner extends StatelessWidget {
-  const _Banner({required this.store});
+  const _Banner({super.key, required this.store});
   final AppStore store;
 
   @override
   Widget build(BuildContext context) {
-    return MxPanel(
-      color: Mx.bgActive,
-      radius: 8,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          children: [
-            Icon(Icons.info_outline, size: 14, color: Mx.fgDim),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(store.banner!, style: TextStyle(fontSize: 11.5, color: Mx.fgDim)),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        builder: (context, t, child) => Opacity(
+          opacity: t,
+          // Sobe os últimos pixels ao entrar: o recado vem de fora da janela,
+          // não aparece do nada em cima do painel.
+          child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: child),
+        ),
+        child: MxPanel(
+          color: Mx.bgActive,
+          radius: 8,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Mx.fgDim),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(store.banner!, style: TextStyle(fontSize: 11.5, color: Mx.fgDim)),
+                ),
+                const SizedBox(width: 10),
+                InkWell(
+                  onTap: store.clearBanner,
+                  child: Icon(Icons.close, size: 13, color: Mx.fgFaint),
+                ),
+              ],
             ),
-            InkWell(
-              onTap: store.clearBanner,
-              child: Icon(Icons.close, size: 13, color: Mx.fgFaint),
-            ),
-          ],
+          ),
         ),
       ),
     );

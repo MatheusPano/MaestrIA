@@ -51,6 +51,15 @@ class MxKeys {
           return;
         }
         showNewTask(context, store, folder, project: store.focusedProject);
+      case MxAction.renamePane:
+        // O painel em foco é o objeto da frase: sem nenhum não há o que
+        // renomear, e o banner diz isso em vez de abrir um diálogo vazio.
+        final focused = store.focusedTab;
+        if (focused == null) {
+          store.showBanner('nenhum painel em foco pra renomear');
+          return;
+        }
+        showRenamePanel(context, store, focused);
       case MxAction.closePane:
         store.closeFocused();
       case MxAction.closeSettled:
@@ -69,6 +78,12 @@ class MxKeys {
         SidebarSearch.reveal();
       case MxAction.openMarkdown:
         store.openMarkdown();
+      // --- ditado (vocalização) — fora desta versão --------------------------
+      // Ver o cabeçalho de `services/dictation.dart`.
+      // case MxAction.dictate:
+        // // Sem `await`: o gesto é o toque, e quem espera a transcrição é o
+        // // cabeçalho do painel, que já está desenhando "ouvindo…".
+        // store.toggleDictation();
       case MxAction.readPlan:
         // Sem sessão em foco não há plano de quem: o leitor não é um lugar
         // onde se escolhe um plano, é onde um plano é lido.
@@ -85,7 +100,7 @@ class MxKeys {
       case MxAction.zoomReset:
         store.resetZoomFocused();
       case MxAction.dailyReport:
-        store.openDailyReport();
+        showDailyReport(context, store);
       case MxAction.refreshGit:
         store.refreshGit();
       case MxAction.settings:

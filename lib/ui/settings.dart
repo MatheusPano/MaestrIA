@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`.
+// import '../services/dictation.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../theme.dart';
@@ -14,6 +17,10 @@ enum MxSection {
   appearance('aparência', Icons.palette_outlined),
   shortcuts('atalhos', Icons.keyboard_outlined),
   launchers('programas', Icons.rocket_launch_outlined);
+  // --- ditado (vocalização) — fora desta versão -------------------------------
+  // A quarta seção era o microfone. Ver o cabeçalho de
+  // `services/dictation.dart`; quando ela voltar, o `;` acima vira `,` de novo.
+  // dictation('ditado', Icons.mic_none_outlined);
 
   const MxSection(this.label, this.icon);
   final String label;
@@ -104,6 +111,8 @@ class _SettingsState extends State<_Settings> {
                               MxSection.appearance => _Appearance(store: widget.store),
                               MxSection.shortcuts => _Shortcuts(store: widget.store),
                               MxSection.launchers => _Launchers(store: widget.store),
+                              // --- ditado (vocalização) — fora desta versão ---
+                              // MxSection.dictation => _Dictation(store: widget.store),
                             },
                           ),
                         ),
@@ -1121,3 +1130,322 @@ class _LauncherRowState extends State<_LauncherRow> {
     );
   }
 }
+
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`. Daqui até o fim do arquivo é
+// a seção do ditado: o bloco de setup, os campos, e os três widgets que só
+// ela usa (`_Setup`, `_Command` e `_Line`).
+
+/*
+/// O microfone: o que ele precisa pra funcionar, e o que ele faz com o texto.
+///
+/// Uma seção própria porque quase tudo aqui é setup, e setup é a única coisa
+/// nesta tela que pode estar *errada* -- as outras três só têm preferências.
+/// Daí o bloco de cima, que não pergunta nada: ele responde "por que o ⌘⇧D não
+/// faz nada", que é a pergunta que traz alguém aqui.
+class _Dictation extends StatefulWidget {
+  const _Dictation({required this.store});
+
+  final AppStore store;
+
+  @override
+  State<_Dictation> createState() => _DictationState();
+}
+
+class _DictationState extends State<_Dictation> {
+  late final _bin = TextEditingController(text: widget.store.dictation.config.bin);
+  late final _model = TextEditingController(text: widget.store.dictation.config.model);
+  late final _lang = TextEditingController(text: widget.store.dictation.config.lang);
+  late final _prompt = TextEditingController(text: widget.store.dictation.config.prompt);
+
+  /// O que a máquina tem, relido a cada vez que a seção abre -- e depois só a
+  /// pedido. É uma resposta que muda por fora do app: quem sai daqui pra rodar
+  /// o `brew install` volta pra clicar em "verificar de novo".
+  String? _missing;
+  bool _checking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  @override
+  void dispose() {
+    _bin.dispose();
+    _model.dispose();
+    _lang.dispose();
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final missing = await widget.store.dictation.problem();
+    if (mounted) {
+      setState(() {
+        _missing = missing;
+        _checking = false;
+      });
+    }
+  }
+
+  /// Guarda e reconfere: trocar o caminho do modelo é justamente o gesto de
+  /// quem está tentando resolver o que o bloco de cima está apontando.
+  void _apply(DictationConfig config) {
+    widget.store.setDictation(config);
+    _check();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final config = widget.store.dictation.config;
+    final chord = widget.store.keymap[MxAction.dictate].firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Heading(
+          'ditado',
+          hint: 'falar em vez de digitar: o microfone abre, o whisper.cpp '
+              'transcreve na sua máquina, e o texto é colado no prompt do '
+              'painel — sem sair daqui e sem mandar áudio pra lugar nenhum. '
+              '${chord == null ? 'sem atalho — escolha um em atalhos.' : '${chord.label} liga e desliga.'}',
+        ),
+        _Setup(
+          missing: _missing,
+          checking: _checking,
+          model: config.model,
+          onRecheck: _check,
+        ),
+        const SizedBox(height: 22),
+        _Line(
+          label: 'binário',
+          hint: 'o nome no PATH basta — o app roda tudo por um login shell',
+          controller: _bin,
+          onChanged: (v) => _apply(config.copyWith(bin: v)),
+        ),
+        _Line(
+          label: 'modelo',
+          hint: 'o .bin do whisper.cpp. large-v3-turbo é o que vale a pena: '
+              'roda em Metal e transcreve mais rápido do que se fala',
+          controller: _model,
+          onChanged: (v) => _apply(config.copyWith(model: v)),
+        ),
+        _Line(
+          label: 'idioma',
+          hint: 'fixo, não `auto`: numa frase em português com nome de branch '
+              'no meio, o detector escolhe inglês e traduz a frase inteira',
+          controller: _lang,
+          width: 90,
+          onChanged: (v) => _apply(config.copyWith(lang: v)),
+        ),
+        _Line(
+          label: 'vocabulário',
+          hint: 'não é uma instrução: é um trecho que o whisper finge ter '
+              'acabado de transcrever, e que por isso enviesa o que ele '
+              'escuta. É o que faz "worktree" e "BUG#45902" saírem inteiros em '
+              'vez de "UASC Trade" e "Bag 45902". Vazio, é o whisper cru.',
+          controller: _prompt,
+          lines: 3,
+          onChanged: (v) => _apply(config.copyWith(prompt: v)),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          value: config.submit,
+          onChanged: (v) => _apply(config.copyWith(submit: v)),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            'enviar sozinho ao terminar de falar',
+            style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          ),
+          subtitle: Text(
+            'desligado, o texto só é colado e você confere antes do enter — '
+            'que é o que vale a pena enquanto você não confia no microfone: '
+            'nome de arquivo e nome de branch são o que ele mais erra.',
+            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// O que falta pra ditar, e como resolver -- ou o verde de que não falta nada.
+class _Setup extends StatelessWidget {
+  const _Setup({
+    required this.missing,
+    required this.checking,
+    required this.model,
+    required this.onRecheck,
+  });
+
+  final String? missing;
+  final bool checking;
+  final String model;
+  final VoidCallback onRecheck;
+
+  /// Os dois comandos do setup, o segundo montado em cima do caminho que está
+  /// configurado -- copiar um comando que baixa pra outro lugar seria pior do
+  /// que não oferecer comando nenhum.
+  List<(String, String)> get _steps => [
+    ('o whisper.cpp', 'brew install whisper-cpp'),
+    (
+      'o modelo (1,6 GB, uma vez)',
+      'mkdir -p ${_dir(model)} && curl -L -o $model '
+          'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
+    ),
+  ];
+
+  static String _dir(String path) {
+    final cut = path.lastIndexOf('/');
+    return cut <= 0 ? '.' : path.substring(0, cut);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = missing == null && !checking;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 11, 13, 13),
+      decoration: BoxDecoration(
+        color: Mx.bg,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: ok ? Mx.green.withValues(alpha: 0.4) : Mx.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                checking ? Icons.hourglass_empty : (ok ? Icons.check_circle : Icons.error_outline),
+                size: 14,
+                color: checking ? Mx.fgFaint : (ok ? Mx.green : Mx.yellow),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  checking ? 'conferindo…' : (missing ?? 'tudo no lugar — é só falar'),
+                  style: TextStyle(fontSize: 12, color: ok ? Mx.green : Mx.fg, height: 1.35),
+                ),
+              ),
+              TextButton(
+                onPressed: checking ? null : onRecheck,
+                child: const Text('verificar de novo'),
+              ),
+            ],
+          ),
+          // As instruções só enquanto elas resolvem alguma coisa: com o setup
+          // pronto, esta seção é sobre preferências e mais nada.
+          if (!ok && !checking) ...[
+            const SizedBox(height: 6),
+            for (final (what, command) in _steps) _Command(what: what, command: command),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Um passo do setup: o que ele instala, o comando, e o botão que o copia.
+///
+/// Copiar e não rodar: baixar 1,6 GB é uma decisão de quem está na
+/// frente da máquina, e o terminal em que isso roda é o do usuário -- que está
+/// a um painel de distância daqui.
+class _Command extends StatefulWidget {
+  const _Command({required this.what, required this.command});
+
+  final String what;
+  final String command;
+
+  @override
+  State<_Command> createState() => _CommandState();
+}
+
+class _CommandState extends State<_Command> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.what, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+          const SizedBox(height: 3),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SelectableText(
+                  widget.command,
+                  style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgDim, height: 1.4),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: widget.command));
+                  if (context.mounted) setState(() => _copied = true);
+                },
+                child: Text(_copied ? 'copiado' : 'copiar'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Um campo desta seção: rótulo, o porquê dele, e a caixa.
+class _Line extends StatelessWidget {
+  const _Line({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    required this.onChanged,
+    this.width,
+    this.lines = 1,
+  });
+
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final double? width;
+  final int lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+          ),
+          const SizedBox(height: 2),
+          Text(hint, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.35)),
+          const SizedBox(height: 7),
+          SizedBox(
+            width: width,
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              minLines: lines,
+              maxLines: lines,
+              style: TextStyle(fontFamily: Mx.mono, fontSize: 12, color: Mx.fg),
+              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+*/

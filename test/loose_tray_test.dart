@@ -136,5 +136,97 @@ void main() {
       // One row at a time: the tray's stays down.
       expect(opacityOf(tester, 'abrir algo sem pasta'), 0);
     });
+
+    // A varrida que se faz toda hora aqui: a bandeja é onde as sessões de uma
+    // tarde se acumulam, e ela estava a dois cliques dentro do ⋯.
+    testWidgets('limpa o concluído e deixa o resto', (tester) async {
+      final store = storeWithFolder();
+      panel(store, 'ainda roda', folder: store.loose);
+      final feito = panel(store, 'essa funcionou', folder: store.loose);
+      await pumpSidebar(tester, store);
+
+      // Nada acabado ainda: um limpar que não tem o que limpar não existe.
+      expect(find.byTooltip('limpar 1 painel concluído'), findsNothing);
+
+      store.setDone(feito, true);
+      await pumpSidebar(tester, store);
+      await hover(tester, find.text('avulsos'));
+      expect(opacityOf(tester, 'limpar 1 painel concluído'), 1);
+
+      await tester.tap(find.byTooltip('limpar 1 painel concluído'));
+      await tester.pump();
+
+      expect(store.tabsOf(store.loose).map((t) => t.title), ['ainda roda']);
+      // Uma linha que sai da lateral é fácil de não ver: o botão se explica.
+      expect(store.banner, contains('um painel fechado'));
+      store.dispose();
+    });
+
+    // A outra porta da mesma varrida, e a que existia antes do botão: o ⋯.
+    testWidgets('a varrida do ⋯ diz o que levou, e deixa o encerrado', (tester) async {
+      final store = storeWithFolder();
+      panel(store, 'ainda roda', folder: store.loose);
+      final feito = panel(store, 'essa funcionou', folder: store.loose);
+      final morto = panel(store, 'saiu na largada', folder: store.loose);
+      store.setDone(feito, true);
+      morto.term.exited = true;
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('o que fazer com os avulsos'));
+      // Nunca pumpAndSettle: a marca de uma sessão do claude pulsa pra sempre,
+      // e uma delas está na bandeja. Um frame põe o menu de pé e o outro
+      // termina a abertura dele -- antes disso a rota engole o clique.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('limpar concluídos'));
+      await tester.pump();
+
+      // O encerrado *não* vai junto: um processo que saiu é um painel
+      // esperando pra rodar de novo, não um trabalho acabado. Ver
+      // [AppStore.closeSettled].
+      expect(store.tabsOf(store.loose).map((t) => t.title), [
+        'ainda roda',
+        'saiu na largada',
+      ]);
+      expect(store.banner, contains('um painel fechado'));
+      store.dispose();
+    });
+
+    // O ⋯ oferece a varrida sempre, ao contrário do botão da régua: então aqui
+    // ela pode não ter o que levar, e um clique que não faz nada e não diz
+    // nada é um clique que se dá de novo.
+    testWidgets('e diz também quando não havia nada pra levar', (tester) async {
+      final store = storeWithFolder();
+      panel(store, 'ainda roda', folder: store.loose);
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('o que fazer com os avulsos'));
+      // Nunca pumpAndSettle: a marca de uma sessão do claude pulsa pra sempre,
+      // e uma delas está na bandeja. Um frame põe o menu de pé e o outro
+      // termina a abertura dele -- antes disso a rota engole o clique.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('limpar concluídos'));
+      await tester.pump();
+
+      expect(store.tabsOf(store.loose), hasLength(1));
+      expect(store.banner, contains('nada pra limpar aqui'));
+      store.dispose();
+    });
+
+    // Varrer durante uma busca fecharia painéis que a busca está escondendo.
+    testWidgets('o limpar sai de cena enquanto se procura', (tester) async {
+      final store = storeWithFolder();
+      panel(store, 'ainda roda', folder: store.loose);
+      final feito = panel(store, 'essa funcionou', folder: store.loose);
+      store.setDone(feito, true);
+      await pumpSidebar(tester, store);
+      expect(find.byTooltip('limpar 1 painel concluído'), findsOneWidget);
+
+      store.setQuery('roda');
+      await pumpSidebar(tester, store);
+      expect(find.byTooltip('limpar 1 painel concluído'), findsNothing);
+      store.dispose();
+    });
   });
 }

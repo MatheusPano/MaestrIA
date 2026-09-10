@@ -10,14 +10,14 @@
 
 // The Linux half of the "maestria/dock" channel.
 //
-// Only one of its three methods survives the crossing. `chooseFolder` is the
-// same idea as the NSOpenPanel sheet -- a picker owned by our own window, so
-// it never reads as the app freezing while it waits. `badge` has no answer
-// here: a dock tile is an AppKit idea, and the launcher APIs that come close
-// are per-desktop and want a .desktop file we do not install. `quickLook` has
-// none either -- nothing on Linux renders a preview without also being the
-// app that owns the type -- so it says so, and Dart falls through to opening
-// the file the ordinary way.
+// Only the two pickers survive the crossing. `chooseFolder` and
+// `chooseWorkspace` are the same idea as the NSOpenPanel sheet -- owned by our
+// own window, so they never read as the app freezing while they wait. `badge`
+// has no answer here: a dock tile is an AppKit idea, and the launcher APIs
+// that come close are per-desktop and want a .desktop file we do not install.
+// `quickLook` has none either -- nothing on Linux renders a preview without
+// also being the app that owns the type -- so it says so, and Dart falls
+// through to opening the file the ordinary way.
 static const char* kDockChannel = "maestria/dock";
 
 struct _MyApplication {
@@ -31,11 +31,12 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-// The picker's answer, once the user has given one.
+// The picker's answer, once the user has given one. Serves both pickers: what
+// comes back is a path either way.
 //
 // Asynchronous rather than gtk_dialog_run: that call spins a nested main loop,
 // which stops Flutter rendering for as long as the dialog is up.
-static void choose_folder_response_cb(GtkDialog* dialog, gint response_id, gpointer user_data) {
+static void choose_path_response_cb(GtkDialog* dialog, gint response_id, gpointer user_data) {
   g_autoptr(FlMethodCall) method_call = FL_METHOD_CALL(user_data);
 
   g_autofree gchar* path = nullptr;
@@ -49,7 +50,7 @@ static void choose_folder_response_cb(GtkDialog* dialog, gint response_id, gpoin
       FL_METHOD_RESPONSE(fl_method_success_response_new(value));
   g_autoptr(GError) error = nullptr;
   if (!fl_method_call_respond(method_call, response, &error)) {
-    g_warning("Failed to respond to chooseFolder: %s", error->message);
+    g_warning("Failed to respond to the file picker: %s", error->message);
   }
 
   gtk_widget_destroy(GTK_WIDGET(dialog));
@@ -66,7 +67,22 @@ static void dock_method_call_cb(FlMethodChannel* channel, FlMethodCall* method_c
         "Cancelar", GTK_RESPONSE_CANCEL, "Escolher", GTK_RESPONSE_ACCEPT, nullptr);
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
     // Answered from the callback, so the call has to outlive this handler.
-    g_signal_connect(dialog, "response", G_CALLBACK(choose_folder_response_cb),
+    g_signal_connect(dialog, "response", G_CALLBACK(choose_path_response_cb),
+                     g_object_ref(method_call));
+    gtk_widget_show_all(dialog);
+    return;
+  }
+
+  if (strcmp(method, "chooseWorkspace") == 0) {
+    GtkWidget* dialog = gtk_file_chooser_dialog_new(
+        "Escolha um workspace do VS Code", self->window, GTK_FILE_CHOOSER_ACTION_OPEN,
+        "Cancelar", GTK_RESPONSE_CANCEL, "Adicionar", GTK_RESPONSE_ACCEPT, nullptr);
+    GtkFileFilter* filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "Workspace do VS Code");
+    gtk_file_filter_add_pattern(filter, "*.code-workspace");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    g_signal_connect(dialog, "response", G_CALLBACK(choose_path_response_cb),
                      g_object_ref(method_call));
     gtk_widget_show_all(dialog);
     return;

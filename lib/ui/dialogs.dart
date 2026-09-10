@@ -1,17 +1,26 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`.
+// import '../services/dictation.dart';
 import '../services/git.dart';
 import '../services/history.dart';
 import '../services/notify.dart';
 import '../services/paths.dart';
+import '../services/report.dart';
+import '../services/shortcuts.dart';
 import '../services/store.dart';
+import '../services/workspace.dart';
 import '../theme.dart';
 import 'claude_mark.dart';
 import 'confetti.dart';
+import 'flow.dart';
+import 'menus.dart';
 
 InputDecoration _field(String label, [String? hint]) => InputDecoration(
   labelText: label,
@@ -21,6 +30,127 @@ InputDecoration _field(String label, [String? hint]) => InputDecoration(
   hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12),
   border: const OutlineInputBorder(),
 );
+
+/// O bloco "abrir algo aqui", escrito uma vez.
+///
+/// Três menus fazem a mesma oferta sobre lugares diferentes -- o + de uma
+/// pasta, o botão direito de um projeto, o de uma worktree --, e antes cada um
+/// dizia a sua parte dela: os programas do usuário só existiam no +, e a
+/// ordem das duas primeiras linhas era diferente em cada um.
+///
+/// A ordem é a das chances de você ter vindo por ela: a sessão, o terminal, a
+/// sessão com o fluxo dela já escrito, retomar uma conversa -- que é abrir uma sessão que já tem passado, um degrau
+/// abaixo da nova -- e ler um markdown de lá, que é o único painel daqui que
+/// não roda nada. Os programas do usuário desceram pra um submenu: eram uma
+/// linha por programa no meio das ofertas do código, e cinco deles empurravam
+/// `projeto…` pro pé de um menu que ficava com o dobro do tamanho. Ver
+/// [Launcher] e [MxSubmenuItem].
+///
+/// [resume] cai fora onde retomar não tem o que retomar: uma worktree é uma
+/// pasta que o histórico de conversas da pasta-mãe não conhece.
+List<PopupMenuEntry<String>> openHereItems(AppStore store, {bool resume = true}) => [
+  mxItem('claude', glyph: const ClaudeMark(size: 13), label: 'sessão do claude'),
+  mxItem('shell', glyph: Icon(Icons.terminal, size: 14, color: Mx.fgDim), label: 'terminal'),
+  // Uma sessão com o depois dela já escrito. Fica atrás das duas de cima
+  // porque é o que menos se pede aqui -- e à frente do resto porque é a
+  // mesma coisa que elas: abrir algo que vai rodar agora.
+  mxItem(
+    'fluxo',
+    glyph: Icon(Icons.account_tree_outlined, size: 14, color: Mx.purple),
+    label: 'montar um fluxo…',
+  ),
+  if (resume)
+    mxItem(
+      'retomar',
+      glyph: Icon(Icons.history, size: 14, color: Mx.fgDim),
+      label: 'retomar conversa…',
+    ),
+  // Um `.md` do disco é a quarta coisa que se abre num lugar, e o lugar é
+  // *onde ele está*. A linha era do menu do painel, que sabe de sessões e não
+  // de arquivos: pra ler um documento você mirava numa sessão qualquer e
+  // pedia um arquivo que quase nunca era da pasta dela. Ver
+  // [AppStore.openMarkdown].
+  mxItem(
+    'markdown',
+    glyph: Icon(Icons.description_outlined, size: 14, color: Mx.fgDim),
+    label: 'abrir um markdown…',
+  ),
+  // Sem programa nenhum não há submenu a abrir: seria uma seta pra uma lista
+  // de um item, e o item é a oferta de ensinar o primeiro.
+  if (store.launchers.isEmpty)
+    mxItem(
+      'novo',
+      glyph: Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
+      label: 'criar um programa…',
+    )
+  else
+    MxSubmenuItem(
+      label: 'meus programas',
+      glyph: Icon(Icons.apps_outlined, size: 14, color: Mx.fgDim),
+      // Lidos na hora de abrir o submenu: quem acabou de criar um programa
+      // pelo diálogo da última linha o encontra aqui sem reabrir o menu.
+      items: () => [
+        // Na ordem em que foram criados -- é a ordem da lista das
+        // configurações, e a lateral não tem por que discordar dela.
+        for (final launcher in store.launchers)
+          MxSubItem(
+            value: 'launcher:${launcher.id}',
+            label: launcher.name,
+            glyph: Icon(launcher.icon.glyph, size: 14, color: launcher.color),
+          ),
+        MxSubItem(
+          value: 'novo',
+          label: 'outro programa…',
+          glyph: Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
+          divided: true,
+        ),
+      ],
+    ),
+];
+
+/// Faz o que a linha escolhida em [openHereItems] pede, e diz se a escolha era
+/// dele -- os menus que o embutem têm as suas próprias linhas para tratar.
+///
+/// [cwd] é onde o painel abre, que só é a raiz da pasta quando não é uma
+/// worktree; [label] é como ele se chama quando o nome da pasta não serve.
+Future<bool> openHereChoice(
+  BuildContext context,
+  AppStore store,
+  String choice, {
+  required Folder folder,
+  Project? project,
+  String? cwd,
+  String? label,
+}) async {
+  switch (choice) {
+    case 'claude':
+      store.openClaude(folder, cwd: cwd ?? folder.root, label: label, project: project);
+    case 'fluxo':
+      await showNewFlow(context, store, folder: folder, cwd: cwd, project: project);
+    case 'shell':
+      store.openShell(folder, cwd: cwd, project: project);
+    case 'retomar':
+      await showChatHistory(context, store, folder: folder, project: project);
+    case 'markdown':
+      // O painel nativo abre no lugar em que se clicou -- a raiz da pasta, ou
+      // o checkout da worktree --, e o leitor nasce morando lá.
+      await store.openMarkdown(folder: folder, cwd: cwd, project: project);
+    case 'novo':
+      // Criar e abrir de uma vez: você veio ao menu pra abrir um painel, e um
+      // programa que nasce sem estrear obrigaria a voltar aqui pra usá-lo.
+      final launcher = await showNewLauncher(context, store);
+      if (launcher != null) {
+        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, project: project);
+      }
+    default:
+      if (!choice.startsWith('launcher:')) return false;
+      final launcher = store.launcherById(choice.split(':').last);
+      if (launcher != null) {
+        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, project: project);
+      }
+  }
+  return true;
+}
 
 Future<String?> promptText(
   BuildContext context, {
@@ -54,23 +184,23 @@ Future<String?> promptText(
 /// A second way in for copy and paste, one that owes nothing to AppKit's key
 /// equivalents -- if ⌘V is ever swallowed again, this still works.
 Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosition) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final hasSelection = tab.term.controller.selection != null;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: globalPosition,
     items: [
-      PopupMenuItem(
-        value: 'copy',
-        height: 34,
+      mxItem(
+        'copy',
+        glyph: Icon(Icons.content_copy, size: 13, color: Mx.fgDim),
+        label: 'copiar',
+        chord: '⌘C',
         enabled: hasSelection,
-        child: const Text('copiar  ⌘C', style: TextStyle(fontSize: 12)),
       ),
-      const PopupMenuItem(
-        value: 'paste',
-        height: 34,
-        child: Text('colar  ⌘V', style: TextStyle(fontSize: 12)),
+      mxItem(
+        'paste',
+        glyph: Icon(Icons.content_paste, size: 13, color: Mx.fgDim),
+        label: 'colar',
+        chord: '⌘V',
       ),
     ],
   );
@@ -93,65 +223,75 @@ Future<void> showPanelMenu(
   MxTab tab,
   Offset globalPosition,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final grouped = store.groupOf(tab);
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // Ver o cabeçalho de `services/dictation.dart`.
+  // final recording = store.dictation.phaseOf(tab.id) == DictationPhase.recording;
+  final choice = await mxMenu<String>(
+    context,
+    at: globalPosition,
     items: [
       // Primeiro porque, num painel de programa que saiu, é a única coisa que
       // se quer fazer com ele. Ver [AppStore.relaunch].
-      if (tab.launcher != null && tab.exited)
-        PopupMenuItem(
-          value: 'relaunch',
-          height: 34,
-          child: Text(
-            'rodar ${tab.launcher!.name} de novo',
-            style: const TextStyle(fontSize: 12),
-          ),
+      if (tab.launcher != null && tab.exited) ...[
+        mxItem(
+          'relaunch',
+          glyph: Icon(Icons.refresh, size: 14, color: tab.launcher!.color),
+          label: 'rodar ${tab.launcher!.name} de novo',
         ),
-      const PopupMenuItem(
-        value: 'rename',
-        height: 34,
-        child: Text('renomear…', style: TextStyle(fontSize: 12)),
+        mxDivider(),
+      ],
+      // O bloco do que este painel *tem*: o nome dele, e o que a sessão
+      // escreveu pra ser lido. Doze linhas seguidas eram uma parede; os riscos
+      // são o que deixa o olho pular pro terço certo dela.
+      mxItem(
+        'rename',
+        glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
+        label: 'renomear…',
       ),
-      const PopupMenuItem(
-        value: 'markdown',
-        height: 34,
-        child: Text('abrir um markdown…', style: TextStyle(fontSize: 12)),
-      ),
+      // --- ditado (vocalização) — fora desta versão --------------------------
+      // // A outra porta do ditado. O atalho é o gesto de todo dia; esta linha é
+      // // como se descobre que ele existe -- e o único caminho pra quem trocou a
+      // // tecla por uma que não lembra. Ver [AppStore.toggleDictation].
+      // if (!tab.isReader && !tab.exited)
+        // mxItem(
+          // 'dictate',
+          // glyph: Icon(
+            // recording ? Icons.mic : Icons.mic_none,
+            // size: 14,
+            // color: recording ? Mx.red : Mx.fgDim,
+          // ),
+          // label: recording ? 'parar de ditar e colar' : 'ditar…',
+        // ),
       // O que uma sessão do claude produziu pra ler. Os dois são markdown e
       // sempre foram; o que não havia era onde desenhá-los.
       if (tab.kind == TabKind.claude) ...[
-        PopupMenuItem(
-          value: 'plan',
-          height: 34,
+        mxItem(
+          'plan',
+          glyph: Icon(Icons.checklist_rtl, size: 14, color: Mx.fgDim),
+          label: tab.hooks.plans.length > 1
+              ? 'ver o plano (${tab.hooks.plans.length})'
+              : 'ver o plano',
           enabled: tab.hooks.plans.isNotEmpty,
-          child: Text(
-            tab.hooks.plans.length > 1
-                ? 'ver o plano (${tab.hooks.plans.length})'
-                : 'ver o plano',
-            style: const TextStyle(fontSize: 12),
-          ),
         ),
-        PopupMenuItem(
-          value: 'message',
-          height: 34,
+        mxItem(
+          'message',
+          glyph: Icon(Icons.chat_bubble_outline, size: 14, color: Mx.fgDim),
+          label: 'ver o último recado',
           enabled: (tab.hooks.lastMessageFull ?? '').trim().isNotEmpty,
-          child: Text('ver o último recado', style: const TextStyle(fontSize: 12)),
         ),
-        PopupMenuItem(
-          value: 'chain',
-          height: 34,
-          child: Text(
-            tab.followUps.isEmpty
-                ? 'quando terminar…'
-                : 'quando terminar… (${tab.followUps.length})',
-            style: const TextStyle(fontSize: 12),
-          ),
+        mxItem(
+          'chain',
+          glyph: Icon(Icons.account_tree_outlined, size: 14, color: Mx.fgDim),
+          label: tab.followUps.isEmpty
+              ? 'quando terminar…'
+              : 'quando terminar… (${tab.followUps.length})',
         ),
       ],
+      mxDivider(),
+      // O bloco de onde o painel *mora* e de como ele está: grupo, projeto,
+      // concluída. Nenhuma das três mexe no conteúdo dele.
+      //
       // Agrupar é do painel que está na tela e da tela em que ele está: os
       // painéis da grade já aparecem acesos na lateral, e agrupar é apontar
       // pra um deles e dizer que aqueles andam juntos. Fora de uma grade a
@@ -165,43 +305,48 @@ Future<void> showPanelMenu(
       if (store.paneCount > 1 &&
           store.isOpen(tab) &&
           (grouped == null || !store.showing(grouped)))
-        const PopupMenuItem(
-          value: 'group',
-          height: 34,
-          child: Text('agrupar painéis', style: TextStyle(fontSize: 12)),
+        mxItem(
+          'group',
+          glyph: Icon(Icons.grid_view_rounded, size: 14, color: Mx.fgDim),
+          label: 'agrupar painéis',
         ),
       if (grouped case final group?)
-        PopupMenuItem(
-          value: 'ungroup',
-          height: 34,
-          child: Text('desagrupar "${group.name}"', style: const TextStyle(fontSize: 12)),
+        mxItem(
+          'ungroup',
+          // Na cor do grupo, que é a cor com que a lateral lava as linhas
+          // dele: é o que diz de qual grupo a linha está falando.
+          glyph: Icon(Icons.grid_off, size: 14, color: group.color),
+          label: 'desagrupar "${group.name}"',
         ),
       // Um leitor não vai pra projeto nem se marca como concluído: as duas
       // coisas se dizem de um trabalho, e ele é uma folha de papel. Estar fora
       // de pasta não impede mais: a bandeja também tem projeto. Ver
       // [showMoveToProject], que é quem diz quando ainda não tem nenhum.
       if (!tab.isReader)
-        const PopupMenuItem(
-          value: 'move',
-          height: 34,
-          child: Text('mover pro projeto…', style: TextStyle(fontSize: 12)),
+        mxItem(
+          'move',
+          glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.purple),
+          label: 'mover pro projeto…',
         ),
       if (!tab.isReader)
-        PopupMenuItem(
-          value: 'done',
-          height: 34,
-          child: Text(
-            tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
-            style: const TextStyle(fontSize: 12),
+        mxItem(
+          'done',
+          glyph: Icon(
+            tab.done ? Icons.task_alt : Icons.check_circle_outline,
+            size: 14,
+            color: tab.done ? Mx.green : Mx.fgDim,
           ),
+          label: tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
         ),
-      PopupMenuItem(
-        value: 'close',
-        height: 34,
-        child: Text(
-          tab.isReader ? 'fechar o leitor' : 'fechar painel',
-          style: TextStyle(fontSize: 12, color: Mx.red),
-        ),
+      mxDivider(),
+      mxItem(
+        'close',
+        glyph: Icon(Icons.close, size: 14, color: Mx.red),
+        label: tab.isReader ? 'fechar o leitor' : 'fechar painel',
+        color: Mx.red,
+        // A tecla vem do mapa: ela é editável, e um menu que ensinasse ⌘⌫ a
+        // quem trocou por outra estaria mentindo.
+        chord: store.keymap[MxAction.closePane].firstOrNull?.label,
       ),
     ],
   );
@@ -219,33 +364,41 @@ Future<void> showPanelMenu(
       }
     case 'ungroup':
       if (grouped != null) store.ungroup(grouped);
-    case 'markdown':
-      // Começa na pasta deste painel: o arquivo que se quer ler é quase sempre
-      // o que a sessão dele acabou de escrever.
-      await store.openMarkdown(from: tab);
+    // --- ditado (vocalização) — fora desta versão ----------------------------
+    // case 'dictate':
+      // await store.toggleDictation();
     case 'plan':
       store.showPlan(tab);
     case 'message':
       store.showMessage(tab);
     case 'chain':
-      await showFollowUps(context, store, tab);
+      await showFlow(context, store, tab);
     case 'move':
       await showMoveToProject(context, store, tab);
     case 'rename':
-      // An empty answer is not a no-op: it drops the custom label and hands the
-      // title back to the branch/folder rule.
-      final v = await promptText(
-        context,
-        title: 'renomear painel',
-        initial: tab.title,
-        label: 'título',
-      );
-      if (v != null) store.renameTab(tab, v);
+      await showRenamePanel(context, store, tab);
     case 'done':
       markDone(context, store, tab, done: !tab.done, from: globalPosition);
     case 'close':
       store.closeTab(tab);
   }
+}
+
+/// O título de um painel, trocado à mão.
+///
+/// Uma função e não o corpo do item de menu porque são duas portas pra mesma
+/// coisa: o menu do painel e o atalho ([MxAction.renamePane]), que renomeia o
+/// que está em foco sem exigir mirar nele com o mouse.
+Future<void> showRenamePanel(BuildContext context, AppStore store, MxTab tab) async {
+  // An empty answer is not a no-op: it drops the custom label and hands the
+  // title back to the branch/folder rule.
+  final v = await promptText(
+    context,
+    title: 'renomear painel',
+    initial: tab.title,
+    label: 'título',
+  );
+  if (v != null) store.renameTab(tab, v);
 }
 
 /// "Essa funcionou": the mark, wherever it is asked for.
@@ -276,54 +429,104 @@ void markDone(
   }
 }
 
-/// Add a folder. The folder picker is `osascript`, which keeps the dependency
-/// list at zero for something the OS already does well.
+/// Add a folder. The folder picker is the native sheet, which keeps the
+/// dependency list at zero for something the OS already does well.
+///
+/// O campo aceita duas coisas, e é o mesmo campo pras duas: uma pasta, ou um
+/// `.code-workspace` do VS Code -- que é uma lista de pastas que alguém já
+/// digitou uma vez, e digitá-la de novo aqui, uma a uma, é o trabalho que este
+/// caminho existe pra não pedir. Ver [CodeWorkspace] e
+/// `AppStore.importWorkspace`.
 Future<void> showAddFolder(BuildContext context, AppStore store) async {
   final controller = TextEditingController();
+  // O que o seletor nativo respondeu quando não deu pra abrir, dito dentro do
+  // diálogo e não numa tarja da janela: a tarja fica atrás dele.
+  String? trouble;
   final path = await showDialog<String>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: Mx.bgSidebar,
-      title: const Text('adicionar pasta', style: TextStyle(fontSize: 15)),
-      content: SizedBox(
-        width: 460,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              style: const TextStyle(fontSize: 13),
-              decoration: _field('caminho do repo', '/Volumes/Dev-Mac/repos/...'),
-              onSubmitted: (v) => Navigator.pop(ctx, v),
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                icon: const Icon(Icons.folder_open, size: 15),
-                label: const Text('escolher pasta…'),
-                onPressed: () async {
-                  final path = await Notifier.chooseFolder();
-                  if (path != null && path.isNotEmpty) controller.text = path;
-                },
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, refresh) => AlertDialog(
+        backgroundColor: Mx.bgSidebar,
+        title: const Text('adicionar pasta', style: TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: _field('caminho do repo', '~/repos/...'),
+                onSubmitted: (v) => Navigator.pop(ctx, v),
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              // Wrap e não Row: são dois botões de texto lado a lado num
+              // diálogo de largura fixa, e o que cabe neles depende da fonte
+              // de quem está lendo -- num corpo maior o segundo desce em vez
+              // de vazar.
+              Wrap(
+                spacing: 4,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.folder_open, size: 15),
+                    label: const Text('escolher pasta…'),
+                    onPressed: () async {
+                      final path = await Notifier.chooseFolder();
+                      if (path != null && path.isNotEmpty) controller.text = path;
+                    },
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.workspaces_outline, size: 15),
+                    label: const Text('escolher workspace…'),
+                    onPressed: () async {
+                      final picked = await Notifier.chooseWorkspace();
+                      // Sem painel do outro lado o clique não produzia nada --
+                      // ver [Notifier.chooseWorkspace]. O campo aceita o
+                      // caminho colado, então o botão morto ainda tem saída.
+                      if (!picked.available) {
+                        refresh(() {
+                          trouble = 'não consegui abrir o seletor — cole aí em cima o '
+                              'caminho do .code-workspace';
+                        });
+                        return;
+                      }
+                      final path = picked.path;
+                      if (path != null && path.isNotEmpty) controller.text = path;
+                    },
+                  ),
+                ],
+              ),
+              Text(
+                trouble ?? 'um .code-workspace adiciona todas as pastas dele de uma vez.',
+                style: TextStyle(
+                  color: trouble == null ? Mx.fgFaint : Mx.yellow,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('adicionar'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancelar')),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, controller.text),
-          child: const Text('adicionar'),
-        ),
-      ],
     ),
   );
-  if (path != null && path.trim().isNotEmpty) {
-    await store.addFolder(path.trim());
+  final typed = path?.trim() ?? '';
+  if (typed.isEmpty) return;
+  // Pela extensão, que é o único jeito de reconhecer um: por dentro o arquivo
+  // é um json como outro qualquer.
+  if (CodeWorkspace.looksLikeOne(typed)) {
+    await store.importWorkspace(typed);
+    return;
   }
+  await store.addFolder(typed);
 }
 
 /// Open a loose panel in a folder maestria knows nothing about.
@@ -385,7 +588,7 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
   final path = expandHome(controller.text.trim());
   if (kind == null || path.isEmpty) return;
   if (!Directory(path).existsSync()) {
-    store.showBanner('pasta não encontrada: $path');
+    store.showBanner('pasta não encontrada: $path', sticky: true);
     return;
   }
   if (kind == TabKind.claude) {
@@ -501,61 +704,62 @@ Future<void> showWorktreeMenu(
   WorktreeInfo worktree,
   Offset globalPosition,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final ghost = worktree.prunable;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: globalPosition,
     items: [
       // A folder that is not on disk cannot be opened in anything, so those
       // entries are absent rather than present and dead.
       if (!ghost) ...[
-        const PopupMenuItem(
-          value: 'code',
-          height: 34,
-          child: Text('abrir no vscode', style: TextStyle(fontSize: 12)),
-        ),
-        const PopupMenuItem(
-          value: 'claude',
-          height: 34,
-          child: Text('nova sessão do claude aqui', style: TextStyle(fontSize: 12)),
-        ),
-        const PopupMenuItem(
-          value: 'shell',
-          height: 34,
-          child: Text('novo terminal aqui', style: TextStyle(fontSize: 12)),
+        // Sem retomar conversa: o histórico é o da pasta que se abriu na
+        // lateral, e esta é outra pasta no disco -- as conversas dela não
+        // estão naquela lista. Ver [openHereItems].
+        ...openHereItems(store, resume: false),
+        mxDivider(),
+        mxItem(
+          'code',
+          glyph: Icon(Icons.code, size: 14, color: Mx.fgDim),
+          label: 'abrir no vscode',
         ),
       ],
-      const PopupMenuItem(
-        value: 'copy',
-        height: 34,
-        child: Text('copiar caminho', style: TextStyle(fontSize: 12)),
+      mxItem(
+        'copy',
+        glyph: Icon(Icons.link, size: 14, color: Mx.fgDim),
+        label: 'copiar caminho',
       ),
       if (!worktree.isMain)
-        PopupMenuItem(
-          value: 'remove',
-          height: 34,
-          child: Text(
-            ghost ? 'limpar registro…' : 'excluir worktree…',
-            style: TextStyle(fontSize: 12, color: Mx.red),
+        mxItem(
+          'remove',
+          glyph: Icon(
+            ghost ? Icons.link_off : Icons.delete_outline,
+            size: 14,
+            color: Mx.red,
           ),
+          label: ghost ? 'limpar registro…' : 'excluir worktree…',
+          color: Mx.red,
         ),
     ],
   );
   if (choice == null || !context.mounted) return;
 
+  // Tudo que abre um painel abre na pasta desta worktree, com o nome do
+  // branch dela: é o que a distingue da pasta-mãe na lateral.
+  if (await openHereChoice(
+    context,
+    store,
+    choice,
+    folder: folder,
+    cwd: worktree.path,
+    label: worktree.isMain ? null : worktree.shortLabel,
+  )) {
+    return;
+  }
+  if (!context.mounted) return;
+
   switch (choice) {
     case 'code':
       await store.openInEditor(worktree.path);
-    case 'claude':
-      store.openClaude(
-        folder,
-        cwd: worktree.path,
-        label: worktree.isMain ? null : worktree.shortLabel,
-      );
-    case 'shell':
-      store.openShell(folder, cwd: worktree.path);
     case 'copy':
       await Clipboard.setData(ClipboardData(text: worktree.path));
       store.showBanner('caminho copiado');
@@ -694,6 +898,141 @@ class _Fact extends StatelessWidget {
   );
 }
 
+/// Pergunta antes de fechar um workspace, com os dois fatos que decidem a
+/// resposta: quantas pastas saem, e quantas sessões vão junto.
+///
+/// Pergunta porque o gesto é grande e não parece: uma linha da lateral leva
+/// sete pastas, os projetos delas e as sessões que estiverem rodando. E os
+/// números vêm antes do botão pelo mesmo motivo do diálogo da worktree -- o
+/// que decide é o que se perde, não o nome do que se fecha.
+Future<void> confirmCloseWorkspace(
+  BuildContext context,
+  AppStore store,
+  Workspace workspace,
+) async {
+  final folders = store.foldersOf(workspace);
+  final sessions = folders.fold<int>(0, (a, f) => a + store.tabsOf(f).length);
+
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text('fechar ${workspace.name}?', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 470,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              workspace.path,
+              style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgFaint),
+            ),
+            const SizedBox(height: 14),
+            _Fact(
+              icon: Icons.folder_off_outlined,
+              color: Mx.fgDim,
+              text: folders.length == 1
+                  ? '1 pasta sai da lateral'
+                  : '${folders.length} pastas saem da lateral',
+            ),
+            // O que mais assusta num diálogo destes é o que ele *não* faz.
+            _Fact(
+              icon: Icons.check_rounded,
+              color: Mx.green,
+              text: 'nada é apagado do disco — nem os repos, nem o .code-workspace',
+            ),
+            if (sessions > 0)
+              _Fact(
+                icon: Icons.warning_amber_rounded,
+                color: Mx.yellow,
+                text: sessions == 1
+                    ? '1 sessão aberta é encerrada'
+                    : '$sessions sessões abertas são encerradas',
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Mx.red),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('fechar workspace'),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+  await store.closeWorkspace(workspace);
+}
+
+// --- grupos -----------------------------------------------------------------
+
+/// Pergunta antes de esquecer todos os arranjos salvos de uma vez -- o
+/// "limpar" da régua dos grupos.
+///
+/// O "esquecer o grupo" de uma linha não pergunta nada, e por um bom motivo:
+/// nada fecha, e aquele arranjo se salva de novo em dois cliques. Seis de uma
+/// vez é outra aposta -- vão os nomes que você deu a eles, e não há como
+/// adivinhar de volta quais eram --, então o botão diz o que vai levar antes
+/// de levar. Um grupo só cai no caso de antes: perguntar ali seria perguntar
+/// o que a linha dele já não pergunta.
+Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
+  final total = store.groups.length;
+  if (total == 0) return;
+  if (total == 1) {
+    final name = store.groups.single.name;
+    store.clearGroups();
+    store.showBanner('grupo "$name" esquecido — os painéis continuam abertos');
+    return;
+  }
+
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text('esquecer os $total grupos?', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Fact(
+              icon: Icons.check_rounded,
+              color: Mx.green,
+              text: 'nenhum painel fecha — a tela de agora fica exatamente como está',
+            ),
+            _Fact(
+              icon: Icons.grid_view_rounded,
+              color: Mx.fgDim,
+              text: 'o que se perde são os $total arranjos guardados, com os nomes deles',
+            ),
+            _Fact(
+              icon: Icons.replay,
+              color: Mx.fgFaint,
+              text: 'pra ter um de volta: arrume a grade e agrupe os painéis outra vez',
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Mx.red),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('esquecer'),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+
+  final gone = store.clearGroups();
+  store.showBanner('$gone grupos esquecidos — nenhum painel foi fechado');
+}
+
 // --- projects ---------------------------------------------------------------
 
 /// Name a new project. The briefing is a second, optional step: you know what
@@ -802,62 +1141,56 @@ Future<void> showProjectMenu(
   Project project,
   Offset globalPosition,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(globalPosition & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: globalPosition,
     items: [
-      const PopupMenuItem(
-        value: 'claude',
-        height: 34,
-        child: Text('nova sessão aqui', style: TextStyle(fontSize: 12)),
-      ),
+      // Abrir algo no projeto é o que se vem fazer aqui, e é a mesma oferta do
+      // + da linha dele -- inclusive os programas do usuário, que antes só
+      // existiam lá. Ver [openHereItems].
+      ...openHereItems(store),
+      mxDivider(),
       // Uma worktree precisa de um repo pra ser worktree de -- ver
       // [MxKeys.run]. No projeto da bandeja a linha não aparece: ela abriria
       // um diálogo de branch e pasta que não tem onde acontecer.
       if (!folder.isLoose)
-        const PopupMenuItem(
-          value: 'task',
-          height: 34,
-          child: Text('nova task nesse projeto…', style: TextStyle(fontSize: 12)),
+        mxItem(
+          'task',
+          glyph: Icon(Icons.call_split, size: 14, color: Mx.fgDim),
+          label: 'nova task nesse projeto…',
         ),
-      const PopupMenuItem(
-        value: 'shell',
-        height: 34,
-        child: Text('novo terminal aqui', style: TextStyle(fontSize: 12)),
+      mxItem(
+        'brief',
+        glyph: Icon(Icons.assignment_outlined, size: 14, color: Mx.fgDim),
+        label: 'briefing…',
       ),
-      const PopupMenuItem(
-        value: 'brief',
-        height: 34,
-        child: Text('briefing…', style: TextStyle(fontSize: 12)),
+      mxItem(
+        'rename',
+        glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
+        label: 'renomear',
       ),
-      const PopupMenuItem(
-        value: 'rename',
-        height: 34,
-        child: Text('renomear', style: TextStyle(fontSize: 12)),
+      mxDivider(),
+      mxItem(
+        'done',
+        glyph: Icon(Icons.task_alt, size: 14, color: Mx.green),
+        label: 'concluir projeto',
       ),
-      const PopupMenuItem(
-        value: 'done',
-        height: 34,
-        child: Text('concluir projeto', style: TextStyle(fontSize: 12)),
-      ),
-      const PopupMenuItem(
-        value: 'dissolve',
-        height: 34,
-        child: Text('dissolver projeto', style: TextStyle(fontSize: 12)),
+      mxItem(
+        'dissolve',
+        glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.red),
+        label: 'dissolver projeto',
+        color: Mx.red,
       ),
     ],
   );
   if (choice == null || !context.mounted) return;
 
+  if (await openHereChoice(context, store, choice, folder: folder, project: project)) return;
+  if (!context.mounted) return;
+
   switch (choice) {
-    case 'claude':
-      store.openClaude(folder, cwd: folder.root, project: project);
     case 'task':
       await showNewTask(context, store, folder, project: project);
-    case 'shell':
-      store.openShell(folder, project: project);
     case 'brief':
       await showProjectBrief(context, store, project);
     case 'rename':
@@ -1024,254 +1357,6 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
   store.assign(tab, choice.isEmpty ? null : store.projectById(choice));
 }
 
-// --- follow-ups -------------------------------------------------------------
-
-/// Arm a panel with what to do when it next goes quiet.
-Future<void> showFollowUps(BuildContext context, AppStore store, MxTab tab) =>
-    showDialog<void>(
-      context: context,
-      builder: (_) => _FollowUpEditor(store: store, tab: tab),
-    );
-
-/// One step being edited. The controller is why the list is drafted in state
-/// and only turned into [FollowUp]s on save.
-class _Draft {
-  _Draft(this.kind, {String text = '', this.targetTabId})
-    : text = TextEditingController(text: text);
-
-  FollowUpKind kind;
-  final TextEditingController text;
-  String? targetTabId;
-}
-
-class _FollowUpEditor extends StatefulWidget {
-  const _FollowUpEditor({required this.store, required this.tab});
-  final AppStore store;
-  final MxTab tab;
-
-  @override
-  State<_FollowUpEditor> createState() => _FollowUpEditorState();
-}
-
-class _FollowUpEditorState extends State<_FollowUpEditor> {
-  late final List<_Draft> _steps = [
-    for (final f in widget.tab.followUps)
-      _Draft(f.kind, text: f.text, targetTabId: f.targetTabId),
-  ];
-
-  /// Every other live Claude panel in the same folder: a handoff is a message
-  /// typed into someone else's prompt, so it needs a prompt to type into.
-  List<MxTab> get _candidates => widget.store.tabs
-      .where(
-        (t) =>
-            t.id != widget.tab.id &&
-            t.kind == TabKind.claude &&
-            !t.exited &&
-            t.folderRoot == widget.tab.folderRoot,
-      )
-      .toList();
-
-  @override
-  void dispose() {
-    for (final s in _steps) {
-      s.text.dispose();
-    }
-    super.dispose();
-  }
-
-  void _add(FollowUpKind kind, {String text = ''}) =>
-      setState(() => _steps.add(_Draft(kind, text: text)));
-
-  void _save() {
-    widget.store.queue(widget.tab, [
-      for (final s in _steps)
-        // A handoff carries the panel's closing message on its own, so it is
-        // the one kind that is still a step with nothing typed into it -- but
-        // only once it has somewhere to go.
-        if (s.kind == FollowUpKind.handoff
-            ? s.targetTabId != null
-            : s.text.text.trim().isNotEmpty)
-          FollowUp(kind: s.kind, text: s.text.text.trim(), targetTabId: s.targetTabId),
-    ]);
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final targets = _candidates;
-    return AlertDialog(
-      backgroundColor: Mx.bgSidebar,
-      title: Text(
-        'quando "${widget.tab.title}" terminar',
-        style: const TextStyle(fontSize: 15),
-      ),
-      content: SizedBox(
-        width: 600,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_steps.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'nada encadeado ainda.',
-                    style: TextStyle(color: Mx.fgFaint, fontSize: 12),
-                  ),
-                ),
-              for (var i = 0; i < _steps.length; i++) _stepCard(i, targets),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _addChip('continuar', FollowUpKind.keepGoing),
-                  _addChip('outra sessão', FollowUpKind.newSession),
-                  _addChip('comando', FollowUpKind.command),
-                  if (targets.isNotEmpty) _addChip('passar a bola', FollowUpKind.handoff),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'um passo por vez: o primeiro dispara na próxima vez que a sessão ficar '
-                'ociosa, o seguinte na vez depois dessa — inclusive depois de algo que '
-                'você mesmo mandar. A fila não sobrevive a fechar o app.',
-                style: TextStyle(color: Mx.fgFaint, fontSize: 11),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
-        FilledButton(onPressed: _save, child: const Text('armar')),
-      ],
-    );
-  }
-
-  Widget _addChip(String label, FollowUpKind kind) => ActionChip(
-    avatar: Icon(kind.icon, size: 14, color: Mx.fgDim),
-    label: Text(label, style: const TextStyle(fontSize: 11.5)),
-    backgroundColor: Mx.bgActive,
-    side: BorderSide(color: Mx.border),
-    onPressed: () => _add(kind, text: kind == FollowUpKind.newSession ? _reviewPrompt : ''),
-  );
-
-  /// The one prompt worth pre-writing: a fresh session that reads the diff the
-  /// panel before it left behind. Fresh is the point — it judges the work, not
-  /// the reasoning that produced it.
-  static const _reviewPrompt =
-      'Revise o que acabou de ser feito nesta worktree: leia `git status` e '
-      '`git diff`, procure bugs, regressões e coisas fora do padrão do repo. '
-      'Não altere nada — só relate o que achou.';
-
-  Widget _stepCard(int i, List<MxTab> targets) {
-    final step = _steps[i];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 12),
-      decoration: BoxDecoration(
-        color: Mx.bgActive,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                '${i + 1}',
-                style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgFaint),
-              ),
-              const SizedBox(width: 10),
-              DropdownButton<FollowUpKind>(
-                value: step.kind,
-                isDense: true,
-                underline: const SizedBox.shrink(),
-                dropdownColor: Mx.bgActive,
-                style: TextStyle(fontSize: 12, color: Mx.fg),
-                items: [
-                  for (final k in FollowUpKind.values)
-                    if (k != FollowUpKind.handoff || targets.isNotEmpty)
-                      DropdownMenuItem(
-                        value: k,
-                        child: Row(
-                          children: [
-                            Icon(k.icon, size: 14, color: Mx.fgDim),
-                            const SizedBox(width: 7),
-                            Text(k.label),
-                          ],
-                        ),
-                      ),
-                ],
-                onChanged: (k) => setState(() => step.kind = k ?? step.kind),
-              ),
-              const Spacer(),
-              InkWell(
-                onTap: () => setState(() => _steps.removeAt(i).text.dispose()),
-                borderRadius: BorderRadius.circular(5),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.close, size: 14, color: Mx.fgFaint),
-                ),
-              ),
-            ],
-          ),
-          if (step.kind == FollowUpKind.handoff) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.arrow_right_alt, size: 16, color: Mx.fgFaint),
-                const SizedBox(width: 7),
-                DropdownButton<String>(
-                  value: targets.any((t) => t.id == step.targetTabId)
-                      ? step.targetTabId
-                      : null,
-                  hint: Text(
-                    'pra qual painel',
-                    style: TextStyle(fontSize: 12, color: Mx.fgFaint),
-                  ),
-                  isDense: true,
-                  underline: const SizedBox.shrink(),
-                  dropdownColor: Mx.bgActive,
-                  style: TextStyle(fontSize: 12, color: Mx.fg),
-                  items: [
-                    for (final t in targets)
-                      DropdownMenuItem(value: t.id, child: Text(t.title)),
-                  ],
-                  onChanged: (id) => setState(() => step.targetTabId = id),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 4),
-          TextField(
-            controller: step.text,
-            minLines: step.kind == FollowUpKind.command ? 1 : 2,
-            maxLines: 6,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontFamily: step.kind == FollowUpKind.command ? Mx.mono : null,
-            ),
-            decoration: InputDecoration(
-              isDense: true,
-              border: const OutlineInputBorder(),
-              hintText: switch (step.kind) {
-                FollowUpKind.keepGoing => 'o que mandar pra ela em seguida',
-                FollowUpKind.newSession => 'o prompt com que a sessão nova abre',
-                FollowUpKind.command => 'flutter analyze && flutter test',
-                FollowUpKind.handoff => 'o recado que vai junto com a última mensagem dela',
-              },
-              hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// O menu do filtro da lateral: uma folha que fica aberta enquanto você marca.
 ///
 /// Um `showMenu` comum fecha a cada item escolhido, e marcar quatro coisas
@@ -1280,11 +1365,9 @@ class _FollowUpEditorState extends State<_FollowUpEditor> {
 /// precisa dar — e o conteúdo trata os próprios toques e se redesenha no
 /// lugar. A lateral atrás dele reage a cada marca, porque o store notifica.
 Future<void> showFilterMenu(BuildContext context, AppStore store, Offset anchor) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-  await showMenu<void>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+  await mxMenu<void>(
+    context,
+    at: anchor,
     items: [
       PopupMenuItem<void>(
         enabled: false,
@@ -1507,10 +1590,15 @@ class _FilterRowState extends State<_FilterRow> {
 /// que é o que ela existe pra mostrar, pra fora da tela. Aqui a lista custa
 /// zero até ser pedida, e o pedido é o mesmo `+` com que se abre qualquer
 /// coisa numa pasta.
+/// As conversas de [folder], ou as de todas as pastas quando ele não vem.
+///
+/// Sem pasta é o histórico da janela -- ver [AppStore.allChats] --, que é a
+/// pergunta do rodapé da lateral: achar uma conversa sem lembrar em que repo
+/// ela rodou. Com pasta é o "deste repo", que é como o + de uma pasta pensa.
 Future<void> showChatHistory(
   BuildContext context,
-  AppStore store,
-  Folder folder, {
+  AppStore store, {
+  Folder? folder,
   Project? project,
 }) => showDialog<void>(
   context: context,
@@ -1518,9 +1606,11 @@ Future<void> showChatHistory(
 );
 
 class _ChatHistory extends StatefulWidget {
-  const _ChatHistory({required this.store, required this.folder, this.project});
+  const _ChatHistory({required this.store, this.folder, this.project});
   final AppStore store;
-  final Folder folder;
+
+  /// Nulo é o histórico inteiro. Ver [showChatHistory].
+  final Folder? folder;
   final Project? project;
 
   @override
@@ -1530,18 +1620,42 @@ class _ChatHistory extends StatefulWidget {
 class _ChatHistoryState extends State<_ChatHistory> {
   /// Pedido uma vez, no `initState` que o `late final` faz: um `build` que
   /// relesse o disco releria a cada repintura do diálogo.
-  late final Future<List<ChatEntry>> _chats = widget.store.chatsIn(widget.folder);
+  late final Future<List<ChatEntry>> _chats = switch (widget.folder) {
+    final folder? => widget.store.chatsIn(folder),
+    null => widget.store.allChats(),
+  };
+
+  /// Como o diálogo se chama, que é a única coisa que diz de onde é a lista:
+  /// as linhas são as mesmas nos três casos.
+  String get _title => switch (widget.folder) {
+    null => 'todas as conversas',
+    final folder when folder.isLoose => 'conversas de antes',
+    final folder => 'conversas em ${folder.name}',
+  };
+
+  /// A pasta em que o painel retomado vai morar, quando dá pra saber daqui.
+  ///
+  /// Nula nos dois históricos que não são de uma pasta -- o inteiro e o da
+  /// bandeja dos avulsos, que é o mesmo --, porque ali cada linha é de um
+  /// lugar diferente: quem sabe qual é o caminho da conversa, e a volta dele
+  /// pra uma pasta da lateral é do store.
+  Folder? get _at => (widget.folder?.isLoose ?? true) ? null : widget.folder;
 
   @override
   Widget build(BuildContext context) {
+    // O diálogo cresce até onde a janela deixa: a lista é longa e cada linha
+    // tem título, pasta e data, então quanto mais couber de uma vez menos rola.
+    // As folgas são o que o [AlertDialog] gasta em volta -- margem dos lados,
+    // título e o `fechar` embaixo -- pra que o teto nunca passe da tela.
+    final screen = MediaQuery.sizeOf(context);
+    final width = math.min(760.0, screen.width - 112);
+    final maxHeight = math.min(620.0, screen.height - 260);
+
     return AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text(
-        widget.folder.isLoose ? 'conversas de antes' : 'conversas em ${widget.folder.name}',
-        style: const TextStyle(fontSize: 15),
-      ),
+      title: Text(_title, style: const TextStyle(fontSize: 15)),
       content: SizedBox(
-        width: 560,
+        width: width,
         child: FutureBuilder<List<ChatEntry>>(
           future: _chats,
           builder: (context, snap) {
@@ -1560,17 +1674,19 @@ class _ChatHistoryState extends State<_ChatHistory> {
             final chats = snap.data ?? const <ChatEntry>[];
             if (chats.isEmpty) {
               return Text(
-                widget.folder.isLoose
-                    ? 'o claude não guardou nenhuma conversa ainda.'
-                    : 'nenhuma conversa em ${widget.folder.name} ainda — as que '
-                          'houver aparecem aqui na próxima vez.',
+                switch (widget.folder) {
+                  final folder? when !folder.isLoose =>
+                    'nenhuma conversa em ${folder.name} ainda — as que houver '
+                        'aparecem aqui na próxima vez.',
+                  _ => 'o claude não guardou nenhuma conversa ainda.',
+                },
                 style: TextStyle(fontSize: 12, color: Mx.fgDim),
               );
             }
             return ConstrainedBox(
               // Rola dentro do diálogo: quarenta linhas não caberiam numa tela
               // de laptop, e um diálogo mais alto que a janela não fecha.
-              constraints: const BoxConstraints(maxHeight: 420),
+              constraints: BoxConstraints(maxHeight: maxHeight),
               child: ListView(
                 shrinkWrap: true,
                 padding: EdgeInsets.zero,
@@ -1587,10 +1703,7 @@ class _ChatHistoryState extends State<_ChatHistory> {
                         Navigator.pop(context);
                         widget.store.resumeChat(
                           chat,
-                          // Sem pasta no histórico inteiro: quem sabe de onde
-                          // aquela conversa é é o caminho dela, e é o store
-                          // que faz essa volta.
-                          folder: widget.folder.isLoose ? null : widget.folder,
+                          folder: _at,
                           project: widget.project,
                         );
                       },
@@ -1883,6 +1996,210 @@ class _IconChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// --- relatório do dia -------------------------------------------------------
+
+/// De que dia é o relatório.
+///
+/// Ele sempre foi de hoje, e hoje era o dia errado quase sempre: o relatório é
+/// falado na daily da manhã seguinte, quando o dia que interessa é ontem -- e
+/// de vez em quando o que se quer é o dia 25 de agosto, que alguém precisa
+/// lembrar. Então o clique pergunta antes, com os dois botões que respondem
+/// quase toda vez e um mês pra andar quando não respondem.
+///
+/// O calendário é desenhado aqui em vez de ser o `showDatePicker` do Material
+/// por dois motivos. Ele fala inglês -- "August 2025", "CANCEL" -- enquanto o
+/// `flutter_localizations` não estiver no projeto, e o app é todo em
+/// português. E ele é muito diálogo pra uma pergunta de um clique: vem com
+/// cabeçalho colorido, campo pra digitar a data e seletor de ano, três coisas
+/// que aqui não têm o que fazer.
+///
+/// [today] existe pros testes: em uso é sempre agora.
+Future<void> showDailyReport(BuildContext context, AppStore store, {DateTime? today}) async {
+  if (store.writingReport) {
+    store.showBanner('já estou escrevendo um relatório — esse leva alguns minutos');
+    return;
+  }
+  final day = await showDialog<DateTime>(
+    context: context,
+    builder: (_) => _DayPicker(today: today ?? DateTime.now()),
+  );
+  if (day == null) return;
+  await store.openDailyReport(day: day);
+}
+
+class _DayPicker extends StatefulWidget {
+  const _DayPicker({required this.today});
+
+  /// Hoje, lido uma vez na abertura: um `DateTime.now()` consultado a cada
+  /// repintura mudaria de resposta num diálogo aberto na virada da meia-noite.
+  final DateTime today;
+
+  @override
+  State<_DayPicker> createState() => _DayPickerState();
+}
+
+class _DayPickerState extends State<_DayPicker> {
+  DateTime get _today => widget.today;
+
+  /// O mês na tela, sempre no dia 1.
+  late DateTime _month = DateTime(_today.year, _today.month);
+
+  /// As iniciais dos dias, começando no domingo -- que é como um calendário se
+  /// lê em português.
+  static const _initials = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+  /// O lado de uma casa do calendário. Sete delas são a largura do diálogo.
+  ///
+  /// Bem maior que os 12 px de fonte do resto do chrome, e de propósito: o
+  /// diálogo tem uma pergunta só e é o alvo de um clique de mira -- um mês
+  /// desenhado no corpo dos rótulos da lateral virava um selinho no meio de
+  /// uma janela de mil pixels, e acertar 25 num quadrado de 34 é pontaria.
+  static const _cell = 46.0;
+
+  void _step(int months) => setState(() => _month = DateTime(_month.year, _month.month + months));
+
+  /// Se há mês pra frente. Amanhã não teve dia nenhum ainda.
+  bool get _ahead => _month.isBefore(DateTime(_today.year, _today.month));
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      // Um mês de seis semanas -- agosto de 2025, que começa numa sexta -- é
+      // 46 px mais alto que um de cinco, e numa janela baixa isso não cabia:
+      // o mês saía cortado por onde o `Column` estourava. Rolar é a saída
+      // certa pra uma casa desse tamanho; encolher a casa pra caber no pior
+      // caso seria pagar o mês inteiro pelo mês raro.
+      scrollable: true,
+      title: const Text('relatório de que dia?', style: TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: _cell * 7,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(child: _quick('hoje', _today)),
+                const SizedBox(width: Mx.gap),
+                // Pela aritmética do calendário, não por 24 horas: no domingo
+                // em que o horário de verão entra as duas contas divergem.
+                Expanded(
+                  child: _quick('ontem', DateTime(_today.year, _today.month, _today.day - 1)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _arrow(Icons.chevron_left_rounded, () => _step(-1)),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      DailyReport.monthName(_month),
+                      style: TextStyle(fontSize: 14, color: Mx.fg, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ),
+                _arrow(Icons.chevron_right_rounded, _ahead ? () => _step(1) : null),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                for (final initial in _initials)
+                  SizedBox(
+                    width: _cell,
+                    height: 24,
+                    child: Center(
+                      child: Text(initial, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+                    ),
+                  ),
+              ],
+            ),
+            _grid(),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
+      ],
+    );
+  }
+
+  /// Um dos dois dias que respondem a pergunta quase toda vez.
+  Widget _quick(String label, DateTime day) => OutlinedButton(
+    style: OutlinedButton.styleFrom(
+      foregroundColor: Mx.fg,
+      side: BorderSide(color: Mx.border),
+      padding: EdgeInsets.zero,
+      minimumSize: const Size(0, 36),
+      textStyle: const TextStyle(fontSize: 13),
+    ),
+    onPressed: () => Navigator.pop(context, day),
+    child: Text(label),
+  );
+
+  Widget _arrow(IconData icon, VoidCallback? onPressed) => IconButton(
+    icon: Icon(icon, color: onPressed == null ? Mx.fgFaint : Mx.fgDim),
+    onPressed: onPressed,
+    iconSize: 22,
+    splashRadius: 17,
+    visualDensity: VisualDensity.compact,
+    constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+    padding: EdgeInsets.zero,
+  );
+
+  Widget _grid() {
+    final first = DateTime(_month.year, _month.month);
+    // O dia 0 do mês seguinte é o último deste: é a conta que acerta fevereiro
+    // sem ninguém aqui escrever a regra do ano bissexto.
+    final days = DateTime(_month.year, _month.month + 1, 0).day;
+    // `weekday` é segunda=1 e domingo=7, e a grade começa no domingo.
+    final lead = first.weekday % 7;
+    return Wrap(
+      children: [
+        for (var i = 0; i < lead; i++) const SizedBox(width: _cell, height: _cell),
+        for (var d = 1; d <= days; d++) _day(DateTime(_month.year, _month.month, d)),
+      ],
+    );
+  }
+
+  Widget _day(DateTime day) {
+    final ahead = day.isAfter(_today);
+    final today = DailyReport.sameDay(day, _today);
+    final text = Text(
+      '${day.day}',
+      style: TextStyle(
+        fontSize: 14,
+        color: ahead ? Mx.fgFaint : Mx.fg,
+        fontWeight: today ? FontWeight.w600 : FontWeight.normal,
+      ),
+    );
+    return SizedBox(
+      width: _cell,
+      height: _cell,
+      // Um dia que ainda não chegou fica escrito e morto: apagá-lo da grade
+      // desalinharia o mês, e deixá-lo clicável abriria um relatório vazio.
+      child: ahead
+          ? Center(child: text)
+          : InkWell(
+              onTap: () => Navigator.pop(context, day),
+              borderRadius: BorderRadius.circular(10),
+              child: DecoratedBox(
+                decoration: today
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Mx.accent),
+                      )
+                    : const BoxDecoration(),
+                child: Center(child: text),
+              ),
+            ),
     );
   }
 }

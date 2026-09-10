@@ -161,10 +161,18 @@ class ChatHistory {
   /// como a lateral pensa. Sem, o de todas as pastas: é a resposta pra quem
   /// procura uma conversa e não sabe mais onde ela rodou.
   ///
+  /// Com [on], só as conversas mexidas naquele dia — é o que um relatório de
+  /// outro dia tem de sessões, porque painel não atravessa o dia e transcript
+  /// atravessa. O critério é o mtime, que é a *última* vez que se falou nela:
+  /// uma conversa de 25 de agosto retomada em setembro conta pra setembro e
+  /// não aparece no dia em que nasceu. Achar a data de nascimento pediria
+  /// abrir os duzentos arquivos em vez de dar stat neles.
+  ///
   /// [root] existe pros testes: em uso é sempre [home].
   static Future<List<ChatEntry>> read({
     String? root,
     List<String>? cwds,
+    DateTime? on,
     int limit = limitDefault,
   }) async {
     final base = Directory(root ?? home);
@@ -199,13 +207,21 @@ class ChatHistory {
       }
     }
     found.sort((a, b) => b.stat.modified.compareTo(a.stat.modified));
+    // O corte por dia vem antes do [limit], e não depois: um dia de março só
+    // apareceria se as quarenta conversas mais recentes chegassem até lá.
+    final picked = on == null
+        ? found
+        : found.where((f) => _sameDay(f.stat.modified, on)).toList();
 
     final chats = <ChatEntry>[];
-    for (final one in found.take(limit)) {
+    for (final one in picked.take(limit)) {
       chats.add(await _entryOf(one.file, one.stat, one.cwd));
     }
     return chats;
   }
+
+  static bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   static Future<ChatEntry> _entryOf(File file, FileStat stat, String? asked) async {
     final name = file.path.split('/').last;

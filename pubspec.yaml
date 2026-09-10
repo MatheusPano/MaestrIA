@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.3+1
+version: 2.0.0+1
 
 environment:
   sdk: ^3.9.2
@@ -44,6 +44,12 @@ dependencies:
   # `ui/doc_pane.dart` escolhe o dialeto (GFM) na mão.
   flutter_markdown_plus: ^1.0.12
   markdown: ^7.3.1
+
+  # Os ícones que o Material não tem. `Icons.*` é um conjunto fechado: quando
+  # o desenho certo não está lá, a saída era escolher o menos errado -- e um
+  # `>` de chevron virava a mesma seta que expande as pastas. Com svg o
+  # desenho vem de fora, e `assets/icons/` é onde ele fica. Ver `ui/icons.dart`.
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -81,6 +87,10 @@ flutter:
         - asset: assets/fonts/Hack-BoldItalic.ttf
           weight: 700
           style: italic
+
+  # Ver `assets/icons/README.md` para a origem e a licença de cada desenho.
+  assets:
+    - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -197,7 +197,7 @@ void main() {
 
       await tester.tap(find.byTooltip('o que fazer com esse projeto'));
       await tester.pumpAndSettle();
-      expect(find.text('nova sessão aqui'), findsOneWidget);
+      expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('nova task nesse projeto…'), findsNothing);
       store.dispose();
     });

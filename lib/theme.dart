@@ -1327,6 +1327,38 @@ class Mx {
         ),
         textStyle: TextStyle(color: p.fg, fontSize: 11),
       ),
+      // Os menus de contexto, no desenho do resto da janela.
+      //
+      // Sem isto eles vinham inteiros do Material: canto de 4, borda nenhuma e
+      // a sombra rasa do M3 -- e um menu assim, aberto por cima de painéis de
+      // canto 10 e borda visível, lê como coisa de outro programa. O raio é o
+      // mesmo dos painéis ([radius]) porque é a mesma família de superfície: o
+      // que flutua na janela tem esse canto.
+      popupMenuTheme: PopupMenuThemeData(
+        color: p.bgActive,
+        surfaceTintColor: Colors.transparent,
+        // Fundo do menu é um passo acima do da lateral e a diferença é de um
+        // fio; a sombra é o que diz que ele está *em cima* e não dentro.
+        elevation: 12,
+        shadowColor: p.shadow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius),
+          side: BorderSide(color: p.border),
+        ),
+        // O ar em volta das linhas é o que deixa o canto ser visto: a primeira
+        // e a última param antes da curva em vez de encostar nela.
+        menuPadding: const EdgeInsets.symmetric(vertical: 5),
+        // O M3 lê `labelTextStyle` e ignora `textStyle`; sem isto a linha vem
+        // com o corpo de um `labelLarge` (14) no meio de uma janela de 12.
+        // O desligado sai no cinza da paleta em vez do onSurface a 38%, que
+        // numa paleta clara fica lavado.
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 12,
+            color: states.contains(WidgetState.disabled) ? p.fgFaint : p.fg,
+          ),
+        ),
+      ),
     );
   }
 }

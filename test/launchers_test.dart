@@ -206,9 +206,9 @@ void main() {
       expect(find.byIcon(Icons.chevron_right), findsNothing);
     });
 
-    // A porta principal da feature: o programa vira uma linha do +, entre o
-    // terminal e a oferta de criar outro.
-    testWidgets('o + oferece os programas, e a criação de mais um', (tester) async {
+    // A porta principal da feature: os programas do usuário atrás de uma linha
+    // só do +, que abre ao lado quando o ponteiro para nela.
+    testWidgets('o + guarda os programas num submenu, aberto no hover', (tester) async {
       final store = storeWith(Launcher(id: 'lch1', name: 'btop', command: 'btop -t'));
       addTearDown(store.dispose);
       await pumpSidebar(tester, store);
@@ -223,9 +223,43 @@ void main() {
       await tester.tap(find.byTooltip('abrir algo nessa pasta'));
       await tester.pumpAndSettle();
 
+      // Claude e terminal primeiro, retomar depois deles, e o menu não cresce
+      // uma linha por programa: o único 'btop' na tela é a linha do painel.
+      expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
-      expect(find.widgetWithText(PopupMenuItem<String>, 'btop'), findsOneWidget);
+      expect(find.text('retomar conversa…'), findsOneWidget);
+      expect(find.text('meus programas'), findsOneWidget);
+      expect(find.text('btop'), findsOneWidget);
+      expect(find.text('outro programa…'), findsNothing);
+
+      await mouse.moveTo(tester.getCenter(find.text('meus programas')));
+      await tester.pumpAndSettle();
+
+      // Agora dois: a linha do painel e a do submenu.
+      expect(find.text('btop'), findsNWidgets(2));
       expect(find.text('outro programa…'), findsOneWidget);
+
+      // E apontar outra linha do menu o fecha: um submenu que fica aberto
+      // enquanto você lê o resto do menu é um submenu no caminho.
+      await mouse.moveTo(tester.getCenter(find.text('terminal')));
+      await tester.pumpAndSettle();
+      expect(find.text('btop'), findsOneWidget);
+      expect(find.text('outro programa…'), findsNothing);
+    });
+
+    // Sem programa nenhum não há seta pra lugar nenhum: a oferta de ensinar o
+    // primeiro fica no menu mesmo.
+    testWidgets('sem programas, o + oferece criar o primeiro sem submenu', (tester) async {
+      final store = AppStore();
+      store.folders.add(folder);
+      addTearDown(store.dispose);
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('abrir algo nessa pasta'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('criar um programa…'), findsOneWidget);
+      expect(find.text('meus programas'), findsNothing);
     });
   });
 }

@@ -112,6 +112,58 @@ void main() {
       expect(written, ['ç']);
     });
 
+    // O bug que o Linux tem e o Mac não: com o ibus no meio -- o método de
+    // entrada padrão do Ubuntu, e do Zorin -- o mesmo commit chega três vezes
+    // seguidas, todas com o caractere já composto, porque o pedido de reset
+    // que o xterm faz entre uma e outra é assíncrono e ainda não chegou. Ver
+    // [VtTerminal.textInput].
+    testWidgets('entregue três vezes pelo ibus, ainda é um caractere só', (tester) async {
+      final written = await typing(tester);
+
+      await simulateKeyDownEvent(LogicalKeyboardKey.quote);
+      await ime(tester, '´', composing: const TextRange(start: 0, end: 1));
+      await simulateKeyUpEvent(LogicalKeyboardKey.quote);
+      // A tecla que fecha a composição vai e volta antes de o ibus entregar
+      // coisa alguma -- e o xterm a esconde do painel enquanto compõe.
+      await simulateKeyDownEvent(LogicalKeyboardKey.keyA, character: 'á');
+      await simulateKeyUpEvent(LogicalKeyboardKey.keyA);
+
+      await ime(tester, 'á');
+      await ime(tester, 'á');
+      await ime(tester, 'á');
+
+      expect(written, ['á'], reason: 'nada de "ááá"');
+    });
+
+    testWidgets('mas duas vezes de propósito continuam sendo duas', (tester) async {
+      final written = await typing(tester);
+
+      for (var i = 0; i < 2; i++) {
+        await simulateKeyDownEvent(LogicalKeyboardKey.quote);
+        await ime(tester, '´', composing: const TextRange(start: 0, end: 1));
+        await simulateKeyUpEvent(LogicalKeyboardKey.quote);
+        await simulateKeyDownEvent(LogicalKeyboardKey.keyA, character: 'á');
+        await ime(tester, 'á');
+        await simulateKeyUpEvent(LogicalKeyboardKey.keyA);
+      }
+
+      expect(written, ['á', 'á']);
+    });
+
+    testWidgets('e a tecla segurada repete, que é o que segurar uma tecla faz', (tester) async {
+      final written = await typing(tester);
+
+      await simulateKeyDownEvent(LogicalKeyboardKey.semicolon, character: 'ç');
+      await ime(tester, 'ç');
+      for (var i = 0; i < 3; i++) {
+        await simulateKeyRepeatEvent(LogicalKeyboardKey.semicolon, character: 'ç');
+        await ime(tester, 'ç');
+      }
+      await simulateKeyUpEvent(LogicalKeyboardKey.semicolon);
+
+      expect(written, ['ç', 'ç', 'ç', 'ç']);
+    });
+
     testWidgets('uma palavra inteira sai como a palavra', (tester) async {
       final written = await typing(tester);
 

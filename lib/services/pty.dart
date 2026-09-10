@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 
+import 'links.dart';
 import 'shell.dart';
 import 'vt.dart';
 
@@ -16,10 +17,15 @@ import 'vt.dart';
 /// matched against a row of `claude agents --json`.
 class TermSession {
   TermSession({int scrollback = 8000})
-    : terminal = VtTerminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel);
+    : terminal = VtTerminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel) {
+    links = TermLinks(terminal);
+  }
 
-  final Terminal terminal;
+  final VtTerminal terminal;
   final TerminalController controller = TerminalController();
+
+  /// Os links que o programa marcou ele mesmo. Ver [TermLinks].
+  late final TermLinks links;
 
   /// The pty's bytes, minus the sequences xterm reads as display attributes.
   final VtScrubber _scrub = VtScrubber();
@@ -77,7 +83,7 @@ class TermSession {
       Sh.shell,
       arguments: args,
       workingDirectory: cwd,
-      environment: {...Platform.environment, ...?env},
+      environment: {...Platform.environment, ..._capabilities, ...?env},
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
     );
@@ -98,12 +104,28 @@ class TermSession {
     terminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
   }
 
+  /// O que este pty diz sobre si mesmo pro programa que roda dentro dele.
+  ///
+  /// `FORCE_HYPERLINK` é como a família do `supports-hyperlinks` pergunta se o
+  /// terminal entende `OSC 8` — e o `claude` é um dos que perguntam: sem uma
+  /// resposta, ele imprime `rótulo (url)` e a URL fica lá, feia mas clicável.
+  /// Com ela, ele marca o link de verdade, que é o que [TermLinks] agora
+  /// entende. O padrão dele é olhar `TERM_PROGRAM` e `VTE_VERSION` numa lista
+  /// de terminais conhecidos, e nós não estamos em lista nenhuma; o que se
+  /// herdava do ambiente era o pior dos dois mundos — no Linux, um
+  /// `VTE_VERSION` do terminal de onde o app foi aberto respondia "sim" por
+  /// nós, e o link marcado morria aqui sem ninguém pra ler.
+  static const _capabilities = {'FORCE_HYPERLINK': '1'};
+
   /// ⌘C. Nothing selected is not an error -- in a terminal that is just a
   /// keypress that means nothing yet.
+  ///
+  /// The text is read by [selectedText] and not by `buffer.getText`, which
+  /// hands over a TUI's line with every space missing -- see `vt.dart`.
   Future<void> copySelection() async {
     final selection = controller.selection;
     if (selection == null) return;
-    await Clipboard.setData(ClipboardData(text: terminal.buffer.getText(selection)));
+    await Clipboard.setData(ClipboardData(text: selectedText(terminal, selection)));
   }
 
   /// What ⌘V puts in.
@@ -122,7 +144,7 @@ class TermSession {
       controller.clearSelection();
       return;
     }
-    if (imagesViaCtrlV) terminal.textInput('\x16');
+    if (imagesViaCtrlV) terminal.send('\x16');
   }
 
   /// A line break in the prompt, the way claude asks for one.
@@ -131,7 +153,7 @@ class TermSession {
   /// `\r` as a bare Enter, and the difference is something the emulator has to
   /// invent. ESC+CR is the sequence claude reads as a newline -- it is what
   /// `/terminal-setup` teaches iTerm and VS Code to send.
-  void newline() => terminal.textInput('\x1b\r');
+  void newline() => terminal.send('\x1b\r');
 
   /// Put [text] in the prompt and send it.
   ///
@@ -177,7 +199,7 @@ class TermSession {
     // Every encoding counts rows and columns from 1.
     final x = col + 1;
     final y = row + 1;
-    terminal.textInput(switch (terminal.mouseReportMode) {
+    terminal.send(switch (terminal.mouseReportMode) {
       MouseReportMode.sgr => '\x1b[<$button;$x;${y}M',
       MouseReportMode.urxvt => '\x1b[${button + 32};$x;${y}M',
       // The oldest encoding of all: each number is one byte, offset by 32.

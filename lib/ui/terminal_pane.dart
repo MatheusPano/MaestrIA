@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
 import '../models.dart';
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`.
+// import '../services/dictation.dart';
 import '../services/links.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
@@ -160,6 +163,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_noteKey);
     if (!widget.focused) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.focused) _focus.requestFocus();
@@ -174,8 +178,23 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_noteKey);
     _focus.dispose();
     super.dispose();
+  }
+
+  /// Conta a tecla pro pty, e não a consome nunca.
+  ///
+  /// Ouvido no [HardwareKeyboard], antes do foco, e não no [_onKeyEvent] logo
+  /// abaixo: o xterm esconde do seu próprio `onKeyEvent` justamente as teclas
+  /// que chegam com uma composição aberta -- que são a vogal do acento e cada
+  /// repetição de uma tecla segurada. É delas que [VtTerminal.textInput]
+  /// precisa saber pra separar o que foi digitado do que o ibus reentregou.
+  bool _noteKey(KeyEvent event) {
+    // Uma tecla subindo nunca produziu texto, e contá-la abriria a porta bem
+    // no meio do eco: o commit do ibus chega depois de a tecla ter subido.
+    if (event is! KeyUpEvent && _focus.hasFocus) widget.tab.term.terminal.keyWentDown();
+    return false;
   }
 
   @override
@@ -217,9 +236,10 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
 
   /// Um link do Claude, clicado.
   ///
-  /// No terminal ninguém marca onde um link começa: quem reconhece um é a
-  /// forma do que estava debaixo do dedo — ver [linkAtCell]. Um clique que não
-  /// pegou link nenhum continua sendo só o clique que dá o teclado ao painel.
+  /// Duas maneiras de haver link ali: o programa marcou o trecho com `OSC 8`
+  /// (ver [TermLinks]) ou não marcou nada, e aí quem reconhece um é a forma do
+  /// que estava debaixo do dedo — ver [linkAtCell]. Um clique que não pegou
+  /// link nenhum continua sendo só o clique que dá o teclado ao painel.
   ///
   /// Ouvido no ponteiro, e não no `onTapUp` do [TerminalView]: aquele callback
   /// existe na assinatura e não existe na prática — o xterm 4.0.0 o repassa ao
@@ -239,11 +259,11 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
 
     final render = _view.currentState?.renderTerminal;
     if (render == null) return;
-    final href = linkAtCell(
-      _terminal,
-      render.getCellOffset(render.globalToLocal(event.position)),
-      base: widget.tab.cwd,
-    );
+    final cell = render.getCellOffset(render.globalToLocal(event.position));
+    // O que o programa marcou vem primeiro: onde ele disse que tem link, não
+    // há o que adivinhar — e o rótulo dele quase nunca se parece com um.
+    final href =
+        widget.tab.term.links.at(cell) ?? linkAtCell(_terminal, cell, base: widget.tab.cwd);
     if (href == null) return;
     widget.store.followLink(href, from: widget.tab);
   }
@@ -276,13 +296,15 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     }
   }
 
-  /// ⌘V, ahead of everything else.
+  /// ⌘C and ⌘V, ahead of everything else.
   ///
-  /// xterm pastes too, but it only ever asks the clipboard for text, so an
-  /// image on the clipboard reaches the prompt as nothing at all. This runs
-  /// first -- [TerminalView.onKeyEvent] beats the built-in shortcuts -- and
-  /// hands a non-text clipboard to claude as a ^V, which is how it asks for
-  /// one.
+  /// xterm copies and pastes too, and gets both halves wrong. It only ever
+  /// asks the clipboard for text, so an image on the clipboard reaches the
+  /// prompt as nothing at all; and it reads the selection with
+  /// `buffer.getText`, which drops every space a TUI drew with a cursor jump
+  /// (see [selectedText]). These run first -- [TerminalView.onKeyEvent] beats
+  /// the built-in shortcuts -- so both go through [TermSession] instead, the
+  /// same way the right-click menu does.
   ///
   /// The other half of this fix is in MainMenu.xib: the Edit menu that ships
   /// with the Flutter template claims ⌘V (and ⌘C, and ⌘A) as key equivalents,
@@ -305,6 +327,10 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       tab.term.pasteClipboard(imagesViaCtrlV: tab.kind == TabKind.claude);
       return KeyEventResult.handled;
     }
+    if (_copy.accepts(event, keyboard)) {
+      tab.term.copySelection();
+      return KeyEventResult.handled;
+    }
     // O mapa de atalhos inteiro, resolvido aqui e não lá em cima: a keytab do
     // xterm resolve ⌃⇥ como um Tab e ⌥← como uma sequência de escape, de modo
     // que atalhos assim nunca chegariam a ser consultados. Como agora as
@@ -318,6 +344,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     return KeyEventResult.ignored;
   }
 
+  static const _copy = SingleActivator(LogicalKeyboardKey.keyC, meta: true);
   static const _paste = SingleActivator(LogicalKeyboardKey.keyV, meta: true);
   static const _newline = SingleActivator(LogicalKeyboardKey.enter, shift: true);
 }
@@ -413,6 +440,14 @@ class _PaneHeader extends StatelessWidget {
                   ),
                 ),
               ),
+              // --- ditado (vocalização) — fora desta versão ------------------
+              // Ver o cabeçalho de `services/dictation.dart`.
+              // // Fora do [LayoutBuilder] acima, então sobrevive ao painel
+              // // estreito que engole as fichas: um microfone aberto é a única
+              // // coisa neste cabeçalho que precisa ser vista sempre.
+              // if (store.dictation.phaseOf(tab.id) case final phase
+                  // when phase != DictationPhase.idle)
+                // _DictationMark(store: store, phase: phase),
               // O programa que saiu, com o botão de subir de novo onde a
               // pessoa está olhando: um painel de `btop` sem btop é uma
               // moldura vazia, e fechar e refazer o caminho do menu é caro
@@ -564,6 +599,68 @@ class StatusDot extends StatelessWidget {
   }
 }
 
+// --- ditado (vocalização) — fora desta versão --------------------------------
+// Ver o cabeçalho de `services/dictation.dart`.
+
+/*
+/// O microfone aberto, dito no cabeçalho do painel que está ouvindo.
+///
+/// Pulsa porque um microfone aberto sem sinal de vida na tela é um problema de
+/// confiança, não de estética -- e porque a diferença entre "ouvindo" e
+/// "transcrevendo" é a diferença entre falar e esperar. Clicável pelo mesmo
+/// motivo que o X existe ao lado do atalho que fecha painel: quem começou a
+/// ditar com a tecla nem sempre lembra qual era a tecla.
+class _DictationMark extends StatefulWidget {
+  const _DictationMark({required this.store, required this.phase});
+
+  final AppStore store;
+  final DictationPhase phase;
+
+  @override
+  State<_DictationMark> createState() => _DictationMarkState();
+}
+
+class _DictationMarkState extends State<_DictationMark>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 750),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final listening = widget.phase == DictationPhase.recording;
+    final color = listening ? Mx.red : Mx.yellow;
+    final mark = FadeTransition(
+      // Enquanto se fala, o pulso; enquanto o whisper lê, não há o que pulsar
+      // -- ninguém precisa ser lembrado de parar de esperar.
+      opacity: listening
+          ? _pulse.drive(Tween(begin: 0.45, end: 1.0))
+          : const AlwaysStoppedAnimation(1.0),
+      child: _Chip(
+        text: listening ? 'ouvindo…' : 'transcrevendo…',
+        color: color,
+        icon: listening ? Icons.mic : Icons.graphic_eq,
+      ),
+    );
+    if (!listening) return mark;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.store.toggleDictation,
+        child: Tooltip(message: 'parar e colar o que foi dito', child: mark),
+      ),
+    );
+  }
+}
+*/
+
 class _Chip extends StatelessWidget {
   const _Chip({required this.text, required this.color, this.icon});
   final String text;
@@ -694,6 +791,11 @@ class EmptyPane extends StatelessWidget {
 /// thing that is happening — so it gets a mark of its own in both places a
 /// panel appears. The tooltip is the whole queue, because "3 passos" without
 /// them is a promise you cannot check.
+///
+/// A primeira linha é o *estado* da fila, e ela existe por causa do caso em
+/// que o fluxo parece travado: sessão ociosa, fila cheia, nada acontecendo.
+/// Quase sempre a resposta é que os agentes que ela abriu ainda estão de pé
+/// (ver [HookState.forksOut]), e isso não se via em lugar nenhum.
 class FollowUpMark extends StatelessWidget {
   const FollowUpMark({super.key, required this.tab});
   final MxTab tab;
@@ -702,8 +804,18 @@ class FollowUpMark extends StatelessWidget {
   Widget build(BuildContext context) {
     final steps = tab.followUps;
     if (steps.isEmpty) return const SizedBox.shrink();
+    final forks = tab.hooks.forksOut;
+    final held = tab.armed && forks > 0;
+    final color = held ? Mx.yellow : Mx.purple;
     return Tooltip(
       message: [
+        if (held)
+          'esperando $forks ${forks == 1 ? 'agente' : 'agentes'} dela terminarem'
+        else if (tab.armed)
+          'dispara assim que ela parar'
+        else
+          'dispara quando o turno dela acabar',
+        '',
         for (var i = 0; i < steps.length; i++)
           '${i + 1}. ${steps[i].kind.label}'
               '${steps[i].text.isEmpty ? '' : ': ${_clip(steps[i].text)}'}',
@@ -711,12 +823,12 @@ class FollowUpMark extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.playlist_play, size: 15, color: Mx.purple),
+          Icon(held ? Icons.hourglass_top : Icons.playlist_play, size: 15, color: color),
           if (steps.length > 1) ...[
             const SizedBox(width: 2),
             Text(
               '${steps.length}',
-              style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: Mx.purple),
+              style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: color),
             ),
           ],
         ],

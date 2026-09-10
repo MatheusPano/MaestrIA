@@ -24,6 +24,12 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
+	<!-- ditado (vocalização): fora desta versão. Ver lib/services/dictation.dart.
+	     A permissão volta com a feature: um app que pede o microfone e não grava
+	     nada é um diálogo do sistema sem resposta.
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O ditado grava o que você fala, transcreve na própria máquina e cola o texto no prompt da sessão.</string>
+	-->
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

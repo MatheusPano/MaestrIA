@@ -1,3 +1,6 @@
+// --- ditado (vocalização) — fora desta versão -------------------------------
+// Ver o cabeçalho de `lib/services/dictation.dart`.
+// import AVFoundation
 import Cocoa
 import FlutterMacOS
 import Quartz
@@ -22,6 +25,14 @@ class MainFlutterWindow: NSWindow {
   /// walks the responder chain looking for a controller, so the data source
   /// has to outlive the method call that set it.
   private let quickLook = QuickLookSource()
+
+  // --- ditado (vocalização) — fora desta versão -----------------------------
+  // Ver o cabeçalho de `lib/services/dictation.dart`.
+  //
+  // /// O microfone do ditado. Da janela pelo mesmo motivo do Quick Look: ele
+  // /// precisa sobreviver à chamada de método que o ligou, e há um só por
+  // /// máquina -- ver [Dictation] no lado Dart.
+  // private let mic = MicRecorder()
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -95,6 +106,29 @@ class MainFlutterWindow: NSWindow {
         file.beginSheetModal(for: self) { response in
           result(response == .OK ? file.url?.path : nil)
         }
+      case "chooseWorkspace":
+        // O arquivo do VS Code que lista pastas. Um picker próprio e não o de
+        // pasta com arquivos ligados: quem vem por aqui já sabe que quer um
+        // arranjo inteiro, e a lista filtrada é o que impede escolher o json
+        // errado que está do lado.
+        let workspace = NSOpenPanel()
+        workspace.canChooseFiles = true
+        workspace.canChooseDirectories = false
+        workspace.allowsMultipleSelection = false
+        workspace.prompt = "Adicionar"
+        workspace.message = "Escolha um workspace do VS Code"
+        // Não há UTI registrada pra `.code-workspace`; pela extensão o sistema
+        // fabrica um tipo dinâmico, que é o bastante pra filtrar.
+        if #available(macOS 11.0, *) {
+          if let type = UTType(filenameExtension: "code-workspace") {
+            workspace.allowedContentTypes = [type]
+          }
+        } else {
+          workspace.allowedFileTypes = ["code-workspace"]
+        }
+        workspace.beginSheetModal(for: self) { response in
+          result(response == .OK ? workspace.url?.path : nil)
+        }
       case "chooseFolder":
         // A sheet on our own window. The osascript picker this replaces
         // opened a loose window belonging to another process, which read as
@@ -112,6 +146,64 @@ class MainFlutterWindow: NSWindow {
         result(FlutterMethodNotImplemented)
       }
     }
+
+    // --- ditado (vocalização) — fora desta versão ---------------------------
+    // Ver o cabeçalho de `lib/services/dictation.dart`. Sem este handler o
+    // canal `maestria/mic` não existe, que é o que o lado Dart já trata como
+    // "este build não tem a metade nativa do microfone".
+
+    /*
+    // O microfone, num canal só dele. Separado do `maestria/dock` porque o
+    // que ele responde é de outra natureza: o dock é um estado que se
+    // empurra, este é um dispositivo que se abre e se fecha.
+    let micChannel = FlutterMethodChannel(
+      name: "maestria/mic",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    micChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(false)
+        return
+      }
+      switch call.method {
+      case "start":
+        guard let path = call.arguments as? String else {
+          result(FlutterError(code: "path", message: "sem caminho pra gravar", details: nil))
+          return
+        }
+        // Pedir sempre, e não só da primeira vez: já decidido, o sistema
+        // responde na hora sem diálogo nenhum, e é assim que uma permissão
+        // revogada no meio do caminho vira uma mensagem em vez de um WAV mudo.
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+          DispatchQueue.main.async {
+            guard granted else {
+              result(
+                FlutterError(
+                  code: "denied",
+                  message:
+                    "o microfone está bloqueado pra Maestria — Ajustes › Privacidade › Microfone",
+                  details: nil))
+              return
+            }
+            do {
+              try self.mic.start(path: path)
+              result(true)
+            } catch {
+              result(
+                FlutterError(code: "mic", message: error.localizedDescription, details: nil))
+            }
+          }
+        }
+      case "stop":
+        result(self.mic.stop() != nil)
+      case "cancel":
+        self.mic.cancel()
+        result(true)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    */
 
     super.awakeFromNib()
   }

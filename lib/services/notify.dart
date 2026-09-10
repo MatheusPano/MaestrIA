@@ -28,6 +28,28 @@ class Notifier {
     }
   }
 
+  /// O painel nativo pra escolher um `.code-workspace`, como sheet da nossa
+  /// janela.
+  ///
+  /// Separado de [chooseFolder] em vez de um picker só que aceita os dois: o
+  /// "abrir sem pasta" também usa aquele, e ali um arquivo não é resposta pra
+  /// pergunta "onde o painel vai rodar".
+  ///
+  /// Devolve as duas respostas separadas porque elas são mesmo duas. Desistir
+  /// de escolher é uma resposta e merece silêncio; não haver painel nenhum do
+  /// outro lado não é -- e engolir as duas iguais dá um botão que não faz
+  /// nada, que é o sintoma mais difícil de ler que existe. Foi assim que este
+  /// método apareceu: um hot reload põe o Dart novo por cima do binário
+  /// nativo de antes, o método ainda não existe lá e o clique não produz nem
+  /// um erro.
+  static Future<({String? path, bool available})> chooseWorkspace() async {
+    try {
+      return (path: await _dock.invokeMethod<String>('chooseWorkspace'), available: true);
+    } on MissingPluginException {
+      return (path: null, available: false);
+    }
+  }
+
   /// O painel nativo pra escolher um markdown, como sheet da nossa janela.
   ///
   /// [startIn] é onde ele abre — a pasta do painel em foco, que é quase sempre

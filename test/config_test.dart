@@ -5,14 +5,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/store.dart';
 
-/// O `layout.panes` que o store acabou de gravar. O save é debounced, então
-/// o arquivo sai do caminho primeiro e a leitura espera ele reaparecer.
-Future<List<Map<String, dynamic>>> savedPanes(AppStore store) async {
+/// O config que o store acabou de gravar. O save é debounced, então o arquivo
+/// sai do caminho primeiro e a leitura espera ele reaparecer.
+Future<Map<String, dynamic>> savedConfig(AppStore store) async {
   final file = File(store.configPath);
   for (var i = 0; i < 60 && !file.existsSync(); i++) {
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
-  final saved = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+  return jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+}
+
+/// O `layout.panes` que ele gravou.
+Future<List<Map<String, dynamic>>> savedPanes(AppStore store) async {
+  final saved = await savedConfig(store);
   return ((saved['layout'] as Map)['panes'] as List).cast<Map<String, dynamic>>();
 }
 
@@ -67,5 +72,34 @@ void main() {
 
     final panes = await savedPanes(store);
     expect(panes.map((p) => p['sessionId']), ['sess-do-fundo']);
+  });
+
+  // Um `writeAsString` direto cria o arquivo, trunca e só depois escreve --
+  // quem lesse nessa fresta achava zero byte. E quem lê o config é o
+  // carregador, que engole a exceção do `jsonDecode`: a janela abria sem
+  // pasta, sem projeto e sem layout por causa de uma leitura que caiu no
+  // milissegundo errado. O `rename` dentro da mesma pasta é atômico.
+  test('o config é escrito ao lado e movido pra cima, sem deixar rascunho', () async {
+    final store = AppStore();
+    addTearDown(store.dispose);
+    store.folders.add(Folder(root: '/repo', name: 'meu-repo'));
+
+    final file = File(store.configPath);
+    if (file.existsSync()) file.deleteSync();
+    store.toggleGroupsCollapsed();
+
+    // Inteiro, e não um pedaço: é o que o rename garante a quem chegar depois.
+    final saved = await savedConfig(store);
+    expect((saved['folders'] as List).single['root'], '/repo');
+    expect(saved['groupsCollapsed'], isTrue);
+
+    // E o temporário não fica pra trás na pasta do estado. O pid no nome dele
+    // é pela segunda janela: duas maestrias guardam no mesmo config, e com um
+    // nome fixo elas escreveriam uma dentro do rascunho da outra.
+    final left = file.parent
+        .listSync()
+        .map((e) => e.path.split('/').last)
+        .where((name) => name.startsWith('config.json') && name != 'config.json');
+    expect(left, isEmpty);
   });
 }

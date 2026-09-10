@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:maestria/models.dart';
+import 'package:maestria/services/layout.dart';
 import 'package:maestria/services/shortcuts.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/theme.dart';
+import 'package:maestria/ui/keys.dart';
 import 'package:maestria/ui/settings.dart';
 
 const _cmdT = MxChord(LogicalKeyboardKey.keyT, meta: true);
@@ -36,7 +39,7 @@ Future<AppStore> pumpSettings(WidgetTester tester) async {
 /// do teste é um teste que falha — ou, pior, um teste que escreve no
 /// ~/.maestria de quem o rodou. Desmontar antes de [AppStore.dispose] é o que
 /// cancela a gravação com a árvore ainda inteira.
-Future<void> closeSettings(WidgetTester tester, AppStore store) async {
+Future<void> closeWindow(WidgetTester tester, AppStore store) async {
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pumpAndSettle();
   store.dispose();
@@ -58,6 +61,42 @@ Future<void> press(
     await tester.sendKeyUpEvent(m, platform: 'macos');
   }
   await tester.pumpAndSettle();
+}
+
+/// A janela reduzida ao que um atalho precisa: o mapa montado do store, e um
+/// contexto abaixo do Navigator pra um diálogo poder abrir.
+Future<AppStore> pumpKeys(WidgetTester tester, AppStore store) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: Mx.theme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (ctx) => CallbackShortcuts(
+            bindings: MxKeys.bindings(store, ctx),
+            child: const Focus(autofocus: true, child: SizedBox.expand()),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return store;
+}
+
+/// Um painel na tela e em foco, sem pty atrás dele.
+MxTab focusedPanel(AppStore store, {String title = 'permissão do drive'}) {
+  final tab = MxTab(
+    id: 'tab1',
+    folder: Folder(root: '/repo', name: 'meu-repo'),
+    kind: TabKind.claude,
+    cwd: '/repo',
+    branch: '',
+    customLabel: title,
+  );
+  store.tabs.add(tab);
+  store.panes = PaneLeaf(tab.id);
+  store.focusedPaneId = tab.id;
+  return tab;
 }
 
 void main() {
@@ -219,6 +258,36 @@ void main() {
     });
   });
 
+  group('renomear pelo teclado', () {
+    testWidgets('⌘E pergunta o nome do painel em foco', (tester) async {
+      final store = await pumpKeys(tester, AppStore());
+      final tab = focusedPanel(store);
+
+      await press(tester, LogicalKeyboardKey.keyE, holding: [LogicalKeyboardKey.metaLeft]);
+      expect(find.text('renomear painel'), findsOneWidget);
+      // Já com o nome de agora dentro: renomear quase sempre é corrigir o que
+      // está escrito, não escrever de novo do zero.
+      expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, tab.title);
+
+      await tester.enterText(find.byType(TextField), 'permissão do google');
+      await tester.tap(find.text('ok'));
+      await tester.pumpAndSettle();
+
+      expect(tab.title, 'permissão do google');
+      await closeWindow(tester, store);
+    });
+
+    testWidgets('e sem painel nenhum em foco, não abre diálogo vazio', (tester) async {
+      final store = await pumpKeys(tester, AppStore());
+
+      await press(tester, LogicalKeyboardKey.keyE, holding: [LogicalKeyboardKey.metaLeft]);
+
+      expect(find.text('renomear painel'), findsNothing);
+      expect(store.banner, contains('renomear'));
+      await closeWindow(tester, store);
+    });
+  });
+
   group('a tela de configurações', () {
     testWidgets('abre no tema, e o tema é a galeria que era um diálogo', (tester) async {
       final store = await pumpSettings(tester);
@@ -226,7 +295,7 @@ void main() {
       expect(find.text('aparência'), findsOneWidget);
       expect(find.text(MxThemes.nord.label), findsOneWidget);
 
-      await closeSettings(tester, store);
+      await closeWindow(tester, store);
     });
 
     testWidgets('trocar um atalho é clicar na tecla e digitar a nova', (tester) async {
@@ -253,7 +322,7 @@ void main() {
       expect(find.text('⇧⌘G'), findsOneWidget);
       expect(find.text('⌘T'), findsNothing);
 
-      await closeSettings(tester, store);
+      await closeWindow(tester, store);
     });
 
     testWidgets('uma tecla que não pode diz por que, e não é gravada', (tester) async {
@@ -272,7 +341,7 @@ void main() {
       // Continua gravando: a tecla recusada não desiste da troca por você.
       expect(find.textContaining('pressione a combinação'), findsOneWidget);
 
-      await closeSettings(tester, store);
+      await closeWindow(tester, store);
     });
 
     testWidgets('⎋ desiste da gravação sem mexer no mapa', (tester) async {
@@ -291,7 +360,7 @@ void main() {
       // E o diálogo fica de pé: o ⎋ foi da gravação, não da tela.
       expect(find.byType(Dialog), findsOneWidget);
 
-      await closeSettings(tester, store);
+      await closeWindow(tester, store);
     });
   });
 }

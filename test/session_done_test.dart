@@ -117,9 +117,9 @@ void main() {
       store.dispose();
     });
 
-    // O menu diz "limpar encerrados e concluídos": marcar não fecha, mas
-    // pedir a varrida fecha o que foi marcado -- senão sobraria fechar um a
-    // um justamente os painéis já declarados resolvidos.
+    // O menu diz "limpar concluídos": marcar não fecha, mas pedir a varrida
+    // fecha o que foi marcado -- senão sobraria fechar um a um justamente os
+    // painéis já declarados resolvidos.
     test('is swept away when the folder is cleared, and the pending stay', () {
       final (store, folder) = storeWithFolder();
       final feito = panel(store, folder, 'essa funcionou');

@@ -120,6 +120,7 @@ class MxChord {
     const MxChord(LogicalKeyboardKey.keyH, meta: true, alt: true):
         'o macOS usa ⌥⌘H pra esconder os outros apps',
     const MxChord(LogicalKeyboardKey.keyV, meta: true): 'o painel cola com ⌘V',
+    const MxChord(LogicalKeyboardKey.keyC, meta: true): 'o painel copia a seleção com ⌘C',
   };
 
   @override
@@ -283,6 +284,13 @@ enum MxAction {
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyN, meta: true)],
   ),
+  renamePane(
+    id: 'rename',
+    label: 'renomear o painel em foco',
+    hint: 'o título dele; em branco, volta a ser o da branch ou da pasta',
+    group: MxGroup.sessions,
+    defaults: [MxChord(LogicalKeyboardKey.keyE, meta: true)],
+  ),
   closePane(
     id: 'close',
     label: 'fechar o painel em foco',
@@ -342,6 +350,17 @@ enum MxAction {
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyO, meta: true)],
   ),
+  // --- ditado (vocalização) — fora desta versão ------------------------------
+  // Ver o cabeçalho de `services/dictation.dart`.
+  // Fora da enum, o ⌘⇧D volta a ser uma tecla livre — e um config
+  // gravado com ele preso ao ditado é lido e descartado sozinho.
+  // dictate(
+    // id: 'dictate',
+    // label: 'ditar no painel em foco',
+    // hint: 'abre o microfone; aperte de novo pra transcrever e colar no prompt',
+    // group: MxGroup.sessions,
+    // defaults: [MxChord(LogicalKeyboardKey.keyD, meta: true, shift: true)],
+  // ),
   readPlan(
     id: 'plan',
     label: 'ver o plano da sessão em foco',

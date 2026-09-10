@@ -44,7 +44,35 @@ class SessionNote {
   final bool exited;
 }
 
-/// A commit made today, as `git log` hands it over.
+/// Uma conversa daquele dia que não está nesta janela.
+///
+/// De um dia que já passou não sobra painel nenhum — painéis morrem com a
+/// janela —, e o que sobra é o transcript que o próprio Claude Code arquiva.
+/// Quem os lê é `services/history.dart`; aqui eles chegam achatados, do mesmo
+/// jeito que uma sessão.
+class ArchivedChat {
+  const ArchivedChat({
+    required this.title,
+    required this.folder,
+    required this.at,
+    this.size = '',
+  });
+
+  final String title;
+
+  /// O nome curto da pasta em que ela rodou.
+  final String folder;
+
+  /// A última vez que alguém falou nela — não a hora em que começou: o que se
+  /// tem sem abrir o arquivo é o mtime dele.
+  final DateTime at;
+
+  /// O tamanho do transcript numa palavra ("312 kB"), que é o único "quão
+  /// longa foi essa conversa" que sai de um stat.
+  final String size;
+}
+
+/// A commit from the reported day, as `git log` hands it over.
 class _Commit {
   _Commit(this.hash, this.time, this.ref, this.subject);
   final String hash;
@@ -61,7 +89,7 @@ class _Bench {
   final List<String> files;
 }
 
-/// The day, gathered and then handed to Claude to be told back as prose.
+/// A day, gathered and then handed to Claude to be told back as prose.
 ///
 /// The split is the whole design: everything factual — which commits, which
 /// worktrees are dirty, which panels ran and what they wrote — is collected
@@ -70,6 +98,13 @@ class _Bench {
 /// go and *find* the day instead would be four minutes of tool calls and a
 /// report that misses the sessions, because those live in this window and
 /// nowhere else.
+///
+/// O dia é escolhido, e nem todo dia se conta do mesmo jeito. De hoje há tudo:
+/// os painéis desta janela, com o que cada sessão pediu e mexeu, e o que está
+/// sem commitar agora. De ontem — que é o dia que se fala na daily da manhã —
+/// e de 25 de agosto há os commits daquele dia e as conversas arquivadas, e
+/// mais nada: painéis não atravessam o dia e o `git status` só sabe do agora.
+/// Ver [material], que diz isso no próprio material em vez de calar.
 class DailyReport {
   /// Longer than a report ever takes, short enough that a hung CLI does not
   /// leave the dialog spinning until the app is quit.
@@ -79,6 +114,7 @@ class DailyReport {
   static const _maxCommits = 40;
   static const _maxDirtyFiles = 12;
   static const _maxTouched = 25;
+  static const _maxChats = 25;
 
   static String get _home => Platform.environment['HOME'] ?? '/';
 
@@ -93,17 +129,38 @@ class DailyReport {
     required Map<String, List<WorktreeInfo>> worktrees,
     required List<Project> projects,
     required List<SessionNote> sessions,
+    required DateTime day,
+    List<ArchivedChat> chats = const [],
     DateTime? now,
   }) async {
     final at = now ?? DateTime.now();
+    final today = sameDay(day, at);
     final out = StringBuffer()
-      ..writeln('# material do dia — ${_longDate(at)}, ${_hhmm(at)}')
+      ..writeln(
+        today
+            ? '# material do dia — ${_longDate(day)}, ${_hhmm(at)}'
+            : '# material de ${_longDate(day)}',
+      )
       ..writeln();
+
+    // Um dia que já passou vem com menos, e o relatório precisa saber disso
+    // antes de escrever: senão ele lê a ausência da bancada como bancada
+    // limpa, e afirma sobre aquela noite uma coisa que ninguém coletou.
+    if (!today) {
+      out
+        ..writeln(
+          'levantado em ${_longDate(at)}, às ${_hhmm(at)}. De um dia que já '
+          'passou o que existe é isto: os commits daquele dia e as conversas '
+          'arquivadas. O que estava sem commitar naquele dia não se sabe mais.',
+        )
+        ..writeln();
+    }
 
     // Folders in parallel: each one is a handful of round trips through a
     // login shell, and they have nothing to say to each other.
     final gathered = await Future.wait([
-      for (final f in folders) _folderSection(f, worktrees[f.root] ?? const []),
+      for (final f in folders)
+        _folderSection(f, worktrees[f.root] ?? const [], day, today: today),
     ]);
 
     out.writeln('## pastas');
@@ -127,7 +184,10 @@ class DailyReport {
         final where = folders.any((f) => f.root == p.folderRoot)
             ? 'pasta ${p.folderRoot.split('/').last}'
             : 'avulsos';
-        out.writeln('- ${p.name} ($where) — $panels painel(éis)');
+        // A contagem de painéis é uma frase sobre agora. Num relatório de
+        // outro dia ela seria sempre zero, e zero leria como "ninguém tocou
+        // nesse projeto naquele dia" -- que não é o que o número sabe.
+        out.writeln(today ? '- ${p.name} ($where) — $panels painel(éis)' : '- ${p.name} ($where)');
         final brief = p.brief.trim();
         if (brief.isNotEmpty) out.writeln('  briefing: ${_oneLine(brief, 300)}');
       }
@@ -137,17 +197,45 @@ class DailyReport {
     out.writeln('## sessões');
     out.writeln();
     if (sessions.isEmpty) {
-      out.writeln('nenhuma sessão aberta hoje.');
+      out.writeln(
+        today
+            ? 'nenhuma sessão aberta hoje.'
+            : 'nenhum painel desta janela é daquele dia — painéis não '
+                  'atravessam o dia. O que rodou está nas conversas.',
+      );
     } else {
       for (final s in sessions) {
         out.writeln(_session(s));
       }
     }
     out.writeln();
+
+    if (chats.isNotEmpty) {
+      out
+        ..writeln('## conversas daquele dia')
+        ..writeln()
+        ..writeln(
+          'do arquivo do próprio Claude Code, não desta janela. Dizem em que '
+          'assunto o dia foi gasto; o que foi entregue está nos commits.',
+        )
+        ..writeln();
+      for (final c in chats.take(_maxChats)) {
+        out.writeln(_chat(c));
+      }
+      if (chats.length > _maxChats) {
+        out.writeln('- … e mais ${chats.length - _maxChats}');
+      }
+      out.writeln();
+    }
     return out.toString();
   }
 
-  static Future<String> _folderSection(Folder f, List<WorktreeInfo> trees) async {
+  static Future<String> _folderSection(
+    Folder f,
+    List<WorktreeInfo> trees,
+    DateTime day, {
+    required bool today,
+  }) async {
     final out = StringBuffer('### ${f.name} (${f.root})');
     if (f.branch.isNotEmpty) out.write(' — checkout principal em ${f.branch}');
     out.writeln();
@@ -160,11 +248,12 @@ class DailyReport {
     }
 
     final email = (await Sh.run('git config user.email', cwd: f.root)).stdout.trim();
-    final commits = await _commitsToday(f.root, email);
+    final commits = await _commitsOn(f.root, email, day);
+    final when = today ? 'de hoje' : 'de ${_dayMonth(day)}';
     out.writeln(
       email.isEmpty
-          ? 'commits de hoje (autor não filtrado — o repo não tem user.email configurado):'
-          : 'commits de hoje, de $email:',
+          ? 'commits $when (autor não filtrado — o repo não tem user.email configurado):'
+          : 'commits $when, de $email:',
     );
     if (commits.isEmpty) {
       out.writeln('- nenhum.');
@@ -172,6 +261,20 @@ class DailyReport {
       for (final c in commits) {
         out.writeln('- ${c.time} · ${c.hash} · ${c.ref} · ${c.subject}');
       }
+    }
+
+    // A bancada é uma pergunta sobre agora: `git status` diz como a checkout
+    // *está*, não como ela estava em 25 de agosto. Então num relatório de
+    // outro dia ela não é coletada -- e o material diz isso, porque uma seção
+    // ausente seria lida como uma bancada limpa.
+    if (!today) {
+      out
+        ..writeln(
+          'trabalho não commitado: não dá pra saber — o git só conhece o '
+          'estado de agora.',
+        )
+        ..writeln();
+      return out.toString();
     }
 
     // The bench: every checkout of this repo that is carrying uncommitted
@@ -200,12 +303,19 @@ class DailyReport {
     return out.toString();
   }
 
-  /// Today's commits across every ref of the repo, so a worktree's branch
+  /// The day's commits across every ref of the repo, so a worktree's branch
   /// counts without having to be visited.
-  static Future<List<_Commit>> _commitsToday(String root, String email) async {
+  ///
+  /// A janela é fechada nos dois lados, e não um `--since=midnight`: um
+  /// relatório de 25 de agosto pedido em setembro traria os dez dias que
+  /// vieram depois. As duas pontas vão sem fuso, que é como o git as lê na
+  /// hora local -- a mesma em que o dia foi escolhido no calendário.
+  static Future<List<_Commit>> _commitsOn(String root, String email, DateTime day) async {
     final author = email.isEmpty ? '' : ' --author=${Sh.q(email)}';
     final r = await Sh.run(
-      'git log --all --source --no-merges --since=midnight$author '
+      'git log --all --source --no-merges '
+      '--since=${Sh.q('${_ymd(day)} 00:00:00')} '
+      '--until=${Sh.q('${_ymd(day)} 23:59:59')}$author '
       "--date=format:'%H:%M' --pretty=format:'%h§%ad§%S§%s'",
       cwd: root,
     );
@@ -258,6 +368,13 @@ class DailyReport {
     return out.toString();
   }
 
+  static String _chat(ArchivedChat c) {
+    final out = StringBuffer('- ${c.title} · pasta ${c.folder}');
+    out.write(' · último movimento ${_hhmm(c.at)}');
+    if (c.size.isNotEmpty) out.write(' · ${c.size}');
+    return out.toString();
+  }
+
   // --- the report ---------------------------------------------------------
 
   /// What Claude is asked to do with the material. Kept next to it, because
@@ -273,15 +390,37 @@ class DailyReport {
   /// leitor, não gosto: uma linha solta debaixo do bullet é a *mesma* linha em
   /// markdown -- uma quebra simples colapsa em espaço -- e sairia grudada no
   /// título dela em `ui/doc_pane.dart`.
-  static String promptFor(String material) =>
-    '''
+  ///
+  /// Que dia é muda três coisas no pedido, e nenhuma é decoração: a data (o
+  /// modelo não tem de onde saber que 25/08 foi uma segunda), a ocasião em que
+  /// isso vai ser lido, e o que o "em aberto" pode afirmar -- de um dia antigo
+  /// não há bancada coletada pra chamar de pendência.
+  static String promptFor(String material, {required DateTime day, DateTime? now}) {
+    final at = now ?? DateTime.now();
+    final today = sameDay(day, at);
+    final yesterday = sameDay(day, _dayBefore(at));
+    final which = today ? 'de hoje' : 'de ${_longDate(day)}';
+    final sources = today
+        ? 'commits, trabalho não commitado e as sessões que rodaram'
+        : 'os commits daquele dia e as conversas arquivadas';
+    final occasion = today
+        ? 'Ele lê isso no fim do expediente e repete de manhã na daily'
+        : yesterday
+        ? 'Ele vai repetir isso na daily de hoje, em minutos'
+        : 'Ele está olhando pra trás pra lembrar o que fez nesse dia';
+    final loose = today
+        ? 'o que ficou sem commit, as sessões paradas esperando resposta, e o '
+              'próximo passo que o material sugere'
+        : 'o que o material daquele dia deixa em aberto — conversa que parou '
+              'no meio, entrega que os commits mostram pela metade. Nada de '
+              'trabalho não commitado: isso não foi coletado';
+    return '''
 Você é o assistente do maestria, o cockpit onde este usuário toca as sessões de
-Claude Code do dia dele. Abaixo vai o material bruto de hoje, coletado pelo
-próprio app: commits, trabalho não commitado e as sessões que rodaram.
+Claude Code do dia dele. Abaixo vai o material bruto $which, coletado pelo
+próprio app: $sources.
 
-Escreva o relatório do dia, em português do Brasil e em markdown. Ele lê isso no
-fim do expediente e repete de manhã na daily — então escreva o que ele vai
-*falar*, na ordem em que ele falaria.
+Escreva o relatório desse dia, em português do Brasil e em markdown.
+$occasion — então escreva o que ele vai *falar*, na ordem em que ele falaria.
 
 - comece com uma frase só, dizendo como foi o dia;
 - depois uma seção `##` por frente de trabalho (o projeto quando houver, senão a
@@ -295,9 +434,7 @@ fim do expediente e repete de manhã na daily — então escreva o que ele vai
   classe quando ajudarem;
 - agrupe: commits que são a mesma entrega viram um bullet só, e no máximo seis
   bullets por frente. Nunca repita a lista de commits linha a linha;
-- termine com uma seção `## em aberto`, na mesma forma: o que ficou sem commit,
-  as sessões paradas esperando resposta, e o próximo passo que o material
-  sugere;
+- termine com uma seção `## em aberto`, na mesma forma: $loose;
 - só o que está no material. Não invente tarefa, decisão nem resultado, e se o
   dia foi vazio diga isso em uma linha e pare;
 - sem preâmbulo, sem "aqui está o relatório", sem fechamento genérico, sem
@@ -317,10 +454,11 @@ A forma, exatamente:
 
 $material
 ''';
+  }
 
   /// Run the report. One headless `claude -p`, nothing else on the machine.
-  static Future<ReportOutcome> ask(String material) async {
-    final at = DateTime.now();
+  static Future<ReportOutcome> ask(String material, {required DateTime day, DateTime? now}) async {
+    final at = now ?? DateTime.now();
     Directory? temp;
     try {
       temp = await Directory.systemTemp.createTemp('maestria-relatorio');
@@ -328,7 +466,7 @@ $material
       // commit subjects and prompts the user wrote, and neither is anything
       // to hand a shell to re-read as syntax.
       final file = File('${temp.path}/prompt.md');
-      await file.writeAsString(promptFor(material));
+      await file.writeAsString(promptFor(material, day: day, now: at));
 
       final process = await Process.start(
         Sh.shell,
@@ -413,8 +551,44 @@ $material
   static String _longDate(DateTime d) =>
       '${_weekdays[d.weekday - 1]}, ${d.day} de ${_months[d.month - 1]} de ${d.year}';
 
-  static String _hhmm(DateTime d) =>
-      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  /// O mês por extenso: "setembro de 2025".
+  ///
+  /// Público porque o calendário que pergunta o dia (ver `ui/dialogs.dart`)
+  /// escreve o mês com os mesmos nomes que o material — e doze strings
+  /// copiadas pra outro arquivo divergem na primeira vez que alguém mexer.
+  static String monthName(DateTime d) => '${_months[d.month - 1]} de ${d.year}';
+
+  /// Se dois instantes caem no mesmo dia do calendário.
+  ///
+  /// Público porque a pergunta é a mesma em três lugares: aqui, no store que
+  /// separa os painéis daquele dia, e no calendário que marca o hoje.
+  static bool sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// O dia anterior a [d], pela aritmética do calendário e não por 24 horas:
+  /// no domingo em que o horário de verão entra as duas contas divergem.
+  static DateTime _dayBefore(DateTime d) => DateTime(d.year, d.month, d.day - 1);
+
+  /// Como o dia se chama num título de painel e num aviso: "do dia" quando é
+  /// hoje — que é como o relatório sempre se chamou —, "de ontem", ou a data.
+  ///
+  /// O ano só aparece quando não é este: "de 25/08" já é uma data, e o painel
+  /// tem 200 e poucos pixels de cabeçalho.
+  static String label(DateTime day, {DateTime? now}) {
+    final at = now ?? DateTime.now();
+    if (sameDay(day, at)) return 'do dia';
+    if (sameDay(day, _dayBefore(at))) return 'de ontem';
+    return day.year == at.year ? 'de ${_dayMonth(day)}' : 'de ${_dayMonth(day)}/${day.year}';
+  }
+
+  static String _dayMonth(DateTime d) => '${_two(d.day)}/${_two(d.month)}';
+
+  /// A data como o git a aceita nas duas pontas de [_commitsOn].
+  static String _ymd(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
+
+  static String _two(int n) => n.toString().padLeft(2, '0');
+
+  static String _hhmm(DateTime d) => '${_two(d.hour)}:${_two(d.minute)}';
 
   /// A field that may be a paragraph, put back on one line and cut. The
   /// material is a list; a wall of text inside a bullet stops being one.

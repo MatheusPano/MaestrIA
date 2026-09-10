@@ -264,9 +264,11 @@ void main() {
       store.dispose();
     });
 
-    // Estreita, não cabem o campo e a palavra "pasta" — e é o campo que fica.
-    // Um estouro aqui é uma barra de ferramentas que vira uma faixa amarela.
-    testWidgets('estreita, sobra o + sozinho e nada estoura', (tester) async {
+    // Na lateral no mínimo: o campo divide o cabeçalho com a engrenagem, e os
+    // dois glifos que produzem alguma coisa na lista estão no rodapé -- que é
+    // a razão de eles terem descido. Um estouro aqui é uma barra de
+    // ferramentas que vira uma faixa amarela.
+    testWidgets('estreita, o cabeçalho é campo + engrenagem e o resto é o pé', (tester) async {
       final store = storeWithFolder();
       panel(store, 'permissão do drive');
       await tester.pumpWidget(
@@ -285,7 +287,28 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.text('pasta'), findsNothing);
+
+      final field = tester.getRect(find.byType(TextField));
+
+      // A pasta e o relatório embaixo do campo, não ao lado dele. Pelo glifo e
+      // não pelo tooltip: os dois que ensinam atalho carregam a tecla junto.
       expect(find.byTooltip('adicionar uma pasta ao cockpit'), findsOneWidget);
+      for (final icon in [Icons.create_new_folder_outlined, Icons.receipt_long_outlined]) {
+        final glyph = find.byIcon(icon);
+        expect(glyph, findsOneWidget, reason: '$icon');
+        expect(tester.getRect(glyph).top, greaterThan(field.bottom), reason: '$icon');
+      }
+
+      // A engrenagem é a única que divide a linha com o campo.
+      final gear = tester.getRect(find.byIcon(Icons.settings_outlined));
+      expect(gear.center.dy, closeTo(field.center.dy, 1));
+      expect(gear.left, greaterThan(field.right));
+
+      // 140px pra escrever, com a lateral no mínimo. Eram 84 quando os três
+      // glifos saíam deste mesmo orçamento -- é o que a engrenagem custa
+      // sozinha, e o que os outros dois deixaram de custar.
+      expect(field.width, greaterThan(120));
+
       expect(tester.takeException(), isNull);
       store.dispose();
     });

@@ -183,6 +183,105 @@ void main() {
     });
   });
 
+  group('o link que o programa marcou (OSC 8)', () {
+    /// `ESC]8;;<url>BEL<rótulo>ESC]8;;BEL` — o link como o claude escreve um.
+    String marked(String url, String label) => '\x1b]8;;$url\x07$label\x1b]8;;\x07';
+
+    test('a URL está no rótulo, e o rótulo não a tem escrita', () {
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      t.write('abra ${marked('https://x.dev/auth', 'aqui')} agora');
+
+      // "abra " são as colunas 0..4; "aqui", 5..8.
+      expect(links.at(const CellOffset(5, 0)), 'https://x.dev/auth');
+      expect(links.at(const CellOffset(8, 0)), 'https://x.dev/auth');
+      // O espaço antes e o texto depois não são o link.
+      expect(links.at(const CellOffset(4, 0)), isNull);
+      expect(links.at(const CellOffset(9, 0)), isNull);
+      // E a URL não passou pela tela: é isso que o palpite pela forma não
+      // tinha como achar.
+      expect(t.buffer.getText(), isNot(contains('x.dev')));
+      expect(t.buffer.getText(), contains('abra aqui agora'));
+    });
+
+    test('um rótulo que o terminal quebrou em duas linhas é um link só', () {
+      final t = Terminal(maxLines: 100);
+      t.resize(20, 6);
+      final links = TermLinks(t);
+      t.write('leia ${marked('https://x.dev/a', 'um rótulo bem comprido')}!');
+
+      expect(links.at(const CellOffset(6, 0)), 'https://x.dev/a');
+      expect(links.at(const CellOffset(3, 1)), 'https://x.dev/a');
+      // O `!` depois do fecha já não é dele.
+      expect(links.at(const CellOffset(7, 1)), isNull);
+    });
+
+    test('um file:// vira o caminho, que é o que o app sabe abrir por dentro', () {
+      final dir = withPlan();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      t.write(marked('file://${dir.path}/PLANO.md', 'PLANO.md'));
+
+      expect(links.at(const CellOffset(2, 0)), '${dir.path}/PLANO.md');
+    });
+
+    test('um link de outra máquina fica sendo URL', () {
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      t.write(marked('file://outra-maquina/etc/hosts', 'hosts'));
+
+      expect(links.at(const CellOffset(2, 0)), 'file://outra-maquina/etc/hosts');
+    });
+
+    test('a TUI redesenhou por cima: a célula não é mais do link', () {
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      t.write(marked('https://x.dev/a', 'aqui'));
+      expect(links.at(const CellOffset(1, 0)), 'https://x.dev/a');
+
+      // Mesma linha, outro texto -- o que uma TUI faz a cada quadro.
+      t.write('\r\x1b[2Koutra coisa');
+      expect(links.at(const CellOffset(1, 0)), isNull);
+    });
+
+    test('a linha que caiu do scrollback levou o link com ela', () {
+      final t = Terminal(maxLines: 30);
+      t.resize(20, 4);
+      final links = TermLinks(t);
+      t.write('${marked('https://x.dev/a', 'aqui')}\r\n');
+      expect(links.at(const CellOffset(1, 0)), 'https://x.dev/a');
+
+      for (var i = 0; i < 40; i++) {
+        t.write('linha $i\r\n');
+      }
+      for (var y = 0; y < t.buffer.lines.length; y++) {
+        expect(links.at(CellOffset(1, y)), isNull, reason: 'linha $y');
+      }
+    });
+
+    test('abrir sem fechar, e fechar sem nada dentro, não inventam link', () {
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      // Um abre novo fecha o de antes, como num terminal de verdade.
+      t.write('\x1b]8;;https://x.dev/a\x07um\x1b]8;;https://x.dev/b\x07dois\x1b]8;;\x07');
+      expect(links.at(const CellOffset(0, 0)), 'https://x.dev/a');
+      expect(links.at(const CellOffset(3, 0)), 'https://x.dev/b');
+
+      // Abriu e fechou sem escrever nada: não há célula pra clicar.
+      t.write('\r\n${'\x1b]8;;https://x.dev/c\x07'}\x1b]8;;\x07texto');
+      expect(links.at(const CellOffset(0, 1)), isNull);
+    });
+
+    test('a URI com ; dentro chega inteira', () {
+      final t = Terminal(maxLines: 100);
+      final links = TermLinks(t);
+      t.write(marked('https://x.dev/a?b=1;c=2', 'aqui'));
+
+      expect(links.at(const CellOffset(1, 0)), 'https://x.dev/a?b=1;c=2');
+    });
+  });
+
   group('o clique no terminal', () {
     testWidgets('num .md do scrollback, abre o leitor', (tester) async {
       final dir = withPlan();
@@ -201,6 +300,25 @@ void main() {
       // Encerrado aqui dentro: pôr um documento na tela agenda a escrita do
       // config, e o teste de widget cobra os timers pendentes antes de o
       // `tearDown` acontecer.
+      store.dispose();
+    });
+
+    testWidgets('num rótulo de OSC 8, segue a URL que estava escondida nele', (tester) async {
+      final dir = withPlan();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final store = AppStore();
+      final tab = session(store, dir.path);
+      tab.term.terminal.write(
+        'veja \x1b]8;;file://${dir.path}/PLANO.md\x07o plano\x1b]8;;\x07 agora\r\n',
+      );
+
+      await pumpPane(tester, store, tab);
+      // A sexta coluna é o "o" de "o plano" -- na tela não há URL nenhuma.
+      await tapCell(tester, col: 5, row: 0);
+
+      final reader = store.tabs.firstWhereOrNull((t) => t.isReader);
+      expect(reader, isNotNull, reason: 'o clique no rótulo do link não abriu nada');
+      expect(reader!.doc!.path, '${dir.path}/PLANO.md');
       store.dispose();
     });
 

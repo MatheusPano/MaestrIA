@@ -6,6 +6,7 @@ import 'package:maestria/models.dart';
 import 'package:maestria/services/history.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/dialogs.dart';
+import 'package:maestria/ui/sidebar.dart';
 
 /// As conversas de mentira: `test/fixtures/history` tem a mesma forma que
 /// `~/.claude/projects` -- uma pasta por caminho escapado, um `.jsonl` por
@@ -80,10 +81,12 @@ Future<void> pumpUntil(WidgetTester tester, Finder finder) async {
 /// O diálogo, aberto pelo botão -- que é o que o `+` da lateral faz. Espera
 /// por [until], que é a primeira linha a aparecer: o diálogo é montado no
 /// clique, mas as conversas só chegam quando a leitura do disco volta.
+///
+/// Sem [folder] é o histórico inteiro, que é o que o rodapé da lateral pede.
 Future<void> openHistory(
   WidgetTester tester,
-  AppStore store,
-  Folder folder, {
+  AppStore store, {
+  Folder? folder,
   required Finder until,
 }) async {
   await tester.pumpWidget(
@@ -91,7 +94,7 @@ Future<void> openHistory(
       home: Builder(
         builder: (context) => Scaffold(
           body: TextButton(
-            onPressed: () => showChatHistory(context, store, folder),
+            onPressed: () => showChatHistory(context, store, folder: folder),
             child: const Text('abrir'),
           ),
         ),
@@ -101,6 +104,15 @@ Future<void> openHistory(
   await tester.tap(find.text('abrir'));
   await pumpUntil(tester, until);
 }
+
+/// A lateral inteira, que é onde o botão do histórico mora de verdade.
+Future<void> pumpSidebar(WidgetTester tester, AppStore store) => tester.pumpWidget(
+  MaterialApp(
+    home: Scaffold(
+      body: SizedBox(width: 660, height: 700, child: Sidebar(store: store)),
+    ),
+  ),
+);
 
 void main() {
   group('o histórico', () {
@@ -161,6 +173,23 @@ void main() {
       expect(gone.missing, isTrue);
     });
 
+    // O histórico da janela é o que a lateral não sabe: o `~/.claude/projects`
+    // tem uma pasta por caminho em que o claude rodou, e a maior parte deles
+    // nunca foi adicionada aqui.
+    test('o da janela traz conversa de pasta que não está na lateral', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final folder = Folder(root: '/tmp', name: 'tmp');
+      store.folders.add(folder);
+
+      final all = await store.allChats();
+      final only = await store.chatsIn(folder);
+
+      expect(all.map((c) => c.sessionId).toSet(), {titled, spoke, mute, orphan});
+      // Enquanto o da pasta continua sendo só o dela.
+      expect(only.map((c) => c.sessionId).toSet(), {titled, spoke, mute});
+    });
+
     test('a mais recente vem primeiro', () async {
       final home = Directory.systemTemp.createTempSync('maestria-history');
       addTearDown(() => home.deleteSync(recursive: true));
@@ -213,6 +242,34 @@ void main() {
       // layout salvo leva pra retomá-la de novo amanhã.
       expect(tab.resumeId, titled);
       expect(tab.title, 'Cabeçalho da lateral com a busca');
+    });
+
+    // No histórico da janela ninguém diz de que pasta a conversa é: cada linha
+    // é de um lugar diferente, e quem sabe qual é o caminho dela.
+    test('sem pasta dita, acha a da lateral pelo caminho da conversa', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      store.folders.add(Folder(root: '/tmp', name: 'tmp'));
+      final chat = byId(await store.allChats(), titled);
+
+      store.resumeChat(chat);
+
+      expect(store.asked.single['folder'], '/tmp');
+      expect(store.asked.single['resumeId'], titled);
+    });
+
+    test('a de um repo que não está na lateral cai nos avulsos', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final chat = byId(await store.allChats(), titled);
+
+      store.resumeChat(chat);
+
+      // A pasta é a bandeja, mas o painel sobe onde a conversa rodou: retomar
+      // noutro lugar é retomar uma conversa que fala de arquivos que não estão
+      // lá.
+      expect(store.asked.single['folder'], store.loose.root);
+      expect(store.asked.single['cwd'], '/tmp');
     });
 
     test('a que já está num painel vai pra tela em vez de abrir a segunda', () async {
@@ -269,7 +326,7 @@ void main() {
       store.folders.add(folder);
       // A bandeja dos avulsos pede o histórico inteiro, que é onde a conversa
       // do repo que sumiu aparece.
-      await openHistory(tester, store, store.loose, until: find.text(chamada));
+      await openHistory(tester, store, folder: store.loose, until: find.text(chamada));
 
       expect(find.text('conversas de antes'), findsOneWidget);
       expect(find.text(chamada), findsOneWidget);
@@ -286,11 +343,35 @@ void main() {
       store.dispose();
     });
 
+    testWidgets('sem pasta, mostra as de todas elas de uma vez', (tester) async {
+      final store = NoPty();
+      store.folders.add(Folder(root: '/tmp', name: 'tmp'));
+      await openHistory(tester, store, until: find.text(chamada));
+
+      expect(find.text('todas as conversas'), findsOneWidget);
+      // A de /tmp e a do repo que sumiu, na mesma lista.
+      expect(find.text(chamada), findsOneWidget);
+      expect(find.text('Migrar o schema do relatório'), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('o rodapé da lateral é por onde se chega nele', (tester) async {
+      final store = NoPty();
+      store.folders.add(Folder(root: '/tmp', name: 'tmp'));
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('retomar uma conversa'));
+      await pumpUntil(tester, find.text(chamada));
+
+      expect(find.text('todas as conversas'), findsOneWidget);
+      store.dispose();
+    });
+
     testWidgets('um clique numa linha retoma aquela conversa', (tester) async {
       final store = NoPty();
       final folder = Folder(root: '/tmp', name: 'tmp');
       store.folders.add(folder);
-      await openHistory(tester, store, folder, until: find.text(chamada));
+      await openHistory(tester, store, folder: folder, until: find.text(chamada));
 
       await tester.tap(find.text(chamada));
       await tester.pump();

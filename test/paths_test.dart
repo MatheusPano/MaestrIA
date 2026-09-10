@@ -25,7 +25,7 @@ void main() {
     });
 
     test('caminho absoluto, relativo e vazio passam intactos', () {
-      expect(expandHome('/Volumes/Dev-Mac/repos/foo'), '/Volumes/Dev-Mac/repos/foo');
+      expect(expandHome('/Volumes/Externo/repos/foo'), '/Volumes/Externo/repos/foo');
       expect(expandHome('repos/foo'), 'repos/foo');
       expect(expandHome('./foo'), './foo');
       expect(expandHome(''), '');

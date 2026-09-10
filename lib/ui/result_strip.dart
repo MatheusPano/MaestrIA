@@ -145,7 +145,7 @@ class _FileRowState extends State<_FileRow> {
   /// mostra. Uma planilha continua sendo assunto de outro app.
   Future<void> _open() async {
     if (_gone) {
-      widget.store.showBanner('esse arquivo não está mais lá: ${widget.path}');
+      widget.store.showBanner('esse arquivo não está mais lá: ${widget.path}', sticky: true);
       return;
     }
     if (AppStore.readable(widget.path)) {

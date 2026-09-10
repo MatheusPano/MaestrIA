@@ -116,7 +116,11 @@ void main() {
       await tester.tap(find.text('TASK#47730'));
       await tester.pumpAndSettle();
 
-      expect(find.text('nova sessão do claude aqui'), findsOneWidget);
+      // O mesmo bloco de abrir do + da pasta -- menos retomar conversa, que
+      // é o histórico de outra pasta. Ver `openHereItems`.
+      expect(find.text('sessão do claude'), findsOneWidget);
+      expect(find.text('terminal'), findsOneWidget);
+      expect(find.text('retomar conversa…'), findsNothing);
       expect(find.text('abrir no vscode'), findsOneWidget);
       expect(find.text('excluir worktree…'), findsOneWidget);
     });

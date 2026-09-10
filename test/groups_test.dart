@@ -80,6 +80,22 @@ Future<void> pumpSidebar(WidgetTester tester, AppStore store) => tester.pumpWidg
   ),
 );
 
+/// Deixa o ponteiro parado numa linha: o "limpar" da régua só existe
+/// enquanto se aponta pra ela -- ver loose_tray_test.
+Future<void> hover(WidgetTester tester, Finder target) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  addTearDown(mouse.removePointer);
+  await mouse.moveTo(tester.getCenter(target));
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
+double opacityOf(WidgetTester tester, String tooltip) => tester
+    .widget<AnimatedOpacity>(
+      find.ancestor(of: find.byTooltip(tooltip), matching: find.byType(AnimatedOpacity)),
+    )
+    .opacity;
+
 /// O gesto novo: botão direito num painel da grade.
 Future<void> openPanelMenu(WidgetTester tester, String row) async {
   await tester.tap(find.text(row), buttons: kSecondaryButton);
@@ -455,6 +471,122 @@ void main() {
       await tester.tap(find.text(saved.name));
       await tester.pump();
       expect(Panes.order(store.panes), ['um', 'dois', 'tres']);
+      store.dispose();
+    });
+  });
+
+  group('a régua dos grupos', () {
+    testWidgets('dobra por cima das linhas, e o número diz o que escondeu', (tester) async {
+      final store = gridOfThree();
+      final saved = store.saveGroup('grid da manhã')!;
+      await pumpSidebar(tester, store);
+
+      expect(find.text(saved.name), findsOneWidget);
+      // Duas réguas abertas na tela: a dos grupos e o cabeçalho da pasta.
+      expect(find.byIcon(Icons.expand_more), findsNWidgets(2));
+
+      await tester.tap(find.text('grupos'));
+      await tester.pump();
+      expect(store.groupsCollapsed, isTrue);
+
+      // A lateral se redesenha pelo store, que é quem escuta -- ver main.dart.
+      await pumpSidebar(tester, store);
+      expect(find.text(saved.name), findsNothing);
+      // A palavra e a conta ficam: dobrada, é o que a régua tem pra dizer.
+      expect(find.text('grupos'), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      // Só o cabeçalho da pasta segue aberto: o galho da régua virou.
+      expect(find.byIcon(Icons.expand_more), findsOneWidget);
+
+      await tester.tap(find.text('grupos'));
+      await pumpSidebar(tester, store);
+      expect(find.text(saved.name), findsOneWidget);
+      store.dispose();
+    });
+
+    test('dobrada, continua dobrada na próxima abertura', () async {
+      final store = gridOfThree();
+      addTearDown(store.dispose);
+      store.saveGroup('grid da manhã');
+      final file = File(store.configPath);
+      if (file.existsSync()) file.deleteSync();
+
+      store.toggleGroupsCollapsed();
+      expect((await savedConfig(store))['groupsCollapsed'], isTrue);
+    });
+  });
+
+  group('limpar os grupos', () {
+    test('esquece todos, e não fecha nem move painel nenhum', () {
+      final store = gridOfThree();
+      addTearDown(store.dispose);
+      store.groupPanes();
+      store.saveGroup('grid da tarde');
+      expect(store.groups, hasLength(2));
+
+      expect(store.clearGroups(), 2);
+      expect(store.groups, isEmpty);
+      // A tela de agora fica como estava -- é o que o diálogo promete.
+      expect(store.tabs, hasLength(3));
+      expect(Panes.order(store.panes), ['um', 'dois', 'tres']);
+      // E ninguém fica lavado da cor de um grupo que já não existe.
+      expect(store.tabs.map((t) => t.groupId), everyElement(isNull));
+      expect(store.clearGroups(), 0);
+    });
+
+    testWidgets('o botão espera o ponteiro e pergunta antes de levar dois', (tester) async {
+      final store = gridOfThree();
+      store.groupPanes();
+      store.saveGroup('grid da tarde');
+      await pumpSidebar(tester, store);
+
+      expect(opacityOf(tester, 'esquecer todos os grupos'), 0);
+      await hover(tester, find.text('grupos'));
+      expect(opacityOf(tester, 'esquecer todos os grupos'), 1);
+
+      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await tester.pumpAndSettle();
+      expect(find.text('esquecer os 2 grupos?'), findsOneWidget);
+
+      await tester.tap(find.text('cancelar'));
+      await tester.pumpAndSettle();
+      expect(store.groups, hasLength(2));
+      store.dispose();
+    });
+
+    testWidgets('confirmado, os grupos e a régua saem juntos', (tester) async {
+      final store = gridOfThree();
+      store.groupPanes();
+      store.saveGroup('grid da tarde');
+      await pumpSidebar(tester, store);
+
+      await hover(tester, find.text('grupos'));
+      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('esquecer'));
+      await tester.pumpAndSettle();
+
+      expect(store.groups, isEmpty);
+      expect(store.banner, contains('2 grupos esquecidos'));
+      // Sem grupo, sem régua: ela não anuncia uma lista vazia.
+      await pumpSidebar(tester, store);
+      expect(find.text('grupos'), findsNothing);
+      store.dispose();
+    });
+
+    // Um grupo só é o "esquecer o grupo" da linha dele, que nunca perguntou
+    // nada: nada fecha, e o arranjo se salva de novo em dois cliques.
+    testWidgets('com um grupo só, não pergunta nada', (tester) async {
+      final store = gridOfThree();
+      store.saveGroup('grid da manhã');
+      await pumpSidebar(tester, store);
+
+      await hover(tester, find.text('grupos'));
+      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await tester.pumpAndSettle();
+
+      expect(store.groups, isEmpty);
+      expect(store.banner, contains('grid da manhã'));
       store.dispose();
     });
   });

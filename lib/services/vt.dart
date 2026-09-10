@@ -1,4 +1,5 @@
-/// Three things xterm 4.0.0 gets wrong about the bytes a TUI writes.
+/// Three things xterm 4.0.0 gets wrong about the bytes a TUI writes, one about
+/// the bytes we write back, and one about reading the screen out again.
 ///
 /// They all show up as the same complaint — "o texto do Claude fica todo
 /// negrito e sublinhado aqui, mas no terminal normal fica normal" — and they
@@ -30,14 +31,35 @@
 ///    half of "tudo sublinhado": not a missing `ESC[24m`, a missing restore.
 ///    [VtTerminal] fixes this too.
 ///
+///  * **The input method's commit, counted more than once.** On Linux with
+///    ibus — the default on Ubuntu, and on Zorin — one composed character
+///    (`´` then `a`) reaches Flutter as three `updateEditingValue` calls in a
+///    row, all three carrying the same finished `á`. xterm works out what was
+///    typed by assuming the platform's editing model is empty again after
+///    every commit (`text.substring(initState.length)` in
+///    `custom_text_edit.dart`), and the reset it asks for is a message like
+///    any other: the updates that arrive before it lands are read as fresh
+///    typing, and claude is handed `ááá`. [VtTerminal.textInput] counts one.
+///
+///  * **The cells nobody wrote in.** A TUI does not pay for its blanks: it
+///    puts a word down, jumps the cursor to the column of the next one with
+///    `ESC[<n>G` and puts that one down, leaving every cell in between at
+///    zero. `buffer.getText` writes *nothing at all* for a cell whose
+///    codepoint is zero (`buffer/line.dart`, `if (codePoint != 0)`), so a
+///    copied line of Claude Code's output reaches the other end as
+///    `Tip:writecode` — every space in it was a cursor move, and none of them
+///    survived the clipboard. [selectedText] reads them as the spaces they
+///    are on screen.
+///
 /// None has a hook to override, so one is fixed on the stream, before the
-/// parser gets to see it, and the others on the terminal, after it.
+/// parser gets to see it, two on the terminal on the way out and one on the
+/// way in — and the last one by reading the buffer here instead of asking it.
 library;
 
 import 'package:xterm/xterm.dart';
 
 /// A [Terminal] that reads `ESC[22m` and `ESC[?1049l` the way every other
-/// terminal does.
+/// terminal does — and that counts a typed character once.
 class VtTerminal extends Terminal {
   VtTerminal({
     super.maxLines,
@@ -72,6 +94,120 @@ class VtTerminal extends Terminal {
     super.useMainBuffer();
     resetCursorStyle();
   }
+
+  /// A key went down, so the next text to arrive was typed by someone.
+  ///
+  /// Called by the pane that holds the keyboard (see `terminal_pane.dart`),
+  /// from before the focus tree gets the event — xterm hides the keys that
+  /// arrive with a composition open, and those are exactly the ones a composed
+  /// character is spending.
+  ///
+  /// A keystroke is worth one insertion and no more, which is the whole trick:
+  /// however many keys go down before the system finally commits something,
+  /// what comes out is one character.
+  void keyWentDown() => _unspentKey = true;
+
+  /// A keystroke that has not yet been answered by text.
+  bool _unspentKey = false;
+
+  /// The last text that actually went to the pty.
+  String? _lastInput;
+
+  /// The typed character, once, however many times the system delivers it.
+  ///
+  /// See the fourth item at the top of this library. What separates ibus's
+  /// repeats from someone really typing the same letter twice is that no key
+  /// went down in between — pressing `á` twice is four keystrokes, and each
+  /// one of them arrives here first.
+  ///
+  /// Empty text is dropped before any of that: an update that carries only a
+  /// composition in progress arrives as an empty string, it has no byte to
+  /// send, and letting it through would spend the keystroke that the composed
+  /// character is still waiting for.
+  @override
+  void textInput(String text) {
+    if (text.isEmpty) return;
+    if (!_unspentKey && text == _lastInput) return;
+    _unspentKey = false;
+    _lastInput = text;
+    super.textInput(text);
+  }
+
+  /// What the app writes on its own account: a wheel notch, `^V`, ESC+CR.
+  ///
+  /// No keystroke has to vouch for these, and they are meant to repeat — a
+  /// wheel turned three notches is the same report three times. [textInput] is
+  /// for what a person typed; this is for what the app said.
+  void send(String data) {
+    _lastInput = null;
+    super.textInput(data);
+  }
+
+  /// A paste is never an echo, however much it repeats what came before it.
+  @override
+  void paste(String text) {
+    _lastInput = null;
+    super.paste(text);
+  }
+}
+
+/// The text of [range], with the blanks a TUI never wrote down.
+///
+/// See the last item at the top of this library: to `buffer.getText` a cell
+/// that was never written to is not a space, it is nothing, and a screen a TUI
+/// laid out with cursor jumps is mostly those. Here an empty cell inside the
+/// selection is the space it looks like.
+///
+/// The empty ones at the *end* of a line are not: those are the rest of a row
+/// nobody drew on, and no terminal puts them on the clipboard. A space the
+/// program actually wrote stays wherever it is — it was selected like any
+/// other character.
+String selectedText(Terminal terminal, BufferRange range) {
+  final buffer = terminal.buffer;
+  final selection = range.normalized;
+  final lines = <StringBuffer>[StringBuffer()];
+
+  for (final segment in selection.toSegments()) {
+    if (segment.line < 0 || segment.line >= buffer.height) continue;
+    final line = buffer.lines[segment.line];
+    // A wrapped line is the second half of the line above it, so it joins
+    // without a break -- the rule `buffer.getText` follows, and the reason a
+    // URL that the terminal split in two is copied whole.
+    if (!(segment.line == selection.begin.y || segment.line == 0 || line.isWrapped)) {
+      lines.add(StringBuffer());
+    }
+    lines.last.write(_segmentText(line, segment.start, segment.end));
+  }
+
+  return lines.join('\n');
+}
+
+/// One line of [selectedText], from cell [start] up to (not including) [end].
+String _segmentText(BufferLine line, int? start, int? end) {
+  final from = (start == null || start < 0) ? 0 : start;
+  final to = (end == null || end > line.length) ? line.length : end;
+
+  // Where the drawn part ends: past this every empty cell is the row's own
+  // padding, and not a gap between two words.
+  var drawn = to;
+  while (drawn > from && line.getCodePoint(drawn - 1) == 0) {
+    drawn--;
+  }
+
+  final out = StringBuffer();
+  for (var i = from; i < drawn; i++) {
+    final codePoint = line.getCodePoint(i);
+    if (codePoint == 0) {
+      // The cell behind a wide character is empty too, and it is not a gap:
+      // the `日` before it is already occupying this column.
+      if (i > 0 && line.getWidth(i - 1) == 2) continue;
+      out.write(' ');
+      continue;
+    }
+    // A wide character the selection cuts in half is not in the selection.
+    if (i + line.getWidth(i) <= to) out.writeCharCode(codePoint);
+  }
+  return out.toString();
 }
 
 /// Drops the `CSI` sequences that xterm would read as display attributes.

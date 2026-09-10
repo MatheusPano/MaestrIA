@@ -4,12 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import 'icons.dart';
 
 /// Anthropic's burst, drawn instead of typed.
 ///
 /// The sidebar used to render the character `✳`, and macOS resolves that to
-/// Apple Color Emoji: a green tile, whatever colour we asked for. A path has
-/// no such opinion — and it is the mark people already read as "claude".
+/// Apple Color Emoji: a green tile, whatever colour we asked for. A drawing
+/// has no such opinion — and it is the mark people already read as "claude".
+///
+/// O desenho é a marca de verdade, vinda de `assets/icons/claude.svg`, e não
+/// mais dez lâminas aproximadas na mão: as proporções são as dela, e não as
+/// que couberam num [CustomPainter]. Ver [MxIcon].
 class ClaudeMark extends StatelessWidget {
   const ClaudeMark({super.key, this.size = 14, this.color = Mx.claude});
 
@@ -17,56 +22,7 @@ class ClaudeMark extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: size,
-    child: CustomPaint(painter: _BurstPainter(color)),
-  );
-}
-
-class _BurstPainter extends CustomPainter {
-  const _BurstPainter(this.color);
-  final Color color;
-
-  /// Ten blades, every other one short. Blades of one length read as a
-  /// snowflake; the mark is a burst.
-  static const _blades = 10;
-
-  /// Half a blade's width, and the hub that welds them into one body — both
-  /// as a fraction of the radius, so the mark is the same shape at 11px and
-  /// at 64.
-  static const _halfWidth = 0.10;
-  static const _hub = 0.17;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = size.shortestSide / 2;
-    final paint = Paint()
-      ..color = color
-      ..isAntiAlias = true;
-    final hw = r * _halfWidth;
-
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    for (var i = 0; i < _blades; i++) {
-      final len = r * (i.isEven ? 1.0 : 0.79);
-      // Parallel-sided for the first half, then drawn to a point: a blade,
-      // not a triangle and not a spike.
-      final blade = Path()
-        ..moveTo(0, -hw)
-        ..lineTo(len * 0.44, -hw * 0.94)
-        ..quadraticBezierTo(len * 0.82, -hw * 0.44, len, 0)
-        ..quadraticBezierTo(len * 0.82, hw * 0.44, len * 0.44, hw * 0.94)
-        ..lineTo(0, hw)
-        ..close();
-      canvas.drawPath(blade, paint);
-      canvas.rotate(2 * math.pi / _blades);
-    }
-    canvas.drawCircle(Offset.zero, r * _hub, paint);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_BurstPainter old) => old.color != color;
+  Widget build(BuildContext context) => MxIcon(MxIcons.claude, size: size, color: color);
 }
 
 /// The mark with a small state badge notched into its corner, the way Warp

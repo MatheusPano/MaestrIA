@@ -7,6 +7,8 @@ import '../services/store.dart';
 import '../theme.dart';
 import 'claude_mark.dart';
 import 'dialogs.dart';
+import 'icons.dart';
+import 'menus.dart';
 import 'panel.dart';
 import 'panes.dart';
 import 'settings.dart';
@@ -46,14 +48,24 @@ class Sidebar extends StatelessWidget {
                 // Com uma busca em curso, um grupo sem achado nenhum sai
                 // inteiro: o cabeçalho dele seria uma linha dizendo "não é
                 // aqui" no lugar de uma que é.
-                for (final p in store.folders)
-                  if (!store.filtering || store.hasHits(p))
-                    _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
+                //
+                // Uma linha é uma pasta ou uma seção de workspace -- ver
+                // `AppStore.sidebarRows`. As duas condições são exclusivas por
+                // construção, então cada `row` desenha uma coisa só.
+                for (final row in store.sidebarRows) ...[
+                  if (row case final Workspace w)
+                    if (!store.filtering || store.hasHitsInWorkspace(w))
+                      _WorkspaceSection(key: ValueKey(w.path), store: store, workspace: w),
+                  if (row case final Folder p)
+                    if (!store.filtering || store.hasHits(p))
+                      _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
+                ],
                 if (!store.filtering || store.hasHits(store.loose))
                   _LooseTray(key: const ValueKey('loose'), store: store),
               ],
             ),
           ),
+          _Footer(store: store),
         ],
       ),
     );
@@ -84,52 +96,108 @@ class _Header extends StatelessWidget {
     // both were the header repeating what the user could already see. Same 42
     // as a panel header, so the two top edges line up across the window.
     //
-    // O que a faixa carrega agora é a busca, e ela leva a largura toda: com
-    // dez, vinte sessões abertas, achar *aquela* que você renomeou era rolar a
-    // lista com o olho. Adicionar uma pasta é uma vez por repo e configurar é
-    // menos que isso — os dois cabem num glifo à direita, que é para onde o +
-    // foi. A regra de antes era "o que adiciona à esquerda"; a nova é "o que
-    // você faz toda hora à esquerda".
+    // A busca e a engrenagem, e mais nada. Os outros dois glifos desceram pro
+    // rodapé (ver [_Footer]) porque saíam do mesmo orçamento de largura que o
+    // campo — três botões deixavam o campo com 62px de texto no `minSidebar`,
+    // e o quarto não teria onde caber.
+    //
+    // A engrenagem ficou: adicionar pasta, retomar conversa e pedir relatório
+    // produzem coisa que aparece na lista logo abaixo, e a mão vai buscá-los
+    // perto do que eles fazem. Configuração não produz nada aqui dentro — é o canto da janela, e
+    // o canto da janela é aqui em cima. Uma sozinha custa 40px do campo; três
+    // custavam 112, que é a conta que motivou tudo isto.
     return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Mx.border)),
       ),
-      child: LayoutBuilder(
-        // Estreita, a lateral não tem espaço pra palavra "pasta" e pro campo
-        // ao mesmo tempo — e é o campo que fica. O tooltip continua dizendo o
-        // que o + adiciona.
-        builder: (context, box) {
-          final tight = box.maxWidth < 300;
-          return Row(
-            children: [
-              Expanded(child: _SearchField(store: store)),
-              const SizedBox(width: 6),
-              _HeaderAction(
-                icon: Icons.add,
-                label: tight ? null : 'pasta',
-                tooltip: 'adicionar uma pasta ao cockpit',
-                onPressed: () => showAddFolder(context, store),
-              ),
-              // O dia inteiro numa página, ao lado da lateral que o produziu.
-              // Fica aqui e não no menu de um painel porque o relatório não é
-              // de painel nenhum: é da janela.
-              _ReportIcon(store: store),
-              _HeaderIcon(
-                icon: Icons.tune,
-                // A tecla vem do mapa e não de um literal: ela é editável agora, e
-                // um tooltip que ensinasse ⌘⇧P a quem trocou por outra estaria
-                // simplesmente errado.
-                tooltip: [
-                  'configurações',
-                  ...store.keymap[MxAction.settings].map((c) => c.label),
-                ].join('  '),
-                onPressed: () => showSettings(context, store),
-              ),
-            ],
-          );
-        },
+      child: Row(
+        spacing: _StripIcon.gap,
+        children: [
+          Expanded(child: _SearchField(store: store)),
+          _StripIcon(
+            icon: Icons.settings_outlined,
+            // A tecla vem do mapa e não de um literal: ela é editável agora, e
+            // um tooltip que ensinasse ⌘⇧P a quem trocou por outra estaria
+            // simplesmente errado.
+            tooltip: [
+              'configurações',
+              ...store.keymap[MxAction.settings].map((c) => c.label),
+            ].join('  '),
+            onPressed: () => showSettings(context, store),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A fileira de glifos no pé da lateral: adicionar uma pasta, retomar uma
+/// conversa e pedir o relatório do dia — as coisas que produzem alguma coisa
+/// na lista logo acima. A engrenagem não é uma delas e ficou no cabeçalho.
+///
+/// A ordem é a do dia: primeiro o lugar onde se vai trabalhar, depois a sessão
+/// que já trabalhou nele, e por último o que foi feito.
+///
+/// Moraram no header até ficar claro que saíam do mesmo orçamento de largura
+/// que a busca — e que o problema não era o terceiro glifo, era o quarto. Numa
+/// faixa horizontal deste tamanho cabem sete botões de 30 mesmo com a lateral
+/// no mínimo; o header aguentava três, e só na largura padrão.
+///
+/// À esquerda, e não à direita, porque é onde o VS Code, o Slack e o Linear
+/// puseram a mesma fileira: é o canto que o olho varre quando procura o que a
+/// janela faz, e não o que ela está mostrando.
+class _Footer extends StatelessWidget {
+  const _Footer({required this.store});
+  final AppStore store;
+
+  // A fileira é do Material, e o traço dele é mais pesado que o do VS Code:
+  // 2px sobre 24 contra ~1px sobre 16 dos codicons. Não é ajuste, é a fonte --
+  // `MaterialIcons-Regular.otf` não tem eixo de peso, então `Icon.weight` não
+  // faz nada aqui. Afinar de verdade custa um pacote: `material_symbols_icons`
+  // traz a fonte variável e aí `weight: 200` passa a valer.
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 42,
+      // O padding que põe o primeiro contorno na mesma coluna da lupa do campo,
+      // 16px da borda: o alvo tem 36 e o glifo 18, então sobram 9 de folga
+      // dentro do botão e 7 é o que falta pra fechar a conta.
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Mx.border)),
+      ),
+      child: Row(
+        spacing: _StripIcon.gap,
+        children: [
+          _StripIcon(
+            // Sem rótulo: `create_new_folder` já é a pasta *e* o +, então a
+            // palavra ao lado era repetição. O tooltip continua dizendo o que
+            // ele adiciona.
+            icon: Icons.create_new_folder_outlined,
+            tooltip: 'adicionar uma pasta ao cockpit',
+            onPressed: () => showAddFolder(context, store),
+          ),
+          // O histórico de todas as pastas de uma vez. O de *uma* pasta
+          // continua no + dela, e é outra pergunta: lá se procura dentro de um
+          // lugar que já se sabe qual é, aqui se procura o lugar junto com a
+          // conversa -- inclusive o de um repo que nunca foi adicionado à
+          // lateral, que é o que só este botão alcança.
+          _StripIcon(
+            // O mesmo relógio da linha "retomar conversa…" dos menus -- são a
+            // mesma coisa vista de dois lugares, e um segundo desenho pra ela
+            // faria pensar que não são --, na versão vazada que esta faixa
+            // pede de todos. Ver [_StripIcon].
+            icon: Icons.history_outlined,
+            tooltip: 'retomar uma conversa',
+            onPressed: () => showChatHistory(context, store),
+          ),
+          // O dia inteiro numa página, ao lado da lateral que o produziu.
+          // Fica aqui e não no menu de um painel porque o relatório não é
+          // de painel nenhum: é da janela.
+          _ReportIcon(store: store),
+        ],
       ),
     );
   }
@@ -364,9 +432,7 @@ class _HeaderAction extends StatefulWidget {
     required this.onPressed,
   });
   final IconData icon;
-
-  /// Null numa lateral estreita: sobra o + e o tooltip. Ver [_Header].
-  final String? label;
+  final String label;
   final String tooltip;
   final VoidCallback onPressed;
 
@@ -399,17 +465,15 @@ class _HeaderActionState extends State<_HeaderAction> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(widget.icon, size: 15, color: _hover ? Mx.fg : Mx.fgDim),
-                if (widget.label case final label?) ...[
-                  const SizedBox(width: 5),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _hover ? Mx.fg : Mx.fgDim,
-                    ),
+                const SizedBox(width: 5),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _hover ? Mx.fg : Mx.fgDim,
                   ),
-                ],
+                ),
               ],
             ),
           ),
@@ -419,13 +483,13 @@ class _HeaderActionState extends State<_HeaderAction> {
   }
 }
 
-/// The icon-only half of the header: the switches that change how the sidebar
-/// and the panes are *shown*, kept together on the right and sized alike so
-/// the group reads as one control cluster.
 /// O botão do relatório do dia, que é o único do cabeçalho que demora.
 ///
 /// Uma volta ao `claude -p` leva dezenas de segundos; um botão que não diz
 /// isso é um botão que parece não ter funcionado, e que se clica de novo.
+///
+/// O clique em si não começa nada: ele pergunta de que dia é o relatório (ver
+/// [showDailyReport]), e a espera só começa depois da resposta.
 class _ReportIcon extends StatelessWidget {
   const _ReportIcon({required this.store});
   final AppStore store;
@@ -434,30 +498,70 @@ class _ReportIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     if (store.writingReport) {
       return const SizedBox(
-        width: 30,
-        height: 30,
+        width: _StripIcon.box,
+        height: _StripIcon.box,
         child: Center(
           child: SizedBox(
-            width: 13,
-            height: 13,
+            width: _StripIcon.glyph - 5,
+            height: _StripIcon.glyph - 5,
             child: CircularProgressIndicator(strokeWidth: 1.8),
           ),
         ),
       );
     }
-    return _HeaderIcon(
-      icon: Icons.summarize_outlined,
+    return _StripIcon(
+      // `receipt_long` e não `summarize`: os dois são uma folha escrita, mas a
+      // folha comprida com o pé serrilhado lê como registro do que aconteceu,
+      // e a de uma linha grossa só lia como "um documento" -- que é o que a
+      // aba de leitor ao lado também é.
+      icon: Icons.receipt_long_outlined,
       tooltip: [
         'relatório do dia',
         ...store.keymap[MxAction.dailyReport].map((c) => c.label),
       ].join('  '),
-      onPressed: store.openDailyReport,
+      onPressed: () => showDailyReport(context, store),
     );
   }
 }
 
-class _HeaderIcon extends StatelessWidget {
-  const _HeaderIcon({required this.icon, required this.tooltip, required this.onPressed});
+/// Um glifo de faixa: a engrenagem no cabeçalho e o par do rodapé. One box and
+/// one glyph size for all of them — mismatched by a couple of pixels they read
+/// as loose buttons instead of one control cluster.
+///
+/// O que o rodapé mudou não foi [glyph], foi [box]: 30px de alvo era o que
+/// cabia quando três botões saíam da largura da busca. Com dois deles embaixo
+/// sobra folga pra um alvo de 36 nas duas faixas — inclusive no cabeçalho, que
+/// agora paga por uma engrenagem em vez de três glifos.
+///
+/// Todos os três são `_outlined`. Antes eram dois cheios e um vazado, que é o
+/// que fazia a fileira parecer três ícones emprestados de lugares diferentes:
+/// numa barra de ferramentas o que dá unidade não é o desenho, é a espessura
+/// do traço ser a mesma em todos.
+class _StripIcon extends StatelessWidget {
+  const _StripIcon({required this.icon, required this.tooltip, required this.onPressed});
+
+  /// O alvo do clique, e o que [_Footer] mede a fileira por. A faixa fica nos
+  /// 42 do header — duas bordas do mesmo tamanho encapando a lista —, então o
+  /// alvo é a folga que sobra dentro dela.
+  static const box = 36.0;
+
+  /// O desenho dentro do alvo, e a única maneira de mexer na espessura dele: o
+  /// traço do `_outlined` do Material é 2px fixos numa grade de 24, então um
+  /// contorno mais fino é um contorno menor -- e é essa a briga: 22 engrossava
+  /// a fileira, 16 sumia dentro do alvo. 18 é o meio, e é o melhor que se
+  /// consegue enquanto peso e tamanho forem o mesmo número.
+  ///
+  /// O alvo é [box] e não segue este número: a mão pede 36, o olho pede 18.
+  ///
+  /// Quem quiser controlar a espessura de verdade tem que trocar a fonte de
+  /// ícones -- ver a nota em [_Footer].
+  static const glyph = 18.0;
+
+  /// A distância entre um botão e o próximo. Sem ela os três alvos se tocam e
+  /// a fileira lê como um bloco só; com ela lê como três coisas que fazem
+  /// três coisas.
+  static const gap = 4.0;
+
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
@@ -466,13 +570,109 @@ class _HeaderIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: tooltip,
-      iconSize: 17,
-      splashRadius: 15,
+      iconSize: glyph,
+      // Menor que meio alvo de propósito: o círculo do hover tem 32 e flutua
+      // dentro da faixa, em vez de raspar as bordas de cima e de baixo.
+      splashRadius: 16,
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+      constraints: const BoxConstraints.tightFor(width: box, height: box),
       padding: EdgeInsets.zero,
       icon: Icon(icon, color: Mx.fgDim),
       onPressed: onPressed,
+    );
+  }
+}
+
+/// As pastas de um workspace do VS Code, juntas e sob uma linha que dobra.
+///
+/// A linha não faz nada além de juntar e dobrar, e é de propósito: o que se
+/// abre, se renomeia e se remove continua sendo a pasta, cada uma com o menu
+/// que ela sempre teve. Ver [Workspace] -- a seção é uma leitura das pastas,
+/// não uma dona delas.
+///
+/// Sem ela, importar um arquivo de sete pastas era despejar sete linhas soltas
+/// na raiz da lateral, sem nada dizendo que elas vieram juntas nem como
+/// escondê-las de uma vez.
+class _WorkspaceSection extends StatelessWidget {
+  const _WorkspaceSection({super.key, required this.store, required this.workspace});
+
+  final AppStore store;
+  final Workspace workspace;
+
+  @override
+  Widget build(BuildContext context) {
+    // Com uma busca em curso, só as pastas que ela achou -- e a seção dobrada
+    // abre, como a pasta e o projeto fazem: o que você escolheu continua
+    // guardado, só não vale enquanto se procura. Ver [_FolderGroup].
+    final folders = store
+        .foldersOf(workspace)
+        .where((f) => !store.filtering || store.hasHits(f))
+        .toList();
+    final collapsed = workspace.collapsed && !store.filtering;
+    // O que a seção esconde quando está fechada, contado em pastas: é a única
+    // coisa que a linha tem pra dizer sobre si, e some quando elas estão à
+    // vista.
+    final count = store.foldersOf(workspace).length;
+    final alerts = folders.fold<int>(0, (a, f) => a + store.needingHuman(f));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Sem [_Hoverable]: a linha não tem botão que apareça sob o ponteiro
+        // -- o que se faz com uma pasta continua no menu dela --, e o realce
+        // de passar por cima é o do próprio InkWell.
+        InkWell(
+          onTap: () => store.toggleWorkspaceCollapsed(workspace),
+          onSecondaryTapDown: (d) =>
+              showWorkspaceMenu(context, store, workspace, d.globalPosition),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
+            child: Row(
+              children: [
+                Icon(
+                  collapsed ? Icons.chevron_right : Icons.expand_more,
+                  size: 20,
+                  color: Mx.fgDim,
+                ),
+                const SizedBox(width: 3),
+                // Nem o glifo de repo nem o do projeto: um workspace não é um
+                // checkout e não é um trabalho com nome, e repetir um dos dois
+                // desenhos aqui faria a linha se passar pelo que ela não é.
+                Icon(Icons.hexagon_outlined, size: 15, color: Mx.accent),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    workspace.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                  ),
+                ),
+                // Fechada, a seção é a única linha que sobra de tudo que está
+                // lá dentro: o aviso de uma sessão parada esperando por você
+                // tem que atravessar, ou ele fica escondido junto.
+                if (collapsed && alerts > 0) _Badge(count: alerts),
+                Text(
+                  count == 1 ? '1 pasta' : '$count pastas',
+                  style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
+                ),
+                _RowButton(
+                  tooltip: 'o que fazer com esse workspace',
+                  icon: Icons.more_horiz,
+                  onTap: (anchor) => showWorkspaceMenu(context, store, workspace, anchor),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (!collapsed)
+          _Nest(
+            children: [
+              for (final f in folders)
+                _FolderGroup(key: ValueKey(f.root), store: store, folder: f),
+              const SizedBox(height: 4),
+            ],
+          ),
+      ],
     );
   }
 }
@@ -597,7 +797,7 @@ class _FolderGroup extends StatelessWidget {
             children: [
               for (final p in projects)
                 _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
-              for (final t in tabs) _TabRow(key: ValueKey(t.id), store: store, tab: t),
+              ..._panelRows(store, tabs),
               // The strip of chips used to end the nest; the rail still wants
               // to run a little past the last row rather than stop dead on it.
               const SizedBox(height: 8),
@@ -641,6 +841,11 @@ class _LooseTray extends StatelessWidget {
     final count = store.filtering
         ? store.visible(store.tabsOf(folder)).length
         : store.tabsOf(folder).length;
+    // O que a varrida levaria. Zero e o "limpar" da régua não existe: um
+    // botão que não tem o que limpar é um botão que não faz nada. Com uma
+    // busca em curso ele também sai: varrer ali fecharia painéis que a busca
+    // está escondendo, e ninguém limpa o que não está vendo.
+    final settled = store.filtering ? 0 : store.settledIn(folder);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -668,6 +873,18 @@ class _LooseTray extends StatelessWidget {
                   Text('$count', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
                 ],
                 const SizedBox(width: 6),
+                // O mesmo "limpar concluídos" do ⋯, na régua: é a varrida que
+                // se faz toda hora aqui -- a bandeja é onde as sessões de uma
+                // tarde se acumulam --, e ela não merecia dois cliques e um
+                // menu. Só aparece quando há o que varrer.
+                if (settled > 0)
+                  _ClearButton(
+                    tooltip: settled == 1
+                        ? 'limpar 1 painel concluído'
+                        : 'limpar $settled painéis concluídos',
+                    shown: hovered,
+                    onTap: () => _sweep(store, folder),
+                  ),
                 _AddButton(
                   store: store,
                   folder: folder,
@@ -682,7 +899,7 @@ class _LooseTray extends StatelessWidget {
         // que tem nome vem antes do que sobrou.
         for (final p in projects)
           _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
-        for (final t in tabs) _TabRow(key: ValueKey(t.id), store: store, tab: t),
+        ..._panelRows(store, tabs),
       ],
     );
   }
@@ -702,30 +919,44 @@ class _LooseMenu extends StatelessWidget {
       tooltip: 'o que fazer com os avulsos',
       icon: Icons.more_horiz,
       onTap: (anchor) async {
-        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-        final choice = await showMenu<String>(
-          context: context,
-          color: Mx.bgActive,
-          position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
-          items: const [
-            PopupMenuItem(
-              value: 'newproject',
-              height: 34,
-              child: Text('novo projeto…', style: TextStyle(fontSize: 12)),
+        final choice = await mxMenu<String>(
+          context,
+          at: anchor,
+          items: [
+            mxItem(
+              'newproject',
+              glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.purple),
+              label: 'novo projeto…',
             ),
-            PopupMenuItem(
-              value: 'sweep',
-              height: 34,
-              child: Text('limpar encerrados e concluídos', style: TextStyle(fontSize: 12)),
+            mxItem(
+              'sweep',
+              glyph: Icon(Icons.clear_all, size: 14, color: Mx.fgDim),
+              label: 'limpar concluídos',
             ),
           ],
         );
         if (choice == null || !context.mounted) return;
         if (choice == 'newproject') await showNewProject(context, store, store.loose);
-        if (choice == 'sweep') store.closeSettled(store.loose);
+        if (choice == 'sweep') _sweep(store, store.loose);
       },
     );
   }
+}
+
+/// A varrida da bandeja, com o relato do que ela levou.
+///
+/// Uma definição pras duas portas -- o ⋯ e o "limpar" da régua --, e o relato
+/// é por causa da segunda: quem clica num botão de limpar quer saber se ele
+/// limpou, e uma linha que sai da lateral é fácil de não ver.
+void _sweep(AppStore store, Folder folder) {
+  final closed = store.closeSettled(folder);
+  store.showBanner(
+    closed == 0
+        ? 'nada pra limpar aqui — nenhum painel marcado como concluído'
+        : closed == 1
+        ? 'um painel fechado — o que estava marcado como concluído'
+        : '$closed painéis fechados — os que estavam marcados como concluídos',
+  );
 }
 
 /// Os arranjos salvos, no alto da lateral. Ver [PaneGroup].
@@ -743,29 +974,64 @@ class _LooseMenu extends StatelessWidget {
 /// que só existe aqui é o que a linha de um painel não consegue oferecer --
 /// abrir um grupo cujos painéis todos saíram da tela (não há linha acesa pra
 /// clicar), renomear e esquecer.
+///
+/// Dobra, ao contrário da régua dos avulsos: aqui há sim onde guardar o que
+/// está embaixo. Um grupo é uma vista que se abre num clique, e depois de
+/// arrumada a vista as linhas dos grupos são o que está entre o alto da
+/// lateral e as sessões -- então a régua fecha por cima delas e fica sendo o
+/// que ela é nesse momento: uma palavra, um número, e o caminho de volta.
 class _GroupTray extends StatelessWidget {
   const _GroupTray({super.key, required this.store});
   final AppStore store;
 
   @override
   Widget build(BuildContext context) {
+    final collapsed = store.groupsCollapsed;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 17, right: 8, top: 4),
-          child: Row(
-            children: [
-              Text(
-                'grupos',
-                style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
+        _Hoverable(
+          builder: (hovered) => InkWell(
+            // A régua inteira dobra e desdobra, como o cabeçalho de uma pasta.
+            onTap: store.toggleGroupsCollapsed,
+            child: Padding(
+              // O galho ocupa a calha à esquerda pra palavra continuar onde
+              // ela estava -- alinhada com "avulsos", que é a outra régua.
+              padding: const EdgeInsets.only(left: 4, right: 8, top: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    collapsed ? Icons.chevron_right : Icons.expand_more,
+                    size: 14,
+                    color: Mx.fgFaint,
+                  ),
+                  Text(
+                    'grupos',
+                    style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(child: Container(height: 1, color: Mx.border)),
+                  // Quantos são -- e dobrada, é o que a régua tem pra dizer
+                  // sobre o que ela está escondendo.
+                  const SizedBox(width: 8),
+                  Text(
+                    '${store.groups.length}',
+                    style: TextStyle(fontSize: 11, color: Mx.fgFaint),
+                  ),
+                  const SizedBox(width: 6),
+                  _ClearButton(
+                    tooltip: 'esquecer todos os grupos',
+                    shown: hovered,
+                    onTap: () => confirmClearGroups(context, store),
+                  ),
+                ],
               ),
-              const SizedBox(width: 9),
-              Expanded(child: Container(height: 1, color: Mx.border)),
-            ],
+            ),
           ),
         ),
-        for (final g in store.groups) _GroupRow(key: ValueKey(g.id), store: store, group: g),
+        if (!collapsed)
+          for (final g in store.groups) _GroupRow(key: ValueKey(g.id), store: store, group: g),
         // A régua da primeira pasta vem logo abaixo; sem isto as duas se
         // encostam e a lista lê como uma coisa só.
         const SizedBox(height: 8),
@@ -836,15 +1102,26 @@ Future<void> showGroupMenu(
   PaneGroup group,
   Offset anchor,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
     items: [
-      _folderItem('update', 'guardar a tela de agora aqui'),
-      _folderItem('rename', 'renomear'),
-      _folderItem('remove', 'esquecer o grupo'),
+      mxItem(
+        'update',
+        glyph: Icon(Icons.grid_view_rounded, size: 14, color: group.color),
+        label: 'guardar a tela de agora aqui',
+      ),
+      mxItem(
+        'rename',
+        glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
+        label: 'renomear',
+      ),
+      mxItem(
+        'remove',
+        glyph: Icon(Icons.grid_off, size: 14, color: Mx.red),
+        label: 'esquecer o grupo',
+        color: Mx.red,
+      ),
     ],
   );
   if (choice == null || !context.mounted) return;
@@ -969,7 +1246,7 @@ class _ProjectGroup extends StatelessWidget {
           _Nest(
             rail: 15,
             children: [
-              for (final t in tabs) _TabRow(key: ValueKey(t.id), store: store, tab: t),
+              ..._panelRows(store, tabs),
               const SizedBox(height: 4),
             ],
           ),
@@ -1026,6 +1303,35 @@ class _ProjectDropState extends State<_ProjectDrop> {
   }
 }
 
+/// As linhas de uma lista de painéis, com o que nasceu de um fluxo pendurado
+/// em quem o abriu.
+///
+/// Um fluxo produz painéis -- a sessão de revisão, o terminal do comando -- e
+/// eles chegavam soltos: linhas seguidas, às vezes com o mesmo nome, e nada
+/// dizendo que eram uma coisa só acontecendo. A ninhada entra um degrau
+/// adentro, no mesmo trilho com que uma pasta segura os painéis dela (ver
+/// [_Nest]), e recursivamente -- um fluxo que abre uma sessão que abre outra
+/// desenha os dois níveis.
+///
+/// Só enquanto o filho vier logo atrás do pai na lista. Arrastar uma linha pra
+/// outro lugar é dizer que ela vale sozinha, e aí ela volta a ser uma linha
+/// como as outras -- sem estado escondido pra discordar do que se vê.
+List<Widget> _panelRows(AppStore store, List<MxTab> tabs) {
+  final rows = <Widget>[];
+  for (var i = 0; i < tabs.length; i++) {
+    final tab = tabs[i];
+    rows.add(_TabRow(key: ValueKey(tab.id), store: store, tab: tab));
+    final brood = <MxTab>[];
+    while (i + 1 < tabs.length && store.descendsFrom(tabs[i + 1], tab)) {
+      brood.add(tabs[++i]);
+    }
+    if (brood.isNotEmpty) {
+      rows.add(_Nest(rail: 18, children: _panelRows(store, brood)));
+    }
+  }
+  return rows;
+}
+
 class _TabRow extends StatelessWidget {
   const _TabRow({super.key, required this.store, required this.tab});
   final AppStore store;
@@ -1047,18 +1353,38 @@ class _TabRow extends StatelessWidget {
       // Concluída, a linha recua um passo: título apagado, marca apagada. Ela
       // continua ali — é uma sessão que você guardou de propósito — mas para
       // de disputar o olho com as que ainda estão trabalhando.
-      dim: tab.done,
+      //
+      // Parada e já lida recua pelo mesmo motivo e um passo antes do tique: o
+      // tique é o julgamento ("essa funcionou"), e antes dele já dá pra saber
+      // que essa aqui não é novidade nenhuma -- você acabou de olhar pra ela.
+      // É o que faz o painel que terminou agora ser o único aceso entre cinco
+      // que dizem "pronto".
+      dim: tab.done || (tab.rested && !tab.unseen),
+      // Quando ela parou, na ponta do subtítulo -- e em verde enquanto você
+      // não tiver visto. Ver [MxTab.restedAt] e [MxTab.unseen].
+      stamp: tab.restedAgo,
+      stampColor: tab.unseen ? Mx.green : null,
       leading: switch (tab.kind) {
         TabKind.claude => ClaudeAvatar(status: tab.status, size: 26, dim: tab.done),
         // Um leitor na lista se distingue pelo que é: uma folha, não um
         // prompt esperando comando.
         TabKind.reader => Icon(Icons.article_outlined, size: 18, color: Mx.fgDim),
         // O terminal que subiu dentro de um programa se anuncia como o
-        // programa: o chevron é o prompt esperando comando, e ali não há
-        // prompt nenhum -- há um btop rodando.
+        // programa: o `>_` é o prompt esperando comando, e ali não há prompt
+        // nenhum -- há um btop rodando.
+        //
+        // O prompt vem dentro de uma tela cheia, e não como chevron solto,
+        // por duas razões. Solto, ele é a mesma seta que abre as pastas e os
+        // grupos duas linhas acima -- na lista, um `>` sozinho se lê como
+        // "clique pra expandir". E sólido ele tem peso: ao lado da rajada do
+        // claude, que enche os 26px dela, um contorno fino sumia.
+        //
+        // Por ser sólido é que vai a 22 e não aos 17 dos glifos de launcher:
+        // o que precisa empatar é a mancha, não a caixa. Isso não desloca o
+        // título -- o `leading` mora num slot de 34 centralizado.
         TabKind.shell => switch (tab.launcher) {
           final l? => Icon(l.icon.glyph, size: 17, color: l.color),
-          null => Icon(Icons.chevron_right, size: 19, color: Mx.fgDim),
+          null => MxIcon(MxIcons.terminal, size: 22, color: Mx.fgDim),
         },
       },
       title: tab.title,
@@ -1428,16 +1754,45 @@ class _AddButton extends StatelessWidget {
   }
 }
 
-/// What the + offers, written down once. The same three things the chip strip
-/// used to spell out, minus the ones that would mean nothing where the menu
-/// opened: a project cannot hold a project -- mais os programas que o usuário
-/// ensinou, que são a mesma oferta com o comando vindo do config em vez do
-/// código. Ver [Launcher].
+/// O "limpar" de uma régua: o gesto de esvaziar o que está embaixo dela.
+///
+/// Mesma mecânica do [_AddButton] -- espera o ponteiro, e invisível também é
+/// inclicável --, e pelos mesmos motivos. São os dois lados de uma régua: o +
+/// põe coisa ali, este tira.
+class _ClearButton extends StatelessWidget {
+  const _ClearButton({required this.tooltip, required this.shown, required this.onTap});
+
+  final String tooltip;
+  final bool shown;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: shown ? 1 : 0,
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOut,
+      child: IgnorePointer(
+        ignoring: !shown,
+        child: _RowButton(
+          tooltip: tooltip,
+          // A vassoura e não um x: um x numa régua leria como "fechar isto
+          // aqui", e o que o botão faz é passar por cima do que está embaixo.
+          icon: Icons.clear_all,
+          onTap: (_) => onTap(),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the + offers: [openHereItems], plus the one thing only the + has.
 ///
 /// A bandeja dos avulsos oferece projeto como qualquer pasta. Ela não é uma
 /// pasta, mas um projeto não é uma pasta tampouco: ele diz *para quê* as
 /// sessões existem, e trabalho com nome que não mora em repo nenhum -- ler um
-/// contrato, arrumar a máquina -- é exatamente o que cai ali.
+/// contrato, arrumar a máquina -- é exatamente o que cai ali. Um projeto é que
+/// não pode conter um projeto, e ali a linha não aparece.
 Future<void> _showAddMenu(
   BuildContext context,
   AppStore store,
@@ -1445,77 +1800,31 @@ Future<void> _showAddMenu(
   Project? project,
   Offset anchor,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
     items: [
-      // The session first: it is what you are almost always here for, and the
-      // chip strip's left-to-right order was never that.
-      _addItem('claude', const ClaudeMark(size: 13), 'sessão do claude'),
-      // Retomar uma conversa é abrir uma sessão -- a diferença é que ela já
-      // tem passado --, então é aqui que a porta fica, um degrau abaixo da
-      // sessão nova. Ver [showChatHistory].
-      _addItem('retomar', Icon(Icons.history, size: 14, color: Mx.fgDim), 'retomar conversa…'),
-      _addItem('shell', Icon(Icons.terminal, size: 14, color: Mx.fgDim), 'terminal'),
-      // Embaixo do terminal porque é o que eles são: terminais com um comando
-      // já digitado. Na ordem em que foram criados -- é a ordem da lista das
-      // configurações, e a lateral não tem por que discordar dela.
-      for (final launcher in store.launchers)
-        _addItem(
-          'launcher:${launcher.id}',
-          Icon(launcher.icon.glyph, size: 14, color: launcher.color),
-          launcher.name,
+      ...openHereItems(store),
+      // Depois do risco porque não é abrir um painel: é dar nome ao trabalho
+      // que os painéis vão fazer.
+      if (project == null) ...[
+        mxDivider(),
+        mxItem(
+          'projeto',
+          glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.purple),
+          label: 'projeto…',
         ),
-      _addItem(
-        'novo',
-        Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
-        store.launchers.isEmpty ? 'criar um programa…' : 'outro programa…',
-      ),
-      if (project == null)
-        _addItem('projeto', Icon(Icons.workspaces_outline, size: 14, color: Mx.purple), 'projeto…'),
+      ],
     ],
   );
   if (choice == null || !context.mounted) return;
 
-  switch (choice) {
-    case 'claude':
-      store.openClaude(folder, cwd: folder.root, project: project);
-    case 'retomar':
-      await showChatHistory(context, store, folder, project: project);
-    case 'shell':
-      store.openShell(folder, project: project);
-    case 'projeto':
-      await showNewProject(context, store, folder);
-    case 'novo':
-      // Criar e abrir de uma vez: você veio ao + pra abrir um painel, e um
-      // programa que nasce sem estrear obrigaria a voltar aqui pra usá-lo.
-      final launcher = await showNewLauncher(context, store);
-      if (launcher != null) {
-        store.openLauncher(launcher, folder, cwd: folder.root, project: project);
-      }
-    default:
-      final launcher = store.launcherById(choice.split(':').last);
-      if (launcher != null) {
-        store.openLauncher(launcher, folder, cwd: folder.root, project: project);
-      }
+  if (choice == 'projeto') {
+    await showNewProject(context, store, folder);
+    return;
   }
+  await openHereChoice(context, store, choice, folder: folder, project: project);
 }
-
-/// A line of the + menu: the glyph the chip used to carry, kept because it is
-/// what made the three offers tellable apart at a glance.
-PopupMenuItem<String> _addItem(String value, Widget glyph, String label) => PopupMenuItem(
-  value: value,
-  height: 34,
-  child: Row(
-    children: [
-      SizedBox(width: 16, child: Center(child: glyph)),
-      const SizedBox(width: 9),
-      Text(label, style: const TextStyle(fontSize: 12)),
-    ],
-  ),
-);
 
 /// The ⋯ on a repo header. One definition, two ways in: this and the header's
 /// right-click both open [showFolderMenu], anchored where you clicked.
@@ -1535,13 +1844,51 @@ class _FolderMenu extends StatelessWidget {
   }
 }
 
-/// Everything you can do to a folder — and the way in to its worktrees.
+/// O que dá pra fazer com a seção de um workspace. Uma linha, e é a que faltava
+/// pra ele ter volta: importar põe as pastas, isto tira.
+///
+/// Só ela porque a seção não é dona de nada -- abrir, renomear e remover
+/// continuam sendo da pasta, cada uma com o menu que sempre teve. Ver
+/// [Workspace].
+Future<void> showWorkspaceMenu(
+  BuildContext context,
+  AppStore store,
+  Workspace workspace,
+  Offset anchor,
+) async {
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
+    items: [
+      // As reticências prometem a pergunta que vem: fechar leva as pastas e as
+      // sessões delas, e isso não acontece num clique só.
+      mxItem(
+        'close',
+        glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.fgDim),
+        label: 'fechar workspace…',
+        color: Mx.red,
+      ),
+    ],
+  );
+  if (choice != 'close' || !context.mounted) return;
+  await confirmCloseWorkspace(context, store, workspace);
+}
+
+/// Everything you can do to a folder — abrir algo nela inclusive — e a porta
+/// das worktrees.
 ///
 /// The worktrees used to be a folded row inside the tree. Folded is where they
 /// spent their life, so that row was a permanent line of sidebar paying for a
 /// click almost nobody made; opened, five branches sat on top of the sessions.
 /// Here the list costs nothing until it is asked for, and asking is the
 /// gesture you already use on a folder.
+///
+/// E o menu abre com a mesma oferta do + da linha: o botão direito numa pasta
+/// é o gesto de "quero fazer algo aqui", e o mais provável dos algos é abrir
+/// uma sessão. Antes ele mandava você mirar num + de 18 pixels que só existe
+/// com o ponteiro em cima da linha -- e o projeto e a worktree, que já traziam
+/// o bloco, respondiam ao botão direito melhor do que a pasta. Ver
+/// [openHereItems].
 Future<void> showFolderMenu(
   BuildContext context,
   AppStore store,
@@ -1549,29 +1896,31 @@ Future<void> showFolderMenu(
   List<WorktreeInfo> worktrees,
   Offset anchor,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final ghosts = worktrees.where((w) => w.prunable).length;
   // Every repo has a main checkout, so a repo with nothing else has a list of
   // one thing -- the folder you just right-clicked. The line only appears once
   // there is something in there you could not already see.
   final branched = worktrees.any((w) => !w.isMain);
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
-    position: RelativeRect.fromRect(anchor & Size.zero, Offset.zero & overlay.size),
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
     items: [
-      // First, and the only line here that opens onto more: what the repo *is*
-      // reads before the things you can do to it.
+      // Abrir algo aqui primeiro: é o que se vem fazer numa pasta, e
+      // 'retomar conversa…' é o que era a linha 'conversas de antes…' deste
+      // menu -- escrita agora onde as outras três moram.
+      ...openHereItems(store),
+      // Depois do bloco de abrir, porque abrir numa worktree é o que se
+      // escolhe lá dentro: a linha é a mesma oferta sobre outro checkout, com
+      // o que o repo *tem* dito de passagem -- quantas, e quantas fantasmas.
       if (branched) ...[
-        PopupMenuItem(
-          value: 'worktrees',
-          height: 34,
-          child: Row(
+        mxDivider(),
+        mxItem(
+          'worktrees',
+          glyph: Icon(Icons.call_split, size: 14, color: Mx.fgDim),
+          label: 'worktrees',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.call_split, size: 14, color: Mx.fgDim),
-              const SizedBox(width: 9),
-              const Text('worktrees', style: TextStyle(fontSize: 12)),
-              const SizedBox(width: 8),
               _CountChip(count: worktrees.length),
               if (ghosts > 0) ...[const SizedBox(width: 6), _GhostChip(count: ghosts)],
               const SizedBox(width: 6),
@@ -1579,30 +1928,48 @@ Future<void> showFolderMenu(
             ],
           ),
         ),
-        const PopupMenuDivider(height: 9),
       ],
-      // Junto do que o repo *é*, e não junto do que se faz com ele: o
-      // histórico é uma coisa que a pasta tem, como as worktrees. A outra
-      // porta é o + da mesma linha, onde retomar fica ao lado de abrir.
-      _folderItem('chats', 'conversas de antes…'),
-      const PopupMenuDivider(height: 9),
-      _folderItem('task', 'nova task…'),
-      _folderItem('newproject', 'novo projeto…'),
-      _folderItem('rename', 'renomear'),
-      _folderItem('refresh', 'atualizar git'),
-      _folderItem('sweep', 'limpar encerrados e concluídos'),
-      _folderItem('remove', 'remover pasta'),
+      mxDivider(),
+      // Dar nome às coisas -- e nada mais neste bloco: 'nova task…' saiu
+      // porque tem atalho ([MxAction.newTask]) e porque o menu do projeto é
+      // onde ela quase sempre é pedida, e 'atualizar git' saiu porque o
+      // `refreshGit` já roda de dez em dez segundos sozinho (ver
+      // [AppStore.start]) -- uma linha de menu pra pedir o que acontece de
+      // graça é uma linha que só ensina a duvidar dela.
+      mxItem(
+        'newproject',
+        glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.purple),
+        label: 'novo projeto…',
+      ),
+      mxItem(
+        'rename',
+        glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
+        label: 'renomear',
+      ),
+      mxDivider(),
+      // E o que tira coisas da lateral.
+      mxItem(
+        'sweep',
+        glyph: Icon(Icons.clear_all, size: 14, color: Mx.fgDim),
+        label: 'limpar concluídos',
+      ),
+      mxItem(
+        'remove',
+        glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.red),
+        label: 'remover pasta',
+        color: Mx.red,
+      ),
     ],
   );
   if (choice == null || !context.mounted) return;
 
+  // O que é do bloco de abrir se resolve nele; o resto é deste menu.
+  if (await openHereChoice(context, store, choice, folder: folder)) return;
+  if (!context.mounted) return;
+
   switch (choice) {
     case 'worktrees':
       await showWorktreesMenu(context, store, folder, worktrees, anchor);
-    case 'chats':
-      await showChatHistory(context, store, folder);
-    case 'task':
-      await showNewTask(context, store, folder);
     case 'newproject':
       await showNewProject(context, store, folder);
     case 'rename':
@@ -1613,22 +1980,12 @@ Future<void> showFolderMenu(
         label: 'nome',
       );
       if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
-    case 'refresh':
-      await store.refreshGit();
     case 'sweep':
       store.closeSettled(folder);
     case 'remove':
       await store.removeFolder(folder);
   }
 }
-
-/// A plain line of a sidebar menu: no glyph, because none of these needs one
-/// to be told apart from its neighbours.
-PopupMenuItem<String> _folderItem(String value, String label) => PopupMenuItem(
-  value: value,
-  height: 34,
-  child: Text(label, style: const TextStyle(fontSize: 12)),
-);
 
 /// The repo's worktrees, listed only when asked for: pick one and its own menu
 /// opens where you picked it.
@@ -1647,80 +2004,48 @@ Future<void> showWorktreesMenu(
   List<WorktreeInfo> worktrees,
   Offset anchor,
 ) async {
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
   final ghosts = worktrees.where((w) => w.prunable).length;
-  final choice = await showMenu<String>(
-    context: context,
-    color: Mx.bgActive,
+  final choice = await mxMenu<String>(
+    context,
     // Stepped off the line that opened it, so the second menu does not land on
     // top of the first and read as the same one redrawn.
-    position: RelativeRect.fromRect(
-      (anchor + const Offset(14, 6)) & Size.zero,
-      Offset.zero & overlay.size,
-    ),
+    at: anchor + const Offset(14, 6),
     items: [
       for (final w in worktrees)
-        PopupMenuItem(
+        mxItem(
           // The path is the identity: two worktrees can sit on branches with
           // the same short label, never in the same folder.
-          value: w.path,
-          // Two lines, because a menu is only about 250 wide and a label beside
-          // `feature/TASK#47730` does not fit on one — the branch is the half
-          // that would have been cut, and it is the half that identifies the
-          // worktree.
-          height: 44,
-          child: Row(
-            children: [
-              Icon(
-                w.prunable
-                    ? Icons.link_off
-                    : w.isMain
-                    ? Icons.home_outlined
-                    : Icons.call_split,
-                size: 14,
-                color: w.prunable ? Mx.yellow : Mx.fgFaint,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      w.isMain ? folder.name : w.shortLabel,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, height: 1.2),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      w.prunable
-                          ? 'sem pasta no disco'
-                          : store.tabAt(w.path) != null
-                          ? '${w.branch} · sessão aberta'
-                          : w.branch,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: Mx.mono,
-                        fontSize: 10.5,
-                        height: 1.2,
-                        color: w.prunable ? Mx.yellow : Mx.fgFaint,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          w.path,
+          glyph: Icon(
+            w.prunable
+                ? Icons.link_off
+                : w.isMain
+                ? Icons.home_outlined
+                : Icons.call_split,
+            size: 14,
+            color: w.prunable ? Mx.yellow : Mx.fgFaint,
           ),
+          label: w.isMain ? folder.name : w.shortLabel,
+          // Duas linhas, porque um menu tem uns 216 de largura e um rótulo ao
+          // lado de `feature/TASK#47730` não cabe numa -- e o branch é justo a
+          // metade que seria cortada, e a que identifica a worktree. Ver
+          // [mxMenuRow].
+          subtitle: w.prunable
+              ? 'sem pasta no disco'
+              : store.tabAt(w.path) != null
+              ? '${w.branch} · sessão aberta'
+              : w.branch,
+          // O amarelo é o que a linha tem pra dizer que aquela pasta não
+          // existe mais: sem ele a fantasma lê como uma worktree qualquer.
+          subtitleColor: w.prunable ? Mx.yellow : null,
         ),
       if (ghosts > 0) ...[
-        const PopupMenuDivider(height: 9),
-        PopupMenuItem(
-          value: 'prune',
-          height: 34,
-          child: Text(
-            'limpar worktrees fantasmas',
-            style: TextStyle(fontSize: 12, color: Mx.yellow),
-          ),
+        mxDivider(),
+        mxItem(
+          'prune',
+          glyph: Icon(Icons.cleaning_services_outlined, size: 14, color: Mx.yellow),
+          label: 'limpar worktrees fantasmas',
+          color: Mx.yellow,
         ),
       ],
     ],
@@ -1777,6 +2102,8 @@ class _Row extends StatefulWidget {
     this.onClose,
     this.dim = false,
     this.tint,
+    this.stamp,
+    this.stampColor,
   });
 
   final bool selected;
@@ -1789,6 +2116,18 @@ class _Row extends StatefulWidget {
   final Widget leading;
   final String title;
   final String subtitle;
+
+  /// A idade que fica na ponta direita do subtítulo, quando a linha tem uma.
+  ///
+  /// Fora do próprio subtítulo de propósito: o subtítulo é a frase que a
+  /// sessão disse por último e quase sempre está sendo cortada por "…" -- uma
+  /// idade grudada no fim dela seria a primeira coisa a sumir, e é justamente
+  /// a que não pode.
+  final String? stamp;
+
+  /// A cor dele, que é onde "você ainda não viu isso" é dito. Ver
+  /// [MxTab.unseen].
+  final Color? stampColor;
   final Widget trailing;
 
   /// Null for a row with nothing to open — a worktree whose folder is gone.
@@ -1863,13 +2202,32 @@ class _RowState extends State<_Row> {
                           fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w400,
                         ),
                       ),
-                      if (widget.subtitle.isNotEmpty) ...[
+                      if (widget.subtitle.isNotEmpty || widget.stamp != null) ...[
                         const SizedBox(height: 3),
-                        Text(
-                          widget.subtitle,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                          style: TextStyle(fontSize: 12, color: Mx.fgFaint),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.subtitle,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                                style: TextStyle(fontSize: 12, color: Mx.fgFaint),
+                              ),
+                            ),
+                            if (widget.stamp case final age?) ...[
+                              const SizedBox(width: 7),
+                              Text(
+                                age,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: widget.stampColor ?? Mx.fgFaint,
+                                  fontWeight: widget.stampColor == null
+                                      ? FontWeight.w400
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ],
@@ -2007,7 +2365,7 @@ class _NoFolders extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       child: Text(
         'nenhuma pasta ainda.\n\nsessões do claude já rodando aparecem aqui sozinhas — '
-        'ou use o + lá em cima pra adicionar um repo.\n\npra abrir um painel sem pasta '
+        'ou use o + no rodapé pra adicionar um repo.\n\npra abrir um painel sem pasta '
         'nenhuma, o + na linha de "avulsos" logo abaixo.',
         style: TextStyle(color: Mx.fgFaint, fontSize: 12.5, height: 1.55),
       ),

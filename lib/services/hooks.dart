@@ -144,6 +144,10 @@ class HookServer {
         'PostToolUse': [group(matcher: '*')],
         'Notification': [group()],
         'Stop': [group()],
+        // O fim de um fork. É o único aviso de que um agente disparado em
+        // segundo plano terminou -- ver [HookState.forksOut] --, e sem ele
+        // "quando terminar" só sabe que o *turno* acabou.
+        'SubagentStop': [group()],
       },
     });
   }
@@ -162,11 +166,26 @@ class HookReducer {
     // *doing* is not the session's status. Without this branch the row read
     // "rodando Grep(store.dart)" while the session itself was parked on the
     // `Agent` call that spawned it.
-    if (p['agent_id'] != null) {
+    final fork = p['agent_id'];
+    if (fork is String && fork.isNotEmpty) {
+      // Um fork que reporta é um fork vivo -- e às vezes um que não se viu
+      // nascer, porque nem toda chamada que abre um agente passa pelo
+      // `PreToolUse` desta sessão. A contagem observada manda na estimada.
+      if (event == _forkEnd) {
+        _forkDone(s, fork);
+      } else if (s.forkIds.add(fork) && s.forkIds.length > s.forksOut) {
+        s.forksOut = s.forkIds.length;
+      }
       if (event == 'PreToolUse') s.tools++;
       // Whoever held the pen, the file is what this session produced. A panel
       // whose forks did all the writing would otherwise show nothing.
       if (event == 'PostToolUse') _touch(s, p);
+      return;
+    }
+    // Um fim de fork sem carimbo: não dá pra saber qual, mas dá pra saber que
+    // é um a menos.
+    if (event == _forkEnd) {
+      _forkDone(s, null);
       return;
     }
 
@@ -175,6 +194,7 @@ class HookReducer {
         // Kept for the day it starts arriving: Claude Code does not fire this
         // one at an `http` hook today, which is why a panel settles itself.
         s.status = ClaudeStatus.ready;
+        _forksClear(s);
       case 'UserPromptSubmit':
         // Answering a question submits a prompt, and so does abandoning it:
         // either way what was asked is no longer pending.
@@ -185,6 +205,9 @@ class HookReducer {
         s.lastPrompt = _clip(p['user_input'] as String?, 70);
       case 'PreToolUse':
         if (p['tool_name'] == _askTool) _asked(s, p['tool_input']);
+        // Um agente disparado daqui pode sobreviver ao turno que o disparou:
+        // ver [HookState.forksOut].
+        if (_forkTools.contains(p['tool_name'])) s.forksOut++;
         // No `PreToolUse` e não no `PostToolUse`: o `ExitPlanMode` só volta se
         // o plano for aprovado, e um plano recusado é exatamente o que se quer
         // reler pra dizer por que. O texto é o mesmo nos dois lados.
@@ -238,7 +261,31 @@ class HookReducer {
         s.status = (reason == 'resume' || reason == 'clear')
             ? ClaudeStatus.ready
             : ClaudeStatus.ended;
+        // Os forks eram do processo que acabou de sair de cena, em qualquer
+        // dos dois casos: nenhum deles vai mandar o `SubagentStop` que
+        // zeraria a conta, e uma conta que não zera trava a fila.
+        _forksClear(s);
     }
+  }
+
+  /// As duas ferramentas que abrem um agente. `Task` é o nome antigo e `Agent`
+  /// o de hoje; os dois aparecem, dependendo da versão do CLI da sessão.
+  static const _forkTools = {'Task', 'Agent'};
+
+  /// O evento com que um fork se despede.
+  static const _forkEnd = 'SubagentStop';
+
+  /// Um fork a menos. O piso em zero importa: um `SubagentStop` a mais que as
+  /// chamadas vistas -- um fork de fork, uma sessão retomada no meio -- não
+  /// pode deixar a conta negativa, porque negativa ela nunca mais fecha.
+  static void _forkDone(HookState s, String? id) {
+    if (id != null) s.forkIds.remove(id);
+    if (s.forksOut > 0) s.forksOut--;
+  }
+
+  static void _forksClear(HookState s) {
+    s.forkIds.clear();
+    s.forksOut = 0;
   }
 
   /// A ferramenta que entrega um plano. O `tool_input` dela é `{plan: "..."}`,
