@@ -1936,6 +1936,22 @@ class AppStore extends ChangeNotifier {
     await refreshGit();
   }
 
+  /// O que dizer quando uma sessão morre nos primeiros segundos.
+  ///
+  /// O 127 ganha nome próprio porque é o modo de falha mais provável de uma
+  /// instalação nova, e o número não diz nada a quem só queria abrir uma
+  /// sessão: é o "command not found" do shell, quase sempre um `claude` que
+  /// está no PATH do terminal e não no que o app herda. [Sh.env] já cobre as
+  /// pastas usuais; o que sobra depende de onde o binário foi instalado, e aí
+  /// só o dono da máquina resolve -- então a receita vem junto.
+  @visibleForTesting
+  static String earlyExitMessage(String title, int? code) => code == 127
+      ? '$title: não achei o `claude` no PATH do app — instale-o, ou ponha a '
+            'pasta do binário no ${Sh.profileFile} (o rc do shell interativo o '
+            'app não lê)'
+      : '$title: o claude saiu na largada (código ${code ?? '?'}) '
+            '— abra o painel pra ver o motivo';
+
   void _register(MxTab tab) {
     tabs.add(tab);
     // A new panel lands in whichever pane you were looking at.
@@ -1946,11 +1962,7 @@ class AppStore extends ChangeNotifier {
       // own buffer.
       final alive = DateTime.now().difference(tab.startedAt);
       if (tab.kind == TabKind.claude && alive.inSeconds < 5) {
-        showBanner(
-          '${tab.title}: o claude saiu na largada '
-          '(código ${tab.term.exitCode ?? '?'}) — abra o painel pra ver o motivo',
-          sticky: true,
-        );
+        showBanner(earlyExitMessage(tab.title, tab.term.exitCode), sticky: true);
       }
       _save();
       notifyListeners();

@@ -472,6 +472,7 @@ $material
         Sh.shell,
         ['-lc', 'claude -p --output-format text < ${Sh.q(file.path)}'],
         workingDirectory: _home,
+        environment: Sh.env,
       );
       final stdout = StringBuffer();
       final stderr = StringBuffer();

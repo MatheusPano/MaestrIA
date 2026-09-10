@@ -243,7 +243,11 @@ class Dictation extends ChangeNotifier {
     }
     // `exec` pra que o pid seja o do gravador, e não o do shell que o subiu:
     // é nele que o sinal de parada precisa cair. Mesmo motivo do [TermSession].
-    _linux = await Process.start(Sh.shell, ['-lc', 'exec $program ${Sh.q(wav.path)}']);
+    _linux = await Process.start(
+      Sh.shell,
+      ['-lc', 'exec $program ${Sh.q(wav.path)}'],
+      environment: Sh.env,
+    );
     return null;
   }
 

@@ -12,9 +12,10 @@ import 'vt.dart';
 /// One real terminal: a pty child wired to an xterm buffer.
 ///
 /// Commands run as `zsh -lc 'exec <cmd>'`. The login shell supplies the PATH a
-/// GUI process does not inherit, and `exec` replaces the shell with the target
-/// so `pty.pid` is the pid of `claude` itself -- which is what lets a tab be
-/// matched against a row of `claude agents --json`.
+/// GUI process does not inherit (o resto dele vem de [Sh.env]), and `exec`
+/// replaces the shell with the target so `pty.pid` is the pid of `claude`
+/// itself -- which is what lets a tab be matched against a row of
+/// `claude agents --json`.
 class TermSession {
   TermSession({int scrollback = 8000})
     : terminal = VtTerminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel) {
@@ -83,7 +84,7 @@ class TermSession {
       Sh.shell,
       arguments: args,
       workingDirectory: cwd,
-      environment: {...Platform.environment, ..._capabilities, ...?env},
+      environment: {...Sh.env, ..._capabilities, ...?env},
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
     );
