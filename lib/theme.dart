@@ -1362,3 +1362,75 @@ class Mx {
     );
   }
 }
+
+/// A cor que alguém escolheu pra um painel.
+///
+/// Opcional de propósito, e é a diferença entre isto e `PaneGroup.color`: a
+/// cor de um grupo sai do id dele porque um grupo *é* um conjunto e ninguém
+/// precisa ser consultado pra dizer isso. Um painel não é nada disso -- ele é
+/// um trabalho --, então pintar todos automaticamente seria a janela dizendo
+/// que há um sentido nas cores que não há. Sem escolha, um painel não tem cor:
+/// [MxTab.tint] é null e o cartão é o cartão de sempre.
+///
+/// Guardada pelo papel e não pelo valor, que é o mesmo princípio de
+/// [MxPalette]: o config diz "ciano" e que ciano é isso quem responde é a
+/// paleta em vigor. Um `Color` gravado no json seria o ciano do tema de ontem
+/// sobrevivendo à troca de tema -- uma cor aceso sozinha no meio de uma paleta
+/// que não é a dela.
+///
+/// Sai do ansi pelo motivo escrito em [Mx.groupTints]: os cinco acentos da
+/// interface já são os estados de uma sessão, e o ansi no chrome ainda não
+/// significa nada.
+///
+/// Cinco, e não quatro como as dos grupos: aqui a cor é escolhida justamente
+/// pra separar duas sessões que se confundem, e quem escolhe merece um tom a
+/// mais que quem só recebe. São os cinco tons de que o ansi dispõe depois de
+/// tirar o preto, o branco e o cinza -- não há um sexto pra oferecer.
+///
+/// Duas escolhas que a lista carrega, e que valem pras duas pontas do arco:
+///
+/// Azul ficou de fora. Na paleta padrão ele é o mesmo valor do [Mx.accent], e
+/// o accent é o anel do painel em foco -- uma cor que quer dizer "este painel
+/// é aquele" não pode ser a mesma que já diz "o teclado está aqui".
+///
+/// Vermelho entrou, contra a regra do [Mx.groupTints], que o reserva pro que
+/// tem risco ([ClaudeStatus.waitingPermission]). A diferença é quem pinta:
+/// lá a cor é deduzida e cair em vermelho sem querer seria a janela dando um
+/// alarme falso; aqui ela é pedida, e um painel vermelho quer dizer o que a
+/// pessoa que o pintou quis dizer. O que ela custa está dito: um painel
+/// vermelho e um pedido de permissão passam a dividir a mesma família de cor.
+enum MxTint {
+  cyan('ciano'),
+  magenta('magenta'),
+  red('vermelho'),
+  green('verde'),
+  yellow('amarelo');
+
+  const MxTint(this.label);
+
+  /// Como a linha do menu se chama. Em português, como o resto dos menus.
+  final String label;
+
+  Color get color => switch (this) {
+    MxTint.cyan => Mx.palette.ansi.cyan,
+    MxTint.magenta => Mx.palette.ansi.magenta,
+    MxTint.red => Mx.palette.ansi.red,
+    // O verde do ansi é, em várias paletas, o mesmo verde do "concluída" --
+    // daí o claro, que é o tom que sobra pra dizer outra coisa. Mesmo motivo
+    // do [Mx.groupTints].
+    MxTint.green => Mx.palette.ansi.brightGreen,
+    MxTint.yellow => Mx.palette.ansi.yellow,
+  };
+
+  /// O que o config diz, virado de volta em cor -- ou null, que é o painel
+  /// sem cor. Um nome que não existe mais também volta null: um painel
+  /// pintado de `blue` antes de o azul sair da lista reabre sem cor, que é o
+  /// pior que pode acontecer com ele -- e melhor que uma exceção no meio da
+  /// leitura do layout.
+  static MxTint? byName(String? name) {
+    for (final tint in values) {
+      if (tint.name == name) return tint;
+    }
+    return null;
+  }
+}

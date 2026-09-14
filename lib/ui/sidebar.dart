@@ -140,6 +140,12 @@ class _Header extends StatelessWidget {
 /// A ordem é a do dia: primeiro o lugar onde se vai trabalhar, depois a sessão
 /// que já trabalhou nele, e por último o que foi feito.
 ///
+/// O medidor de plano fica no canto oposto, com um vão entre ele e os três.
+/// Ele também não produz nada na lista -- é a mesma razão que mandou a
+/// engrenagem pro cabeçalho --, mas é uma pergunta que se faz *antes* de abrir
+/// a próxima sessão, e o cabeçalho não tem largura pra um segundo glifo. O vão
+/// é o que o impede de ler como o quarto de uma fileira de quatro.
+///
 /// Moraram no header até ficar claro que saíam do mesmo orçamento de largura
 /// que a busca — e que o problema não era o terceiro glifo, era o quarto. Numa
 /// faixa horizontal deste tamanho cabem sete botões de 30 mesmo com a lateral
@@ -179,16 +185,17 @@ class _Footer extends StatelessWidget {
             tooltip: 'adicionar uma pasta ao cockpit',
             onPressed: () => showAddFolder(context, store),
           ),
-          // O histórico de todas as pastas de uma vez. O de *uma* pasta
-          // continua no + dela, e é outra pergunta: lá se procura dentro de um
-          // lugar que já se sabe qual é, aqui se procura o lugar junto com a
-          // conversa -- inclusive o de um repo que nunca foi adicionado à
-          // lateral, que é o que só este botão alcança.
+          // O histórico, inteiro: todas as pastas de uma vez, repartido por
+          // pasta -- e este é o único lugar por onde se chega nele. A lista
+          // esteve também no menu de cada pasta, filtrada nela, e era escolher
+          // antes de ver: a conversa de um repo que não está na lateral não
+          // aparecia em nenhuma das seis listas de pasta, só nesta. Ver
+          // [showChatHistory].
           _StripIcon(
-            // O mesmo relógio da linha "retomar conversa…" dos menus -- são a
-            // mesma coisa vista de dois lugares, e um segundo desenho pra ela
-            // faria pensar que não são --, na versão vazada que esta faixa
-            // pede de todos. Ver [_StripIcon].
+            // O relógio que era a linha "retomar conversa…" dos menus, na
+            // versão vazada que esta faixa pede de todos os glifos: quem
+            // procurava a linha reconhece o desenho dela aqui. Ver
+            // [_StripIcon].
             icon: Icons.history_outlined,
             tooltip: 'retomar uma conversa',
             onPressed: () => showChatHistory(context, store),
@@ -197,6 +204,15 @@ class _Footer extends StatelessWidget {
           // Fica aqui e não no menu de um painel porque o relatório não é
           // de painel nenhum: é da janela.
           _ReportIcon(store: store),
+          const Spacer(),
+          // O mesmo desenho da seção que ele abre (ver [MxSection.account]):
+          // são o mesmo lugar visto de dois cantos da janela, e um segundo
+          // desenho pra ele faria pensar que não são.
+          _StripIcon(
+            icon: MxSection.account.icon,
+            tooltip: MxSection.account.label,
+            onPressed: () => showSettings(context, store, section: MxSection.account),
+          ),
         ],
       ),
     );
@@ -735,7 +751,9 @@ class _FolderGroup extends StatelessWidget {
                     color: Mx.fgDim,
                   ),
                   const SizedBox(width: 3),
-                  RepoGlyph(isRepo: folder.isRepo),
+                  // Na cor da pasta quando ela tem uma: é o fundo do repo
+                  // dito na linha que abre o repo. Ver [MxTint].
+                  RepoGlyph(isRepo: folder.isRepo, color: folder.tint?.color),
                   const SizedBox(width: 9),
                   Expanded(
                     child: Column(
@@ -794,6 +812,9 @@ class _FolderGroup extends StatelessWidget {
         ),
         if (!collapsed)
           _Nest(
+            // Como a do projeto: a trilha diz de que pasta é o que está
+            // pendurado nela.
+            color: folder.tint?.color,
             children: [
               for (final p in projects)
                 _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
@@ -1200,7 +1221,15 @@ class _ProjectGroup extends StatelessWidget {
                       color: Mx.fgDim,
                     ),
                     const SizedBox(width: 4),
-                    Icon(Icons.workspaces_outline, size: 15, color: Mx.purple),
+                    // Na cor do projeto quando ele tem uma: é a mesma marca
+                    // roxa de sempre até alguém pintá-lo, e a partir daí é
+                    // ela que diz de que projeto são os painéis pendurados
+                    // aqui embaixo. Ver [MxTint].
+                    Icon(
+                      Icons.workspaces_outline,
+                      size: 15,
+                      color: project.tint?.color ?? Mx.purple,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1245,6 +1274,9 @@ class _ProjectGroup extends StatelessWidget {
         if (!collapsed && tabs.isNotEmpty)
           _Nest(
             rail: 15,
+            // A trilha é o que liga as sessões ao projeto delas; pintada, ela
+            // diz de relance onde aquele bloco de cor começa e acaba.
+            color: project.tint?.color,
             children: [
               ..._panelRows(store, tabs),
               const SizedBox(height: 4),
@@ -1349,7 +1381,14 @@ class _TabRow extends StatelessWidget {
     final row = _Row(
       selected: selected,
       focused: focused,
-      tint: group?.color,
+      // A escolhida pro painel na frente da do grupo -- a regra mora na
+      // store, com os outros três lugares que pintam. Ver [AppStore.tintOf].
+      tint: store.tintOf(tab),
+      // E mais forte quando foi escolhida -- pelo painel ou pelo projeto dele.
+      // A cor de um grupo é uma etiqueta que junta linhas espalhadas e um
+      // sussurro basta pra isso; a cor pedida existe pra um painel não ser
+      // confundido com o vizinho, e aí sussurro nenhum serve.
+      tintBold: store.chosenTintOf(tab) != null,
       // Concluída, a linha recua um passo: título apagado, marca apagada. Ela
       // continua ali — é uma sessão que você guardou de propósito — mas para
       // de disputar o olho com as que ainda estão trabalhando.
@@ -1563,14 +1602,18 @@ class _PanelDragState extends State<_PanelDrag> {
 /// repo — the branch mark welded onto its corner. Together they say "repo
 /// folder" without spending a word on it; a plain folder stays a plain folder.
 class RepoGlyph extends StatelessWidget {
-  const RepoGlyph({super.key, required this.isRepo, this.size = 17});
+  const RepoGlyph({super.key, required this.isRepo, this.size = 17, this.color});
   final bool isRepo;
   final double size;
+
+  /// A cor da pasta, quando ela tem uma. Só a pasta é pintada: o distintivo
+  /// de branch continua roxo, porque ele não fala da pasta -- fala de git.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     if (!isRepo) {
-      return Icon(Icons.folder_outlined, size: size, color: Mx.fgFaint);
+      return Icon(Icons.folder_outlined, size: size, color: color ?? Mx.fgFaint);
     }
     return SizedBox(
       width: size + 3,
@@ -1578,7 +1621,7 @@ class RepoGlyph extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(Icons.folder_rounded, size: size, color: Mx.fgDim),
+          Icon(Icons.folder_rounded, size: size, color: color ?? Mx.fgDim),
           Positioned(
             right: 0,
             bottom: -1,
@@ -1905,9 +1948,11 @@ Future<void> showFolderMenu(
     context,
     at: anchor,
     items: [
-      // Abrir algo aqui primeiro: é o que se vem fazer numa pasta, e
-      // 'retomar conversa…' é o que era a linha 'conversas de antes…' deste
-      // menu -- escrita agora onde as outras três moram.
+      // Abrir algo aqui primeiro: é o que se vem fazer numa pasta. Retomar
+      // uma conversa não está no bloco -- foi 'conversas de antes…' e depois
+      // 'retomar conversa…' neste menu, e hoje é o relógio do rodapé da
+      // lateral, com esta pasta virando uma seção da lista de lá. Ver
+      // [openHereItems].
       ...openHereItems(store),
       // Depois do bloco de abrir, porque abrir numa worktree é o que se
       // escolhe lá dentro: a linha é a mesma oferta sobre outro checkout, com
@@ -1946,6 +1991,11 @@ Future<void> showFolderMenu(
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
         label: 'renomear',
       ),
+      // A mesma linha do menu do projeto e do painel, um andar acima de
+      // todos: aqui ela é o fundo do repo -- vale pro painel que ninguém
+      // pintou e que não é de projeto pintado. Ver [tintItem] e
+      // [AppStore.chosenTintOf].
+      tintItem(folder.tint),
       mxDivider(),
       // E o que tira coisas da lateral.
       mxItem(
@@ -1980,6 +2030,8 @@ Future<void> showFolderMenu(
         label: 'nome',
       );
       if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
+    case final pick when isTintChoice(pick):
+      store.setFolderTint(folder, tintPicked(pick));
     case 'sweep':
       store.closeSettled(folder);
     case 'remove':
@@ -2069,9 +2121,12 @@ Future<void> showWorktreesMenu(
 /// line is what keeps saying it once a folder has enough tiles that its
 /// header has scrolled out of sight.
 class _Nest extends StatelessWidget {
-  const _Nest({required this.children, this.rail = 20});
+  const _Nest({required this.children, this.rail = 20, this.color});
 
   final List<Widget> children;
+
+  /// A cor da trilha, quando quem ela segura tem uma. Null é o fio de sempre.
+  final Color? color;
 
   /// Where the rail falls, measured from the parent row's left edge. A folder
   /// header's chevron sits at x=10 and is 20 wide, so 20 lands on its centre.
@@ -2082,7 +2137,7 @@ class _Nest extends StatelessWidget {
     return Container(
       margin: EdgeInsets.only(left: rail),
       decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: Mx.border)),
+        border: Border(left: BorderSide(color: color ?? Mx.border)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
     );
@@ -2102,6 +2157,7 @@ class _Row extends StatefulWidget {
     this.onClose,
     this.dim = false,
     this.tint,
+    this.tintBold = false,
     this.stamp,
     this.stampColor,
   });
@@ -2110,9 +2166,14 @@ class _Row extends StatefulWidget {
   final bool focused;
   final bool dim;
 
-  /// A cor do grupo a que esta linha pertence, quando pertence a um. Ver
-  /// [_TabRow] e `PaneGroup.color`.
+  /// A cor com que esta linha se lava, quando tem uma: a que alguém escolheu
+  /// pro painel, ou a do grupo a que ele pertence. Ver [_TabRow], [MxTint] e
+  /// `PaneGroup.color`.
   final Color? tint;
+
+  /// Quanto dela entra: a escolhida à mão vai pesada, a deduzida vai leve.
+  /// Ver [_TabRow].
+  final bool tintBold;
   final Widget leading;
   final String title;
   final String subtitle;
@@ -2165,7 +2226,11 @@ class _RowState extends State<_Row> {
     final background = widget.tint == null
         ? grey
         : Color.alphaBlend(
-            widget.tint!.withValues(alpha: widget.selected ? 0.2 : 0.11),
+            widget.tint!.withValues(
+              alpha: widget.tintBold
+                  ? (widget.selected ? 0.4 : 0.26)
+                  : (widget.selected ? 0.2 : 0.11),
+            ),
             // Transparente não se mistura: sobre uma linha apagada o banho
             // vai por cima do fundo da lateral, que é o que está atrás dela.
             grey == Colors.transparent ? Mx.bgSidebar : grey,

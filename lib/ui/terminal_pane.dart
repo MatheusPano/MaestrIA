@@ -80,6 +80,7 @@ class _TerminalPaneState extends State<TerminalPane> {
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,
+        tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
             _PaneHeader(
@@ -363,161 +364,189 @@ class _PaneHeader extends StatelessWidget {
   final bool resultOpen;
   final VoidCallback onToggleResult;
 
+  /// O que o painel fora de foco apaga -- e o nome dele não está aqui.
+  ///
+  /// Era o cabeçalho inteiro num `Opacity`, e isso apagava justamente a coisa
+  /// que a pessoa vai procurar: numa grade de quatro, três nomes a 55% e um
+  /// aceso. O que fica apagado é o que só interessa no painel em que você está
+  /// digitando -- as fichas, o subtítulo e os botões.
+  Widget _faded(Widget child) => dimmed ? Opacity(opacity: 0.55, child: child) : child;
+
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: dimmed ? 0.55 : 1,
-      // The same menu the sidebar row offers: the header *is* this panel.
-      child: GestureDetector(
-        onSecondaryTapDown: (d) => showPanelMenu(context, store, tab, d.globalPosition),
-        child: Container(
-          height: 42,
-          decoration: BoxDecoration(
-            color: Mx.bgSidebar,
-            border: Border(bottom: BorderSide(color: Mx.border)),
-          ),
-          padding: const EdgeInsets.only(left: 12, right: 8),
-          child: Row(
-            children: [
-              tab.kind == TabKind.claude
-                  ? ClaudeAvatar(status: tab.status, size: 20)
-                  : StatusDot(status: tab.status),
-              const SizedBox(width: 9),
-              // Title, chips and subtitle share one flexible block on purpose.
-              //
-              // Laid out as siblings of the buttons, whatever the title's flex
-              // share went unused stayed unclaimed, and a Row packed to the
-              // start leaves that slack at its *end* — which is why the close
-              // button used to float somewhere in from the right edge instead
-              // of sitting on it. Boxed here, the slack falls inside the box.
-              Expanded(
-                // Num painel estreito -- e a grade faz painéis estreitos --
-                // sobra o nome e mais nada: as fichas e o subtítulo têm
-                // largura própria, e a partir de certo ponto elas não encolhem
-                // mais, elas transbordam. A lateral continua dizendo tudo.
-                child: LayoutBuilder(
-                  builder: (context, box) => Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          tab.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+    // A tecla deste painel, pra dizer no cabeçalho. Ver [PaneKeyHint].
+    final index = store.tabs.indexWhere((t) => t.id == tab.id);
+    // The same menu the sidebar row offers: the header *is* this panel.
+    return GestureDetector(
+      onSecondaryTapDown: (d) => showPanelMenu(context, store, tab, d.globalPosition),
+      child: Container(
+        height: 42,
+        decoration: paneHeaderBox(store.tintOf(tab)),
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        child: Row(
+          children: [
+            tab.kind == TabKind.claude
+                ? ClaudeAvatar(status: tab.status, size: 20)
+                : StatusDot(status: tab.status),
+            const SizedBox(width: 9),
+            // Title, chips and subtitle share one flexible block on purpose.
+            //
+            // Laid out as siblings of the buttons, whatever the title's flex
+            // share went unused stayed unclaimed, and a Row packed to the
+            // start leaves that slack at its *end* — which is why the close
+            // button used to float somewhere in from the right edge instead
+            // of sitting on it. Boxed here, the slack falls inside the box.
+            Expanded(
+              // Num painel estreito -- e a grade faz painéis estreitos --
+              // sobra o nome e mais nada: as fichas e o subtítulo têm
+              // largura própria, e a partir de certo ponto elas não encolhem
+              // mais, elas transbordam. A lateral continua dizendo tudo.
+              child: LayoutBuilder(
+                builder: (context, box) => Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        tab.title,
+                        overflow: TextOverflow.ellipsis,
+                        style: paneTitleStyle,
+                      ),
+                    ),
+                    // Colada no nome, e do lado de fora do corte de 170px: as
+                    // duas juntas são o par com que a lateral identifica uma
+                    // linha, e num painel estreito é justamente ele que tem
+                    // que sobrar. Ver [PaneKeyHint].
+                    PaneKeyHint(index: index),
+                    if (box.maxWidth >= 170) ...[
+                      const SizedBox(width: 8),
+                      _faded(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (store.projectOf(tab) case final project?)
+                              _Chip(
+                                text: project.name,
+                                color: Mx.purple,
+                                icon: Icons.workspaces_outline,
+                              ),
+                            if (tab.branch.isNotEmpty && tab.branch != tab.title)
+                              _Chip(text: tab.branch, color: Mx.fgDim, icon: Icons.call_split),
+                            if (tab.dirty > 0) _Chip(text: '${tab.dirty}', color: Mx.yellow),
+                            if (tab.hooks.touched.isNotEmpty)
+                              ResultChip(
+                                count: tab.hooks.touched.length,
+                                open: resultOpen,
+                                onTap: onToggleResult,
+                              ),
+                            if (tab.followUps.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: FollowUpMark(tab: tab),
+                              ),
+                          ],
                         ),
                       ),
-                      if (box.maxWidth >= 170) ...[
-                        const SizedBox(width: 8),
-                        if (store.projectOf(tab) case final project?)
-                          _Chip(
-                            text: project.name,
-                            color: Mx.purple,
-                            icon: Icons.workspaces_outline,
-                          ),
-                        if (tab.branch.isNotEmpty && tab.branch != tab.title)
-                          _Chip(text: tab.branch, color: Mx.fgDim, icon: Icons.call_split),
-                        if (tab.dirty > 0) _Chip(text: '${tab.dirty}', color: Mx.yellow),
-                        if (tab.hooks.touched.isNotEmpty)
-                          ResultChip(
-                            count: tab.hooks.touched.length,
-                            open: resultOpen,
-                            onTap: onToggleResult,
-                          ),
-                        if (tab.followUps.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: FollowUpMark(tab: tab),
-                          ),
-                        Flexible(
-                          flex: 2,
-                          child: Text(
+                      Flexible(
+                        flex: 2,
+                        child: _faded(
+                          Text(
                             tab.subtitle,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: Mx.fgDim, fontSize: 12),
                           ),
                         ),
-                      ],
+                      ),
                     ],
+                  ],
+                ),
+              ),
+            ),
+            // --- ditado (vocalização) — fora desta versão --------------------
+            // Ver o cabeçalho de `services/dictation.dart`.
+            // // Fora do [LayoutBuilder] acima, então sobrevive ao painel
+            // // estreito que engole as fichas: um microfone aberto é a única
+            // // coisa neste cabeçalho que precisa ser vista sempre.
+            // if (store.dictation.phaseOf(tab.id) case final phase
+                // when phase != DictationPhase.idle)
+              // _DictationMark(store: store, phase: phase),
+            _faded(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // O programa que saiu, com o botão de subir de novo onde a
+                  // pessoa está olhando: um painel de `btop` sem btop é uma
+                  // moldura vazia, e fechar e refazer o caminho do menu é caro
+                  // demais pra um `q` apertado sem querer. Ver
+                  // [AppStore.relaunch].
+                  if (tab.launcher != null && tab.exited)
+                    IconButton(
+                      tooltip: 'rodar ${tab.launcher!.command} de novo',
+                      iconSize: 16,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () => store.relaunch(tab),
+                      icon: Icon(Icons.refresh, color: tab.launcher!.color),
+                    ),
+                  if (tab.agentName != null || tab.sessionId != null)
+                    _AgentHandle(store: store, tab: tab),
+                  // O tique fica antes do x porque é a outra forma de acabar
+                  // com um painel — e a que fica com ele. Quem leu a resposta
+                  // está olhando pra este header; é daqui que ele diz "essa
+                  // funcionou".
+                  Builder(
+                    builder: (ctx) => IconButton(
+                      tooltip: tab.done
+                          ? 'concluída — clique pra reabrir'
+                          : 'marcar esta sessão como concluída',
+                      iconSize: 16,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () {
+                        final box = ctx.findRenderObject() as RenderBox?;
+                        markDone(
+                          context,
+                          store,
+                          tab,
+                          done: !tab.done,
+                          // O confete sai do botão, não do canto da janela.
+                          from: box?.localToGlobal(box.size.center(Offset.zero)),
+                        );
+                      },
+                      icon: Icon(
+                        tab.done ? Icons.task_alt : Icons.check_circle_outline,
+                        color: tab.done ? Mx.green : Mx.fgDim,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              // --- ditado (vocalização) — fora desta versão ------------------
-              // Ver o cabeçalho de `services/dictation.dart`.
-              // // Fora do [LayoutBuilder] acima, então sobrevive ao painel
-              // // estreito que engole as fichas: um microfone aberto é a única
-              // // coisa neste cabeçalho que precisa ser vista sempre.
-              // if (store.dictation.phaseOf(tab.id) case final phase
-                  // when phase != DictationPhase.idle)
-                // _DictationMark(store: store, phase: phase),
-              // O programa que saiu, com o botão de subir de novo onde a
-              // pessoa está olhando: um painel de `btop` sem btop é uma
-              // moldura vazia, e fechar e refazer o caminho do menu é caro
-              // demais pra um `q` apertado sem querer. Ver [AppStore.relaunch].
-              if (tab.launcher != null && tab.exited)
-                IconButton(
-                  tooltip: 'rodar ${tab.launcher!.command} de novo',
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-                  style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  onPressed: () => store.relaunch(tab),
-                  icon: Icon(Icons.refresh, color: tab.launcher!.color),
-                ),
-              if (tab.agentName != null || tab.sessionId != null)
-                _AgentHandle(store: store, tab: tab),
-              // O tique fica antes do x porque é a outra forma de acabar com
-              // um painel — e a que fica com ele. Quem leu a resposta está
-              // olhando pra este header; é daqui que ele diz "essa funcionou".
-              Builder(
-                builder: (ctx) => IconButton(
-                  tooltip: tab.done
-                      ? 'concluída — clique pra reabrir'
-                      : 'marcar esta sessão como concluída',
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-                  style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  onPressed: () {
-                    final box = ctx.findRenderObject() as RenderBox?;
-                    markDone(
-                      context,
-                      store,
-                      tab,
-                      done: !tab.done,
-                      // O confete sai do botão, não do canto da janela.
-                      from: box?.localToGlobal(box.size.center(Offset.zero)),
-                    );
-                  },
-                  icon: Icon(
-                    tab.done ? Icons.task_alt : Icons.check_circle_outline,
-                    color: tab.done ? Mx.green : Mx.fgDim,
+                  // Sair do painel e encerrar a sessão são coisas diferentes, e
+                  // este é o gesto que se faz sem pensar -- então é o
+                  // inofensivo. Matar continua a um gesto de distância, e nos
+                  // três lugares onde é uma decisão: o X da linha na lateral,
+                  // o menu do painel e ⌘⌫.
+                  IconButton(
+                    // A tecla vem do mapa: ela é editável, e um tooltip que
+                    // ensinasse ⌘⌫ a quem trocou por outra estaria mentindo.
+                    tooltip: [
+                      'tirar do painel — a sessão continua na lateral',
+                      if (store.keymap[MxAction.closePane].firstOrNull case final chord?)
+                        '${chord.label} encerra a sessão',
+                    ].join('\n'),
+                    iconSize: 16,
+                    // Material pads a button out to a 48x48 touch target and
+                    // centres it in there — 11px of air on each side, which is
+                    // most of the way back to the inset we just removed. This
+                    // is a mouse-driven header; the 26px box is target enough.
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                    style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    onPressed: () => store.dismiss(tab),
+                    icon: Icon(Icons.close, color: Mx.fgDim),
                   ),
-                ),
+                ],
               ),
-              // Sair do painel e encerrar a sessão são coisas diferentes, e este
-              // é o gesto que se faz sem pensar -- então é o inofensivo. Matar
-              // continua a um gesto de distância, e nos três lugares onde é
-              // uma decisão: o X da linha na lateral, o menu do painel e ⌘⌫.
-              IconButton(
-                // A tecla vem do mapa: ela é editável, e um tooltip que
-                // ensinasse ⌘⌫ a quem trocou por outra estaria mentindo.
-                tooltip: [
-                  'tirar do painel — a sessão continua na lateral',
-                  if (store.keymap[MxAction.closePane].firstOrNull case final chord?)
-                    '${chord.label} encerra a sessão',
-                ].join('\n'),
-                iconSize: 16,
-                // Material pads a button out to a 48x48 touch target and
-                // centres it in there — 11px of air on each side, which is
-                // most of the way back to the inset we just removed. This is
-                // a mouse-driven header; the 26px box is target enough.
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-                style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                onPressed: () => store.dismiss(tab),
-                icon: Icon(Icons.close, color: Mx.fgDim),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

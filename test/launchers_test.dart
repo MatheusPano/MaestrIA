@@ -223,11 +223,10 @@ void main() {
       await tester.tap(find.byTooltip('abrir algo nessa pasta'));
       await tester.pumpAndSettle();
 
-      // Claude e terminal primeiro, retomar depois deles, e o menu não cresce
-      // uma linha por programa: o único 'btop' na tela é a linha do painel.
+      // Claude e terminal primeiro, e o menu não cresce uma linha por
+      // programa: o único 'btop' na tela é a linha do painel.
       expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
-      expect(find.text('retomar conversa…'), findsOneWidget);
       expect(find.text('meus programas'), findsOneWidget);
       expect(find.text('btop'), findsOneWidget);
       expect(find.text('outro programa…'), findsNothing);

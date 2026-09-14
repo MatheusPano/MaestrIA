@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/store.dart';
+import 'package:maestria/theme.dart';
 import 'package:maestria/ui/dialogs.dart';
 import 'package:maestria/ui/sidebar.dart';
 
@@ -179,7 +180,7 @@ void main() {
   group('abrir algo aqui', () {
     // A oferta é a mesma nos três menus porque é escrita uma vez, e a ordem é
     // a das chances de você ter vindo por ela. Ver `openHereItems`.
-    testWidgets('a ordem é sessão, terminal, retomar', (tester) async {
+    testWidgets('a ordem é sessão, terminal, fluxo', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
       final project = store.addProject(folder, 'permissão do google');
@@ -188,11 +189,14 @@ void main() {
 
       final sessao = tester.getTopLeft(find.text('sessão do claude')).dy;
       final terminal = tester.getTopLeft(find.text('terminal')).dy;
-      final retomar = tester.getTopLeft(find.text('retomar conversa…')).dy;
+      final fluxo = tester.getTopLeft(find.text('montar um fluxo…')).dy;
       expect(sessao, lessThan(terminal));
-      expect(terminal, lessThan(retomar));
+      expect(terminal, lessThan(fluxo));
       // E o que é do menu de baixo vem depois do risco, não no meio da oferta.
-      expect(retomar, lessThan(tester.getTopLeft(find.text('renomear')).dy));
+      expect(fluxo, lessThan(tester.getTopLeft(find.text('renomear')).dy));
+      // Retomar uma conversa não é mais deste bloco: é o relógio do rodapé da
+      // lateral, e esta pasta virou uma seção da lista de lá.
+      expect(find.text('retomar conversa…'), findsNothing);
       await closeMenu(tester);
     });
 
@@ -235,8 +239,9 @@ void main() {
 
       expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
-      // 'conversas de antes…' era esta linha, dita com outro nome só aqui.
-      expect(find.text('retomar conversa…'), findsOneWidget);
+      // Retomar conversa era 'conversas de antes…' aqui e saiu do bloco: hoje
+      // é o rodapé da lateral, repartido por pasta.
+      expect(find.text('retomar conversa…'), findsNothing);
       expect(find.text('conversas de antes…'), findsNothing);
       expect(find.text('meus programas'), findsOneWidget);
       // E o que sempre foi deste menu continua nele, depois do bloco.
@@ -393,6 +398,168 @@ void main() {
       // Antes do fim do teste: o recado tem um prazo de verdade correndo, e um
       // timer de pé é o que o `testWidgets` reclama com a árvore já desmontada.
       store.dispose();
+    });
+  });
+
+  // A cor de um painel: opcional, escolhida à mão, e o menu é a única porta
+  // dela. Ver [MxTint].
+  group('a cor no menu do painel', () {
+    MxTab panelOf(AppStore store) {
+      final tab = MxTab(
+        id: 'tab1',
+        folder: folder,
+        kind: TabKind.claude,
+        cwd: '/repo',
+        branch: '',
+      );
+      store.tabs.add(tab);
+      return tab;
+    }
+
+    testWidgets('a linha diz que não há cor nenhuma até alguém escolher uma', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final tab = panelOf(store);
+
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+
+      expect(find.text('cor'), findsOneWidget);
+      expect(tab.tint, isNull);
+      await closeMenu(tester);
+    });
+
+    testWidgets('escolher uma no submenu pinta o painel', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final tab = panelOf(store);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('magenta'));
+      await tester.pumpAndSettle();
+
+      expect(tab.tint, MxTint.magenta);
+      // E a linha do menu passa a dizer qual é, sem ter que reabrir o submenu.
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+      expect(find.text('cor: magenta'), findsOneWidget);
+      await closeMenu(tester);
+    });
+
+    testWidgets('e "sem cor" desfaz a escolha', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final tab = panelOf(store)..tint = MxTint.cyan;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+      await mouse.moveTo(tester.getCenter(find.text('cor: ciano')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('sem cor'));
+      await tester.pumpAndSettle();
+
+      expect(tab.tint, isNull);
+    });
+  });
+
+  // O mesmo submenu, um andar acima: a cor do projeto é a dos painéis dele.
+  group('a cor no menu do projeto', () {
+    testWidgets('escolher uma pinta o projeto, e com ele os painéis', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final project = store.addProject(folder, 'permissão do google');
+      final tab = MxTab(
+        id: 'tab1',
+        folder: folder,
+        kind: TabKind.claude,
+        cwd: '/repo',
+        branch: '',
+      )..projectId = project.id;
+      store.tabs.add(tab);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await openMenu(
+        tester,
+        (ctx) => showProjectMenu(ctx, store, folder, project, Offset.zero),
+      );
+      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('vermelho'));
+      await tester.pumpAndSettle();
+
+      expect(project.tint, MxTint.red);
+      // O painel não ganhou cor própria -- ele herdou a do projeto.
+      expect(tab.tint, isNull);
+      expect(store.tintOf(tab), MxTint.red.color);
+    });
+
+    // Com o projeto pintado, o menu do painel não finge que dá pra escolher:
+    // a linha diz de onde a cor vem, e não abre submenu nenhum.
+    testWidgets('e o menu do painel passa a dizer que a cor é de lá', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final project = store.addProject(folder, 'permissão do google');
+      final tab = MxTab(
+        id: 'tab1',
+        folder: folder,
+        kind: TabKind.claude,
+        cwd: '/repo',
+        branch: '',
+      )..projectId = project.id;
+      store.tabs.add(tab);
+      store.setProjectTint(project, MxTint.cyan);
+
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+
+      expect(find.text('cor: ciano — do projeto'), findsOneWidget);
+      expect(find.text('cor'), findsNothing);
+      await closeMenu(tester);
+    });
+  });
+
+  // E o terceiro andar: a pasta.
+  group('a cor no menu da pasta', () {
+    testWidgets('escolher uma pinta o repo e o que roda nele', (tester) async {
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final tab = MxTab(
+        id: 'tab1',
+        folder: folder,
+        kind: TabKind.claude,
+        cwd: '/repo',
+        branch: '',
+      );
+      store.tabs.add(tab);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      // A pasta deste arquivo é de todos os testes dele: o que este pinta,
+      // ele despinta na saída.
+      addTearDown(() => folder.tint = null);
+
+      await openMenu(
+        tester,
+        (ctx) => showFolderMenu(ctx, store, folder, const [], Offset.zero),
+      );
+      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('amarelo'));
+      await tester.pumpAndSettle();
+
+      expect(folder.tint, MxTint.yellow);
+      expect(store.tintOf(tab), MxTint.yellow.color);
+      // Fundo, e não lei: o painel ainda pode pedir outra. No campo e não
+      // pelo store -- depois do último pump, o debounce do save ficaria de pé
+      // e um timer pendente derruba um teste de widget por invariante.
+      tab.tint = MxTint.red;
+      expect(store.tintOf(tab), MxTint.red.color);
     });
   });
 

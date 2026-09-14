@@ -78,15 +78,22 @@ Future<void> pumpUntil(WidgetTester tester, Finder finder) async {
   }
 }
 
-/// O diálogo, aberto pelo botão -- que é o que o `+` da lateral faz. Espera
-/// por [until], que é a primeira linha a aparecer: o diálogo é montado no
-/// clique, mas as conversas só chegam quando a leitura do disco volta.
-///
-/// Sem [folder] é o histórico inteiro, que é o que o rodapé da lateral pede.
+/// Bate frames até [finder] não achar mais ninguém -- o par de [pumpUntil], e
+/// pela mesma razão: o que o teste espera é uma leitura de disco de verdade.
+Future<void> pumpUntilGone(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 40 && finder.evaluate().isNotEmpty; i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+    await tester.pump();
+  }
+}
+
+/// O diálogo, aberto pelo botão -- que é o que o relógio do rodapé da lateral
+/// faz. Espera por [until], que é a primeira linha a aparecer: o diálogo é
+/// montado no clique, mas as conversas só chegam quando a leitura do disco
+/// volta.
 Future<void> openHistory(
   WidgetTester tester,
   AppStore store, {
-  Folder? folder,
   required Finder until,
 }) async {
   await tester.pumpWidget(
@@ -94,7 +101,7 @@ Future<void> openHistory(
       home: Builder(
         builder: (context) => Scaffold(
           body: TextButton(
-            onPressed: () => showChatHistory(context, store, folder: folder),
+            onPressed: () => showChatHistory(context, store),
             child: const Text('abrir'),
           ),
         ),
@@ -188,6 +195,29 @@ void main() {
       expect(all.map((c) => c.sessionId).toSet(), {titled, spoke, mute, orphan});
       // Enquanto o da pasta continua sendo só o dela.
       expect(only.map((c) => c.sessionId).toSet(), {titled, spoke, mute});
+    });
+
+    // Uma worktree é outra pasta no disco, e a conversa que rodou nela é
+    // trabalho do mesmo repo: sem isto ela cairia nos avulsos do histórico,
+    // que é onde vai o que a lateral não conhece.
+    test('a conversa de uma worktree é da pasta dela, mesmo fora dela', () {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final folder = Folder(root: '/tmp', name: 'tmp');
+      store.folders.add(folder);
+      store.worktrees['/tmp'] = [
+        WorktreeInfo(path: '/tmp', branch: 'main', isMain: true),
+        WorktreeInfo(path: '/var/wt/TASK-1', branch: 'feature/TASK#1', isMain: false),
+      ];
+
+      expect(store.folderAt('/tmp'), same(folder));
+      expect(store.folderAt('/tmp/lib/ui'), same(folder));
+      expect(store.folderAt('/var/wt/TASK-1'), same(folder));
+      // E o que não é de pasta nenhuma continua não sendo: nem um caminho que
+      // só *começa* como o de uma pasta.
+      expect(store.folderAt('/var/wt/TASK-1000'), isNull);
+      expect(store.folderAt('/tmpfs/outro'), isNull);
+      expect(store.folderAt(''), isNull);
     });
 
     test('a mais recente vem primeiro', () async {
@@ -324,11 +354,9 @@ void main() {
       final store = NoPty();
       final folder = Folder(root: '/tmp', name: 'tmp');
       store.folders.add(folder);
-      // A bandeja dos avulsos pede o histórico inteiro, que é onde a conversa
-      // do repo que sumiu aparece.
-      await openHistory(tester, store, folder: store.loose, until: find.text(chamada));
+      await openHistory(tester, store, until: find.text(chamada));
 
-      expect(find.text('conversas de antes'), findsOneWidget);
+      expect(find.text('todas as conversas'), findsOneWidget);
       expect(find.text(chamada), findsOneWidget);
       expect(find.text('Tarefa o + da bandeja de grupos ficou torto'), findsOneWidget);
       expect(find.text('Migrar o schema do relatório'), findsOneWidget);
@@ -343,15 +371,79 @@ void main() {
       store.dispose();
     });
 
-    testWidgets('sem pasta, mostra as de todas elas de uma vez', (tester) async {
+    // A separação que a lateral faz com as sessões abertas, feita aqui com as
+    // conversas de antes: uma seção por pasta, e o que não é de pasta nenhuma
+    // nos avulsos do fim.
+    testWidgets('reparte por pasta, com os avulsos no fim', (tester) async {
       final store = NoPty();
       store.folders.add(Folder(root: '/tmp', name: 'tmp'));
       await openHistory(tester, store, until: find.text(chamada));
 
-      expect(find.text('todas as conversas'), findsOneWidget);
-      // A de /tmp e a do repo que sumiu, na mesma lista.
+      final tmp = tester.getTopLeft(find.text('tmp')).dy;
+      final avulsos = tester.getTopLeft(find.text('avulsos')).dy;
+      expect(tmp, lessThan(avulsos));
+      // As conversas de /tmp entre as duas réguas, e embaixo da segunda as
+      // duas que a lateral não sabe de quem são: a do repo que sumiu e a que
+      // nunca disse em que pasta rodou.
+      expect(tester.getTopLeft(find.text(chamada)).dy, greaterThan(tmp));
+      expect(tester.getTopLeft(find.text(chamada)).dy, lessThan(avulsos));
+      expect(
+        tester.getTopLeft(find.text('Migrar o schema do relatório')).dy,
+        greaterThan(avulsos),
+      );
+      expect(tester.getTopLeft(find.text('maestria_v2')).dy, greaterThan(avulsos));
+      // O número na régua é quantas a seção tem, como na lateral: duas e duas.
+      expect(find.text('2'), findsNWidgets(2));
+      store.dispose();
+    });
+
+    testWidgets('sem pasta nenhuma na lateral, tudo é avulso', (tester) async {
+      final store = NoPty();
+      await openHistory(tester, store, until: find.text(chamada));
+
+      expect(find.text('avulsos'), findsOneWidget);
+      expect(find.text('4'), findsOneWidget);
+      // E não há histórico de pasta a buscar: fora das pastas, o que a leitura
+      // da janela trouxe já é tudo que há.
+      expect(find.textContaining('todas as conversas em'), findsNothing);
+      store.dispose();
+    });
+
+    // A lista chega cortada pelas conversas mais recentes de *todas* as
+    // pastas, então a seção de uma pasta oferece o histórico dela inteiro --
+    // que é o que o menu da pasta dava, na lista onde ele passou a fazer
+    // sentido. Ver `AppStore.chatsIn`.
+    testWidgets('a seção de uma pasta vai buscar o resto do histórico dela', (tester) async {
+      final store = NoPty();
+      store.folders.add(Folder(root: '/tmp', name: 'tmp'));
+      await openHistory(tester, store, until: find.text(chamada));
+
+      expect(find.text('todas as conversas em tmp'), findsOneWidget);
+      await tester.tap(find.text('todas as conversas em tmp'));
+      // A mesma linha diz que está buscando enquanto o disco não responde: o
+      // clique já aconteceu, e oferecê-lo de novo convidaria a um segundo.
+      await tester.pump();
+      expect(find.text('buscando…'), findsOneWidget);
+      await pumpUntilGone(tester, find.text('buscando…'));
+
+      // Atendida, a linha sai: a seção passou a *ser* o histórico da pasta, e
+      // uma linha que oferecesse o que já está na tela só ensinaria a duvidar
+      // dela.
+      expect(find.text('todas as conversas em tmp'), findsNothing);
       expect(find.text(chamada), findsOneWidget);
-      expect(find.text('Migrar o schema do relatório'), findsOneWidget);
+      // A leitura da pasta é por caminho e não pelo que o transcript diz, então
+      // ela acha também a conversa que não disse onde rodou -- e essa sai dos
+      // avulsos em vez de aparecer nas duas seções.
+      final avulsos = tester.getTopLeft(find.text('avulsos')).dy;
+      expect(find.text('maestria_v2'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('maestria_v2')).dy, lessThan(avulsos));
+      expect(find.text('3'), findsOneWidget);
+      // E a seção continua sendo a da pasta: a conversa do repo que sumiu não
+      // migrou pra ela.
+      expect(
+        tester.getTopLeft(find.text('Migrar o schema do relatório')).dy,
+        greaterThan(avulsos),
+      );
       store.dispose();
     });
 
@@ -371,7 +463,7 @@ void main() {
       final store = NoPty();
       final folder = Folder(root: '/tmp', name: 'tmp');
       store.folders.add(folder);
-      await openHistory(tester, store, folder: folder, until: find.text(chamada));
+      await openHistory(tester, store, until: find.text(chamada));
 
       await tester.tap(find.text(chamada));
       await tester.pump();

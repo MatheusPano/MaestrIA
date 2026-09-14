@@ -125,6 +125,7 @@ class _DocPaneState extends State<DocPane> {
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,
+        tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
             _DocHeader(
@@ -322,76 +323,90 @@ class _DocHeader extends StatelessWidget {
     DocSource.report => Icons.summarize_outlined,
   };
 
+  /// O mesmo apagado do cabeçalho do terminal, e pelo mesmo motivo: o nome de
+  /// um painel fora de foco é o que se vai procurar nele. Ver `_PaneHeader`.
+  Widget _faded(Widget child) => dimmed ? Opacity(opacity: 0.55, child: child) : child;
+
   @override
   Widget build(BuildContext context) {
     final doc = tab.doc!;
-    return Opacity(
-      opacity: dimmed ? 0.55 : 1,
-      child: Container(
-        height: 42,
-        decoration: BoxDecoration(
-          color: Mx.bgSidebar,
-          border: Border(bottom: BorderSide(color: Mx.border)),
-        ),
-        padding: const EdgeInsets.only(left: 12, right: 8),
-        child: Row(
-          children: [
-            Icon(iconOf(doc.source), size: 17, color: Mx.fgDim),
-            const SizedBox(width: 9),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, box) => Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        tab.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                      ),
+    final index = store.tabs.indexWhere((t) => t.id == tab.id);
+    return Container(
+      height: 42,
+      decoration: paneHeaderBox(store.tintOf(tab)),
+      padding: const EdgeInsets.only(left: 12, right: 8),
+      child: Row(
+        children: [
+          Icon(iconOf(doc.source), size: 17, color: Mx.fgDim),
+          const SizedBox(width: 9),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) => Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      tab.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: paneTitleStyle,
                     ),
-                    if (box.maxWidth >= 190) ...[
-                      const SizedBox(width: 8),
-                      Flexible(
-                        flex: 2,
-                        child: Text(
+                  ),
+                  PaneKeyHint(index: index),
+                  if (box.maxWidth >= 190) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      flex: 2,
+                      child: _faded(
+                        Text(
                           tab.subtitle,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: Mx.fgDim, fontSize: 12),
                         ),
                       ),
-                    ],
+                    ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          _faded(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (doc.source.onDisk && doc.path != null) ...[
+                  _Action(
+                    icon: Icons.refresh,
+                    tooltip: 'reler do disco — ele já relê sozinho enquanto está aberto',
+                    onPressed: onReload,
+                  ),
+                  _Action(
+                    icon: Icons.folder_open_outlined,
+                    tooltip: 'mostrar no Finder',
+                    onPressed: () => Notifier.reveal(doc.path!),
+                  ),
+                  _Action(
+                    icon: Icons.edit_outlined,
+                    tooltip: 'abrir no vscode',
+                    onPressed: () => store.openInEditor(doc.path!),
+                  ),
+                ],
+                _Action(
+                  icon: Icons.copy_all_outlined,
+                  tooltip: 'copiar o markdown',
+                  onPressed: onCopy,
                 ),
-              ),
+                _Action(
+                  icon: Icons.close,
+                  tooltip: 'fechar este leitor',
+                  // Fechar de verdade, não [AppStore.dismiss]: um leitor não
+                  // tem processo nem conversa pra guardar na lateral, então um
+                  // que sai do painel não seria nada — só uma linha a mais na
+                  // lista.
+                  onPressed: () => store.closeTab(tab),
+                ),
+              ],
             ),
-            if (doc.source.onDisk && doc.path != null) ...[
-              _Action(
-                icon: Icons.refresh,
-                tooltip: 'reler do disco — ele já relê sozinho enquanto está aberto',
-                onPressed: onReload,
-              ),
-              _Action(
-                icon: Icons.folder_open_outlined,
-                tooltip: 'mostrar no Finder',
-                onPressed: () => Notifier.reveal(doc.path!),
-              ),
-              _Action(
-                icon: Icons.edit_outlined,
-                tooltip: 'abrir no vscode',
-                onPressed: () => store.openInEditor(doc.path!),
-              ),
-            ],
-            _Action(icon: Icons.copy_all_outlined, tooltip: 'copiar o markdown', onPressed: onCopy),
-            _Action(
-              icon: Icons.close,
-              tooltip: 'fechar este leitor',
-              // Fechar de verdade, não [AppStore.dismiss]: um leitor não tem
-              // processo nem conversa pra guardar na lateral, então um que sai
-              // do painel não seria nada — só uma linha a mais na lista.
-              onPressed: () => store.closeTab(tab),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+// Só a `Color`, pro [AppStore.tintOf]: o `foundation` não a reexporta, e o
+// `material` inteiro traria uma janela de widgets pra dentro da store.
+import 'dart:ui' show Color;
 
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -54,6 +57,17 @@ class MxTab {
   final String cwd;
   String branch;
   String? customLabel;
+
+  /// A cor deste painel, quando alguém escolheu uma. Ver [MxTint].
+  ///
+  /// Mora ao lado do [customLabel] porque é a outra metade da mesma coisa: as
+  /// duas são o que *você* diz sobre este painel, e nenhuma das duas se
+  /// deriva de pasta, branch ou estado. Null é o padrão e é a maioria -- um
+  /// painel sem cor é o cartão de sempre.
+  ///
+  /// Vale quando o projeto deste painel não tem cor -- se tem, é a dele que
+  /// manda. Ver [AppStore.chosenTintOf].
+  MxTint? tint;
 
   final TermSession term = TermSession();
   final HookState hooks = HookState();
@@ -281,6 +295,10 @@ class MxTab {
     // [AppStore._openPane].
     if (launcher case final l?) 'launcher': l.id,
     if (customLabel != null) 'label': customLabel,
+    // Junto do nome, e na receita e não só no layout: um grupo salvo guarda
+    // arranjo, e a cor de um painel é do painel -- reabri-lo pelo grupo tem
+    // que devolver o cartão que você pintou.
+    if (tint != null) 'tint': tint!.name,
     // The session id is the whole point: a restored panel resumes the
     // conversation instead of starting a stranger in the same folder.
     if (resumable) 'sessionId': resumeId,
@@ -683,6 +701,7 @@ class AppStore extends ChangeNotifier {
       );
     }
     if (label != null) tab.customLabel = label;
+    tab.tint = MxTint.byName(pane['tint'] as String?);
     // Contido pela base de agora: quem baixou o corpo nas configurações
     // desde a última vez não recebe um painel fora do limite.
     tab.zoom = Mx.type.clampZoom((pane['zoom'] as num?)?.toInt() ?? 0);
@@ -982,6 +1001,13 @@ class AppStore extends ChangeNotifier {
     return result;
   }
 
+  /// A cor desta pasta, ou null pra tirar a que ela tinha. Ver [Folder.tint].
+  void setFolderTint(Folder folder, MxTint? tint) {
+    folder.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
   void renameFolder(Folder p, String name) {
     p.name = name;
     _save();
@@ -1278,6 +1304,17 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A cor deste projeto, ou null pra tirar a que ele tinha -- e com ela a
+  /// dos painéis que não escolheram a sua. Ver [Project.tint] e [tintOf].
+  ///
+  /// Fora do [editProject] de propósito: aquele tem os campos que se editam
+  /// num diálogo de texto, e este é uma escolha de menu que vale na hora.
+  void setProjectTint(Project project, MxTint? tint) {
+    project.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
   void toggleProjectCollapsed(Project project) {
     project.collapsed = !project.collapsed;
     _save();
@@ -1445,9 +1482,13 @@ class AppStore extends ChangeNotifier {
   ///
   /// Da pasta *e das worktrees dela*, porque uma conversa é da worktree em que
   /// aconteceu -- e o trabalho aqui mora em worktree: filtrar só pelo checkout
-  /// principal esconderia justamente as conversas de task. A bandeja dos
-  /// avulsos é a exceção e recebe [allChats]: ela é onde se vai quando nenhuma
-  /// das pastas de cima é a resposta.
+  /// principal esconderia justamente as conversas de task.
+  ///
+  /// Quem pergunta é a seção de uma pasta no histórico, quando alguém pede o
+  /// resto dela: a lista chega com as conversas mais recentes de todas as
+  /// pastas juntas -- ver [allChats] --, e o pedaço de uma pasta que cai ali
+  /// não é o histórico dela. A bandeja dos avulsos não tem o que pedir e
+  /// recebe [allChats]: ela é o que sobrou de pasta nenhuma.
   Future<List<ChatEntry>> chatsIn(Folder folder) => folder.isLoose
       ? allChats()
       : ChatHistory.read(
@@ -1473,6 +1514,27 @@ class AppStore extends ChangeNotifier {
   static String get chatHome => Platform.environment.containsKey('FLUTTER_TEST')
       ? 'test/fixtures/history'
       : ChatHistory.home;
+
+  /// A pasta da lateral em que [cwd] está, quando é de alguma: a raiz dela,
+  /// algo dentro dela, ou uma worktree dela -- que é outra pasta no disco e
+  /// ainda é trabalho do mesmo repo, e é onde metade das conversas daqui
+  /// rodou. Ver [worktrees].
+  ///
+  /// Nula é o caminho que a lateral não conhece: o `~/.claude/projects` tem
+  /// uma pasta por lugar em que o claude já rodou, e a maior parte deles nunca
+  /// foi adicionada aqui. É essa a resposta que os avulsos recebem -- no
+  /// histórico, que reparte as conversas por pasta, e no painel que retoma uma
+  /// delas. Ver [resumeChat].
+  Folder? folderAt(String cwd) {
+    if (cwd.isEmpty) return null;
+    bool inside(String root) => cwd == root || cwd.startsWith('$root/');
+    // A raiz antes das worktrees porque é o caso de quase toda conversa, e não
+    // porque uma exclua a outra: as duas listas não se cruzam.
+    return folders.firstWhereOrNull((f) => inside(f.root)) ??
+        folders.firstWhereOrNull(
+          (f) => worktrees[f.root]?.any((w) => inside(w.path)) ?? false,
+        );
+  }
 
   /// Em que pé está [chat] agora. Ver [ChatStanding].
   ChatStanding standingOf(ChatEntry chat) {
@@ -1523,10 +1585,7 @@ class AppStore extends ChangeNotifier {
     // A pasta que o cockpit conhece pra esse caminho, quando quem pediu não
     // disse: o histórico inteiro traz conversa de repo que não está na lateral,
     // e essa entra nos avulsos.
-    final at =
-        folder ??
-        folders.firstWhereOrNull((f) => chat.cwd == f.root || chat.cwd.startsWith('${f.root}/')) ??
-        loose;
+    final at = folder ?? folderAt(chat.cwd) ?? loose;
     return openClaude(
       at,
       cwd: chat.cwd,
@@ -2096,6 +2155,17 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A cor deste painel, ou null pra tirar a que ele tinha. Ver [MxTint].
+  ///
+  /// Vizinha do [renameTab] porque é o mesmo gesto: dar nome e dar cor são as
+  /// duas coisas que a pessoa diz sobre um painel, e as duas têm que
+  /// atravessar o fechamento da janela -- daí o [_save].
+  void setTabTint(MxTab tab, MxTint? tint) {
+    tab.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
   /// Mark a session as having done its job, or take the mark back.
   ///
   /// Deliberately not a close. Closing says "I am done with this panel" and
@@ -2320,6 +2390,43 @@ class AppStore extends ChangeNotifier {
 
   /// O grupo de que este painel faz parte, se faz de algum.
   PaneGroup? groupOf(MxTab tab) => groupById(tab.groupId);
+
+  /// A cor que alguém *escolheu* pra este painel: a do projeto de que ele é,
+  /// ou a dele. Null quando ninguém escolheu nenhuma.
+  ///
+  /// O projeto na frente do painel, e não a mais específica na frente da mais
+  /// geral. É deliberado: a cor de um projeto existe pra que as sessões dele
+  /// sejam reconhecíveis *como um bloco*, e um painel destoando no meio
+  /// desfaz justamente isso -- de relance ele lê como sendo de outro
+  /// trabalho, que é o erro que a cor veio evitar.
+  ///
+  /// E a pasta por último das três, que é a ordem virando do avesso de novo.
+  /// Também é deliberado, e pela mesma pergunta: de que bloco a cor fala. Um
+  /// projeto é *um* trabalho, e por isso manda no painel; uma pasta é o lugar
+  /// onde vários trabalhos acontecem, e uma cor que mandasse ali apagaria
+  /// justamente a distinção entre eles. Ela é o fundo -- pinta quem ninguém
+  /// pintou. Ver [Folder.tint].
+  ///
+  /// A cor do painel não some por baixo dela: ela fica guardada e volta a
+  /// valer no dia em que o projeto ficar sem cor, ou em que o painel sair
+  /// dele. E o menu do painel não finge que dá pra escolher enquanto o
+  /// projeto manda -- ver `showPanelMenu`.
+  ///
+  /// Separada do [tintOf] porque a diferença entre escolhida e deduzida vale
+  /// desenho: o que foi pedido é dito alto (ver `_TabRow`), o que a janela
+  /// deduziu é dito baixo.
+  MxTint? chosenTintOf(MxTab tab) => projectOf(tab)?.tint ?? tab.tint ?? tab.folder.tint;
+
+  /// A cor com que este painel se lava, quando tem uma -- o cartão dele, o
+  /// cabeçalho e a linha dele na lateral.
+  ///
+  /// A regra de precedência mora aqui, e não nos quatro lugares que desenham:
+  /// projeto, painel, grupo. As duas primeiras são escolhas (ver
+  /// [chosenTintOf]); a do grupo é automática, diz "estes três andam juntos"
+  /// e por isso vem por último -- um pedido ganha de uma dedução.
+  ///
+  /// Null é a maioria dos painéis, e é o cartão de sempre. Ver [MxTint].
+  Color? tintOf(MxTab tab) => chosenTintOf(tab)?.color ?? groupOf(tab)?.color;
 
   /// O grupo que a tela está mostrando, quando ela está mostrando um.
   ///

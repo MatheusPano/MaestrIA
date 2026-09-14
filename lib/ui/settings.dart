@@ -7,19 +7,25 @@ import '../models.dart';
 // import '../services/dictation.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
+import '../services/usage.dart';
 import '../theme.dart';
 import 'dialogs.dart';
 import 'theme_gallery.dart';
 
-/// As três metades da tela: como a janela se parece, o que o teclado faz, e o
-/// que o + da lateral tem pra oferecer.
+/// As quatro metades da tela: como a janela se parece, o que o teclado faz, o
+/// que o + da lateral tem pra oferecer, e quanto do plano já foi.
+///
+/// A última é a única que não configura nada, e fica aqui mesmo assim: é a
+/// gaveta em que já se entra pra olhar uma coisa e sair, e um medidor de plano
+/// não tem tráfego pra pagar uma região da janela só pra ele.
 enum MxSection {
   appearance('aparência', Icons.palette_outlined),
   shortcuts('atalhos', Icons.keyboard_outlined),
-  launchers('programas', Icons.rocket_launch_outlined);
+  launchers('programas', Icons.rocket_launch_outlined),
+  account('conta & uso', Icons.speed_outlined);
   // --- ditado (vocalização) — fora desta versão -------------------------------
-  // A quarta seção era o microfone. Ver o cabeçalho de
-  // `services/dictation.dart`; quando ela voltar, o `;` acima vira `,` de novo.
+  // O microfone era mais uma seção aqui. Ver o cabeçalho de
+  // `services/dictation.dart`; quando ele voltar, o `;` acima vira `,` de novo.
   // dictation('ditado', Icons.mic_none_outlined);
 
   const MxSection(this.label, this.icon);
@@ -111,6 +117,7 @@ class _SettingsState extends State<_Settings> {
                               MxSection.appearance => _Appearance(store: widget.store),
                               MxSection.shortcuts => _Shortcuts(store: widget.store),
                               MxSection.launchers => _Launchers(store: widget.store),
+                              MxSection.account => const _Account(),
                               // --- ditado (vocalização) — fora desta versão ---
                               // MxSection.dictation => _Dictation(store: widget.store),
                             },
@@ -223,12 +230,19 @@ class _RailItemState extends State<_RailItem> {
                 color: widget.selected ? Mx.accent : (lit ? Mx.fg : Mx.fgDim),
               ),
               const SizedBox(width: 9),
-              Text(
-                widget.section.label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w400,
-                  color: lit ? Mx.fg : Mx.fgDim,
+              // Cortado em vez de estourar: os 184px do rail são fixos e o
+              // rótulo é de quem escreveu a seção, então o dia em que um nome
+              // não couber a linha some atrás de listras amarelas -- ou, em
+              // teste, derruba a suíte inteira por um item que ninguém leu.
+              Expanded(
+                child: Text(
+                  widget.section.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w400,
+                    color: lit ? Mx.fg : Mx.fgDim,
+                  ),
                 ),
               ),
             ],
@@ -1125,6 +1139,339 @@ class _LauncherRowState extends State<_LauncherRow> {
               icon: Icon(Icons.close, color: Mx.fgDim),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Quanto do plano já foi gasto, e de quem é o plano.
+///
+/// A única seção que não muda nada: aqui não há o que salvar, só o que ler --
+/// e por isso é a única com um botão de recarregar. As outras três respondem
+/// ao clique; esta responde a uma pergunta cuja resposta envelhece sozinha.
+///
+/// A leitura é pedida ao entrar e não fica se repetindo enquanto a tela está
+/// aberta: são percentuais inteiros de janelas de horas e dias, então um
+/// número novo a cada poucos segundos seria o mesmo número com uma chamada de
+/// rede em cima. Ver [Usage.read].
+class _Account extends StatefulWidget {
+  const _Account();
+
+  @override
+  State<_Account> createState() => _AccountState();
+}
+
+class _AccountState extends State<_Account> {
+  /// Guardado num campo, e não montado no `build`: o corpo do diálogo é
+  /// reconstruído a cada mexida do store -- que tem um timer de um segundo --
+  /// e um future criado ali dentro seria uma chamada de rede por repintura.
+  late Future<UsageReading> _reading = Usage.read();
+  DateTime _readAt = DateTime.now();
+
+  void _again() => setState(() {
+    _reading = Usage.read();
+    _readAt = DateTime.now();
+  });
+
+  /// A hora do relógio, e não "há 3min": nada aqui tem um timer pra fazer um
+  /// "há quanto tempo" andar, e um que não anda mente depois do primeiro minuto.
+  String get _when {
+    final h = _readAt.hour.toString().padLeft(2, '0');
+    final m = _readAt.minute.toString().padLeft(2, '0');
+    return 'lida às $h:$m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _Heading(
+          'conta & uso',
+          hint: 'o mesmo que o /usage do claude mostra, lido da credencial desta máquina',
+        ),
+        FutureBuilder<UsageReading>(
+          future: _reading,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) return const _Waiting();
+            // Um erro do future é um bug daqui, não uma resposta da api --
+            // aquelas já voltam como [UsageReading.failed]. Ainda assim vira
+            // uma frase na tela: a alternativa é a seção em branco.
+            final reading = snap.data ?? UsageReading.failed('${snap.error}');
+            if (!reading.ok) return _Trouble(reading.problem!, onRetry: _again);
+            return _Meters(reading: reading, when: _when, onRefresh: _again);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// A leitura, desenhada.
+class _Meters extends StatelessWidget {
+  const _Meters({required this.reading, required this.when, required this.onRefresh});
+
+  final UsageReading reading;
+  final String when;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final who = reading.account;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!who.isEmpty) ...[
+          Text(
+            [
+              if (who.organization case final org?) org,
+              if (who.plan case final plan?) plan,
+            ].join(' · '),
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+          ),
+          if (who.email case final mail?) ...[
+            const SizedBox(height: 2),
+            Text(mail, style: TextStyle(fontSize: 11.5, color: Mx.fgDim)),
+          ],
+          const SizedBox(height: 18),
+        ],
+        for (final window in reading.windows) _Meter(window),
+        if (reading.credits case final credits?) ...[
+          const SizedBox(height: 2),
+          Text(credits, style: TextStyle(fontSize: 11.5, color: Mx.fgDim)),
+          const SizedBox(height: 6),
+        ],
+        Row(
+          children: [
+            Text(when, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+            const SizedBox(width: 10),
+            _Reload(onPressed: onRefresh),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Uma cor de primeiro plano rebaixada a fundo de faixa.
+///
+/// Existe porque os tons de fundo do tema não servem pra faixas pequenas.
+/// `bgActive` era o palpite óbvio e é o pior possível: no tema `maestria` ele
+/// dá 1,28 de razão de contraste contra o `bgSidebar` do diálogo, e uma faixa
+/// de 5px nessa distância simplesmente não aparece -- que é o bug que trouxe
+/// esta função. `border` é ainda menor (1,24). Não é defeito daqueles tokens:
+/// eles separam superfícies grandes, onde o olho tem área pra somar a
+/// diferença, e uma faixa de 5px não tem.
+///
+/// Rebaixando uma cor de frente, a mesma faixa sobe pra ~1,7 na maioria dos
+/// temas e não cai de ~1,4 em nenhum dos vinte.
+Color _faded(Color color) => color.withValues(alpha: 0.3);
+
+/// Uma janela do plano: o nome, o número, a barra, e quando ela zera.
+class _Meter extends StatelessWidget {
+  const _Meter(this.window);
+
+  final UsageWindow window;
+
+  /// Onde a barra troca de cor.
+  ///
+  /// Números daqui, e não o `severity` que a resposta manda junto: aquele é um
+  /// texto de vocabulário desconhecido -- sabe-se que existe `normal`, e nada
+  /// sobre o resto --, e uma cor escolhida por igualdade a uma string que
+  /// ninguém documentou é uma cor que um dia para de mudar em silêncio.
+  ///
+  /// 75 é onde ainda dá pra decidir alguma coisa (trocar de modelo, deixar a
+  /// tarefa grande pra depois do reset) e 90 é onde já não dá.
+  static Color _colorAt(int percent) {
+    if (percent >= 90) return Mx.red;
+    if (percent >= 75) return Mx.yellow;
+    return Mx.accent;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _colorAt(window.percent);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 17),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              // Pelo mesmo motivo do rail: o rótulo de uma janela que a api
+              // passe a mandar não é escolhido aqui, e o número é a metade da
+              // linha que não pode ser a cortada.
+              Expanded(
+                child: Text(
+                  window.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, color: Mx.fg),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${window.percent}%',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontFamily: Mx.mono,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 5,
+            decoration: BoxDecoration(
+              // Acompanha o âmbar e o vermelho: a barra continua lendo
+              // como um objeto só quando o plano aperta.
+              color: _faded(color),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              // O teto é da barra, não do número: passar de 100 acontece, e a
+              // porcentagem ao lado continua dizendo quanto passou.
+              widthFactor: (window.percent / 100).clamp(0.0, 1.0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ),
+          if (window.resetsAt case final at?) ...[
+            const SizedBox(height: 6),
+            Text(
+              'reseta em ${shortUntil(at)}',
+              style: TextStyle(fontSize: 11, color: Mx.fgFaint),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// O lugar das barras enquanto a resposta não chega.
+///
+/// Três blocos da altura de um medidor, e não um spinner no meio da área: a
+/// seção já tem uma forma, e mantê-la faz a chegada dos números ser uma troca
+/// de conteúdo em vez de um salto de layout.
+///
+/// Cinza e não na cor de destaque, pelo mesmo motivo: uma barra colorida aqui
+/// seria um número que ainda não existe. Ver [_faded] -- os blocos sofriam do
+/// mesmo sumiço que a trilha dos medidores.
+class _Waiting extends StatelessWidget {
+  const _Waiting();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < 3; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 17),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: 9,
+                  width: 108,
+                  decoration: BoxDecoration(
+                    color: _faded(Mx.fgDim),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: _faded(Mx.fgDim),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Por que não deu, e o botão de tentar de novo.
+class _Trouble extends StatelessWidget {
+  const _Trouble(this.problem, {required this.onRetry});
+
+  final String problem;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+      decoration: BoxDecoration(
+        color: Mx.bg,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: Mx.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.cloud_off_outlined, size: 15, color: Mx.fgFaint),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              problem,
+              style: TextStyle(fontSize: 11.5, color: Mx.fgDim, height: 1.35),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _Reload(onPressed: onRetry),
+        ],
+      ),
+    );
+  }
+}
+
+/// O glifo de recarregar, no tamanho dos alvos pequenos desta tela.
+class _Reload extends StatefulWidget {
+  const _Reload({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_Reload> createState() => _ReloadState();
+}
+
+class _ReloadState extends State<_Reload> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        behavior: HitTestBehavior.opaque,
+        child: Tooltip(
+          message: 'ler de novo',
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: _hover ? Mx.bgHover : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(Icons.refresh, size: 14, color: _hover ? Mx.fg : Mx.fgDim),
+          ),
         ),
       ),
     );

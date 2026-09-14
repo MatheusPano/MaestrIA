@@ -116,8 +116,9 @@ void main() {
       await tester.tap(find.text('TASK#47730'));
       await tester.pumpAndSettle();
 
-      // O mesmo bloco de abrir do + da pasta -- menos retomar conversa, que
-      // é o histórico de outra pasta. Ver `openHereItems`.
+      // O mesmo bloco de abrir do + da pasta, que é escrito uma vez só -- e
+      // retomar conversa não está nele desde que virou o relógio do rodapé da
+      // lateral. Ver `openHereItems`.
       expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
       expect(find.text('retomar conversa…'), findsNothing);

@@ -46,11 +46,21 @@ class Folder {
   bool isRepo = false;
   String branch = '';
 
+  /// A cor desta pasta, quando alguém escolheu uma. Ver [MxTint].
+  ///
+  /// É o fundo, e não a lei: vale pro painel que ninguém pintou e que não é
+  /// de um projeto pintado. Um repo não é *um* trabalho -- ele guarda vários,
+  /// e a cor de um projeto dentro dele é o que separa um do outro. Pintar a
+  /// pasta é dizer "tudo que roda aqui é desta cor, menos o que pediu outra".
+  /// Ver `AppStore.chosenTintOf`.
+  MxTint? tint;
+
   Map<String, dynamic> toJson() => {
     'root': root,
     'name': name,
     'collapsed': collapsed,
     if (workspace != null) 'workspace': workspace,
+    if (tint != null) 'tint': tint!.name,
   };
 
   static Folder fromJson(Map<String, dynamic> j) => Folder(
@@ -58,7 +68,7 @@ class Folder {
     name: j['name'] as String,
     collapsed: (j['collapsed'] as bool?) ?? false,
     workspace: j['workspace'] as String?,
-  );
+  )..tint = MxTint.byName(j['tint'] as String?);
 }
 
 /// A named piece of work inside a folder: "permissão do google", not
@@ -104,12 +114,27 @@ class Project {
 
   bool collapsed;
 
+  /// A cor deste projeto, quando alguém escolheu uma -- e a dos painéis dele,
+  /// que é o ponto. Ver [MxTint] e `AppStore.tintOf`.
+  ///
+  /// Herdada e não copiada: os painéis não guardam cor nenhuma por causa
+  /// disto, eles perguntam a do projeto na hora de desenhar. É o que faz
+  /// repintar um projeto repintar as quatro sessões dele de uma vez.
+  ///
+  /// E manda: um painel pintado à mão continua guardando a cor dele, mas
+  /// mostra a do projeto enquanto o projeto tiver uma. O que a cor de um
+  /// projeto tem pra dizer é "estas quatro sessões são o mesmo trabalho", e
+  /// uma delas destoando no meio desfaz a frase. Ver
+  /// `AppStore.chosenTintOf`.
+  MxTint? tint;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'folderRoot': folderRoot,
     'name': name,
     'brief': brief,
     'collapsed': collapsed,
+    if (tint != null) 'tint': tint!.name,
   };
 
   static Project fromJson(Map<String, dynamic> j) => Project(
@@ -118,7 +143,7 @@ class Project {
     name: j['name'] as String,
     brief: (j['brief'] as String?) ?? '',
     collapsed: (j['collapsed'] as bool?) ?? false,
-  );
+  )..tint = MxTint.byName(j['tint'] as String?);
 }
 
 /// Um workspace do VS Code, do jeito que ele existe aqui: um nome, e as pastas
@@ -574,6 +599,25 @@ String shortAgo(DateTime at, {DateTime? now}) {
   if (since.inMinutes < 60) return '${since.inMinutes}min';
   if (since.inHours < 24) return '${since.inHours}h';
   if (since.inDays < 7) return '${since.inDays}d';
+  return '${at.day}/${at.month}';
+}
+
+/// Daqui a quanto tempo, na mesma régua do [shortAgo].
+///
+/// O par dele, e não um `shortAgo` com o sinal trocado: as duas contas param
+/// em lugares diferentes. Uma janela que zera em quarenta segundos zera
+/// *agora* pra quem lê -- mas ela ainda não zerou, e "agora" num medidor
+/// convida a mandar o prompt que vai bater no teto. Daí o `<1min`.
+///
+/// Uma data que já passou responde `agora`: entre dizer que faltam -3min e
+/// dizer que a espera acabou, a segunda é a verdadeira.
+String shortUntil(DateTime at, {DateTime? now}) {
+  final left = at.difference(now ?? DateTime.now());
+  if (left.isNegative) return 'agora';
+  if (left.inMinutes < 1) return '<1min';
+  if (left.inMinutes < 60) return '${left.inMinutes}min';
+  if (left.inHours < 24) return '${left.inHours}h';
+  if (left.inDays < 7) return '${left.inDays}d';
   return '${at.day}/${at.month}';
 }
 
