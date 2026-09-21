@@ -99,4 +99,58 @@ void main() {
       expect(scrub(long), long);
     });
   });
+
+  // A âncora é o que sabe em que linha uma seleção começou e em que célula um
+  // `OSC 8` foi pendurado. Ela conta a fila pela linha, a linha conta pela
+  // lista -- e a lista, depois de aparar o scrollback, passa a contar errado.
+  // É esse número que põe a seleção trinta linhas abaixo do mouse.
+  group('a âncora depois de apagar o scrollback', () {
+    /// Um terminal de 10 linhas de janela com 30 escritas, que é uma janela e
+    /// vinte e uma de scrollback.
+    T cheio<T extends Terminal>(T t) {
+      t.resize(80, 10);
+      for (var i = 0; i < 30; i++) {
+        t.write('linha $i\r\n');
+      }
+      return t;
+    }
+
+    test('a âncora nova diz a linha em que foi feita', () {
+      final t = cheio(VtTerminal(maxLines: 8000));
+      t.write('\x1b[3J');
+
+      expect(t.buffer.createAnchor(0, 2).y, 2);
+      expect(t.buffer.createAnchor(0, 9).y, 9);
+    });
+
+    test('o xterm de fábrica é o que erra -- a régua deste teste', () {
+      final t = cheio(Terminal(maxLines: 8000));
+      t.write('\x1b[3J');
+
+      // 21 linhas caíram, e a lista não tomou conhecimento.
+      expect(t.buffer.createAnchor(0, 2).y, 23);
+    });
+
+    test('e a âncora feita antes do corte acompanha a linha dela', () {
+      final t = cheio(VtTerminal(maxLines: 8000));
+      // A última linha escrita está no fim do buffer; depois do corte ela é a
+      // penúltima da janela, e a âncora tem que dizer isso.
+      final anchor = t.buffer.createAnchor(0, t.buffer.lines.length - 2);
+      t.write('\x1b[3J');
+
+      expect(anchor.y, t.buffer.lines.length - 2);
+    });
+
+    test('e o corte que vem do resize da tela alternativa também', () {
+      final t = VtTerminal(maxLines: 8000);
+      t.resize(80, 10);
+      t.write('\x1b[?1049h');
+      for (var i = 0; i < 20; i++) {
+        t.write('tui $i\r\n');
+      }
+      t.resize(80, 6);
+
+      expect(t.buffer.createAnchor(0, 1).y, 1);
+    });
+  });
 }

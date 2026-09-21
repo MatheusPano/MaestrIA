@@ -426,7 +426,7 @@ class _PaneHeader extends StatelessWidget {
                               _Chip(
                                 text: project.name,
                                 color: Mx.purple,
-                                icon: Icons.workspaces_outline,
+                                icon: Icons.track_changes,
                               ),
                             if (tab.branch.isNotEmpty && tab.branch != tab.title)
                               _Chip(text: tab.branch, color: Mx.fgDim, icon: Icons.call_split),
@@ -486,6 +486,19 @@ class _PaneHeader extends StatelessWidget {
                       style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       onPressed: () => store.relaunch(tab),
                       icon: Icon(Icons.refresh, color: tab.launcher!.color),
+                    ),
+                  // A sessão hibernada na tela -- veio num grupo, ou foi
+                  // hibernada à mão enquanto você olhava -- religa daqui. Ver
+                  // [AppStore.wake].
+                  if (tab.hibernated)
+                    IconButton(
+                      tooltip: 'retomar a conversa',
+                      iconSize: 16,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () => store.wake(tab),
+                      icon: Icon(Icons.play_arrow, color: Mx.accent),
                     ),
                   if (tab.agentName != null || tab.sessionId != null)
                     _AgentHandle(store: store, tab: tab),

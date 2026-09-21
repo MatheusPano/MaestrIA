@@ -8,6 +8,7 @@ import 'package:maestria/models.dart';
 import 'package:maestria/services/layout.dart';
 import 'package:maestria/services/links.dart';
 import 'package:maestria/services/store.dart';
+import 'package:maestria/services/vt.dart';
 import 'package:maestria/ui/terminal_pane.dart';
 import 'package:xterm/xterm.dart';
 
@@ -258,6 +259,40 @@ void main() {
       for (var y = 0; y < t.buffer.lines.length; y++) {
         expect(links.at(CellOffset(1, y)), isNull, reason: 'linha $y');
       }
+    });
+
+    // O `/clear` do claude escreve `ESC[3J`, e o que ele apaga é o scrollback:
+    // a linha do link continua na tela, numa fila mais acima. Ver o sexto
+    // item no topo de `services/vt.dart` -- sem o conserto de lá, a âncora
+    // segue apontando pra fila de antes e o link some da célula que tem o
+    // rótulo escrito.
+    test('o /clear não deixa o link na fila em que ele estava', () {
+      final t = VtTerminal(maxLines: 8000);
+      t.resize(40, 6);
+      final links = TermLinks(t);
+      for (var i = 0; i < 20; i++) {
+        t.write('linha $i\r\n');
+      }
+      t.write('abra ${marked('https://x.dev/auth', 'aqui')}');
+      expect(links.at(CellOffset(5, t.buffer.lines.length - 1)), 'https://x.dev/auth');
+
+      t.write('\x1b[3J');
+      // Sobrou a janela: a linha do link é a última das seis.
+      expect(t.buffer.lines.length, 6);
+      expect(links.at(const CellOffset(5, 5)), 'https://x.dev/auth');
+    });
+
+    test('e o xterm de fábrica perde o link aí -- a régua', () {
+      final t = Terminal(maxLines: 8000);
+      t.resize(40, 6);
+      final links = TermLinks(t);
+      for (var i = 0; i < 20; i++) {
+        t.write('linha $i\r\n');
+      }
+      t.write('abra ${marked('https://x.dev/auth', 'aqui')}');
+      t.write('\x1b[3J');
+
+      expect(links.at(const CellOffset(5, 5)), isNull);
     });
 
     test('abrir sem fechar, e fechar sem nada dentro, não inventam link', () {

@@ -22,6 +22,7 @@ enum MxSection {
   appearance('aparência', Icons.palette_outlined),
   shortcuts('atalhos', Icons.keyboard_outlined),
   launchers('programas', Icons.rocket_launch_outlined),
+  sessions('sessões', Icons.bedtime_outlined),
   account('conta & uso', Icons.speed_outlined);
   // --- ditado (vocalização) — fora desta versão -------------------------------
   // O microfone era mais uma seção aqui. Ver o cabeçalho de
@@ -117,6 +118,7 @@ class _SettingsState extends State<_Settings> {
                               MxSection.appearance => _Appearance(store: widget.store),
                               MxSection.shortcuts => _Shortcuts(store: widget.store),
                               MxSection.launchers => _Launchers(store: widget.store),
+                              MxSection.sessions => _Sessions(store: widget.store),
                               MxSection.account => const _Account(),
                               // --- ditado (vocalização) — fora desta versão ---
                               // MxSection.dictation => _Dictation(store: widget.store),
@@ -296,6 +298,64 @@ class _Appearance extends StatelessWidget {
         ThemeGallery(store: store),
         const SizedBox(height: 26),
         _Typography(store: store),
+      ],
+    );
+  }
+}
+
+/// A hibernação das sessões paradas. Ver [MxTab.hibernated].
+class _Sessions extends StatelessWidget {
+  const _Sessions({required this.store});
+
+  final AppStore store;
+
+  /// Os degraus do tempo: finos embaixo, onde cinco minutos fazem diferença,
+  /// largos em cima, onde a diferença entre 90 e 95 não é uma escolha.
+  static int _less(int m) => m <= 5 ? 5 : (m <= 30 ? m - 5 : (m <= 120 ? m - 15 : m - 60));
+  static int _more(int m) => m < 30 ? m + 5 : (m < 120 ? m + 15 : m + 60);
+
+  @override
+  Widget build(BuildContext context) {
+    final on = store.autoHibernate;
+    final minutes = store.hibernateMinutes;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Heading(
+          'hibernação',
+          hint: 'uma sessão do claude parada no prompt custa uns 200MB de RAM pra '
+              'não fazer nada. Hibernar é desligar o processo e ficar com a '
+              'conversa: a linha continua na lateral, e o clique nela retoma de '
+              'onde parou. Também dá pra hibernar uma sessão à mão, pelo menu '
+              'da linha.',
+        ),
+        SwitchListTile(
+          value: on,
+          onChanged: (v) => store.setHibernateMinutes(v ? AppStore.defaultHibernateMinutes : 0),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            'hibernar sozinho o que está parado fora da tela',
+            style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          ),
+          subtitle: Text(
+            'só as que não estão na tela, sem pendência com você, sem fila pra '
+            'andar e sem agentes rodando. O que estava rodando dentro dela — '
+            'um servidor MCP, um dev server que uma ferramenta subiu — vai '
+            'junto com o processo.',
+            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
+          ),
+        ),
+        if (on) ...[
+          const SizedBox(height: 14),
+          _Stepper(
+            label: 'depois de quanto tempo parada',
+            value: minutes >= 60 && minutes % 60 == 0 ? '${minutes ~/ 60}' : '$minutes',
+            unit: minutes >= 60 && minutes % 60 == 0 ? ' h' : ' min',
+            onLess: minutes > 5 ? () => store.setHibernateMinutes(_less(minutes)) : null,
+            onMore: minutes < 24 * 60 ? () => store.setHibernateMinutes(_more(minutes)) : null,
+          ),
+        ],
       ],
     );
   }

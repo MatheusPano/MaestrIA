@@ -25,16 +25,20 @@ import 'notify.dart';
 import 'paths.dart';
 import 'pty.dart';
 import 'report.dart';
+import 'setup.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
 import 'workspace.dart';
 
 /// O que um painel é.
 ///
-/// [reader] é o de fora: não tem processo, não tem pty e não tem sessão -- é um
-/// documento na árvore de painéis, do mesmo tamanho e com o mesmo cabeçalho
-/// que os outros. Ver [MxDoc], e `ui/doc_pane.dart` pra como ele é desenhado.
-enum TabKind { shell, claude, reader }
+/// [reader] é o de fora: não tem processo, não tem pty e não tem sessão -- é
+/// um documento na árvore de painéis, do mesmo tamanho e com o mesmo cabeçalho
+/// que os outros. Ver [MxDoc] e `ui/doc_pane.dart` pra como ele é desenhado.
+///
+/// [setup] é o segundo de fora: os arquivos que o Claude Code lê de uma
+/// pasta, editáveis. Ver [MxSetup] e `ui/setup_pane.dart`.
+enum TabKind { shell, claude, reader, setup }
 
 /// One panel. Owns its pty and its hook-derived state.
 class MxTab {
@@ -46,6 +50,7 @@ class MxTab {
     required this.branch,
     this.customLabel,
     this.doc,
+    this.setup,
     this.launcher,
   });
 
@@ -81,6 +86,25 @@ class MxTab {
   /// sessão pra dizer. Meia dúzia de lugares perguntam isso antes de tratar
   /// este painel como uma sessão.
   bool get isReader => kind == TabKind.reader && doc != null;
+
+  /// O que este painel mostra, quando ele é um [TabKind.setup]: a pasta cujos
+  /// arquivos de configuração do Claude estão no editor. Null em todos os
+  /// outros -- e não-null em todos os de configuração, que é o que [isSetup]
+  /// garante pra quem vai desreferenciar.
+  final MxSetup? setup;
+
+  /// Um painel de configuração. Ver [isReader]: a mesma pergunta, pelo mesmo
+  /// motivo.
+  bool get isSetup => kind == TabKind.setup && setup != null;
+
+  /// Um painel que não é uma sessão de terminal: não tem pty, não tem saída
+  /// pra ler e não tem o que matar no encerramento.
+  ///
+  /// Nasceu quando a configuração virou o segundo destes. Os lugares que
+  /// perguntavam `isReader` quase todos queriam perguntar isto -- um editor de
+  /// configuração tem tão pouco a ver com git, fila e status quanto uma folha
+  /// de markdown.
+  bool get isPassive => isReader || isSetup;
 
   /// O programa que este painel subiu, quando ele saiu de um. Ver [Launcher].
   ///
@@ -169,6 +193,21 @@ class MxTab {
   /// still resumable. What it stops being is *pending*.
   bool done = false;
 
+  /// Sem processo de propósito: a conversa fica, a memória volta.
+  ///
+  /// Uma sessão do claude parada no prompt custa uns 200MB de RAM pra não
+  /// fazer nada -- e treze delas na lateral, das quais duas na tela, são o
+  /// motivo de a máquina ficar sem memória. Hibernar é desligar o processo e
+  /// ficar com o que importa: o id da conversa (ver [resumable]), o
+  /// scrollback e a linha na lateral. Retomar é um clique, e o `--resume`
+  /// devolve a conversa de onde parou.
+  ///
+  /// Distinto de [exited] sozinho, que também é o `q` apertado sem querer e o
+  /// processo que morreu: aqui foi o app que desligou, e a linha tem que dizer
+  /// isso -- e o clique nela tem que religar, em vez de mostrar uma moldura
+  /// com "processo saiu (0)". Ver [AppStore.hibernate] e [AppStore.wake].
+  bool hibernated = false;
+
   /// Quando esta sessão parou de trabalhar: o instante da virada pra repouso,
   /// não o do último evento.
   ///
@@ -211,6 +250,9 @@ class MxTab {
     // TASK#47730", "relatório do dia". A pasta e a branch não dizem nada sobre
     // ele que o título já não diga melhor.
     if (doc case final open?) return open.title;
+    // E a configuração pela pasta que ela configura: é a única coisa que
+    // distingue duas abertas lado a lado.
+    if (setup case final open?) return 'claude · ${open.name}';
     // E um painel de programa se chama pelo programa: "btop", e não pelo repo
     // em que ele por acaso subiu. Mesmo raciocínio do documento acima -- a
     // pasta e a branch não dizem nada dele que o nome não diga melhor.
@@ -243,6 +285,11 @@ class MxTab {
       final says = from != null && from.isNotEmpty && !title.contains(from);
       return [open.source.label, if (says) 'de $from', when].join(' · ');
     }
+    // O arquivo aberto no editor, que é o que o título não diz.
+    if (setup case final open?) return open.selected ?? 'configuração do claude';
+    // Antes do "processo saiu": saiu porque o app mandou, e o que a linha tem
+    // a dizer é o que fazer a respeito.
+    if (hibernated) return 'hibernada · clique pra retomar';
     if (exited) return 'processo saiu (${term.exitCode ?? '?'})';
     // O comando, que é a única coisa que o cabeçalho ainda não disse: o nome
     // do programa já é o título, e "programa" embaixo dele não informaria
@@ -272,7 +319,7 @@ class MxTab {
   /// [ClaudeStatus.unknown], que é o estado que não acende badge, não conta
   /// como pendência e não notifica.
   ClaudeStatus get status => switch (kind) {
-    TabKind.reader => ClaudeStatus.unknown,
+    TabKind.reader || TabKind.setup => ClaudeStatus.unknown,
     TabKind.shell => exited ? ClaudeStatus.ended : ClaudeStatus.unknown,
     TabKind.claude => hooks.status,
   };
@@ -303,6 +350,7 @@ class MxTab {
     // conversation instead of starting a stranger in the same folder.
     if (resumable) 'sessionId': resumeId,
     if (doc case final open?) 'doc': open.toJson(),
+    if (setup case final open?) 'setup': open.toJson(),
     // Uma sessão que você deixou grande é uma sessão que você quer grande
     // amanhã também — e é uma tecla, não uma preferência, então não tem outro
     // lugar onde ser lembrada.
@@ -329,6 +377,11 @@ class MxTab {
     // that only you knew, and a restart that forgot it would be asking you
     // to read four sessions again to find out which three were settled.
     if (done) 'done': true,
+    // No layout e não na receita: um grupo guarda arranjo, e abrir um grupo
+    // é querer os painéis dele rodando. Já a janela que fecha com uma sessão
+    // hibernada reabre com ela hibernada -- religar treze processos no launch
+    // pra deixá-los parados era justamente o que a hibernação veio evitar.
+    if (hibernated) 'hibernated': true,
   };
 }
 
@@ -386,11 +439,11 @@ class AppStore extends ChangeNotifier {
   // /// painel, e o que acontece quando não se ouviu nada -- é lógica deste
   // /// store, e é o que o teste alcança trocando só as duas pontas de IO.
   // AppStore({Dictation? dictation}) : dictation = dictation ?? Dictation() {
-    // // No construtor e não no [init]: quem desenha painel escuta o store, não o
-    // // ditado, então sem esta ponte o cabeçalho nunca fica sabendo que o
-    // // microfone abriu. O [init] sobe servidor, timer e git -- coisas que um
-    // // teste não quer --, e uma ligação em memória não tem por que morar lá.
-    // this.dictation.addListener(notifyListeners);
+  // // No construtor e não no [init]: quem desenha painel escuta o store, não o
+  // // ditado, então sem esta ponte o cabeçalho nunca fica sabendo que o
+  // // microfone abriu. O [init] sobe servidor, timer e git -- coisas que um
+  // // teste não quer --, e uma ligação em memória não tem por que morar lá.
+  // this.dictation.addListener(notifyListeners);
   // }
   AppStore();
 
@@ -468,6 +521,15 @@ class AppStore extends ChangeNotifier {
   static const double defaultSidebar = 352;
   double sidebarWidth = defaultSidebar;
 
+  /// Se a lateral está fora da tela.
+  ///
+  /// Escondida, e não encolhida: [minSidebar] existe porque uma lista de 100px
+  /// é uma lista ilegível, então "agora quero a janela inteira pros painéis"
+  /// não é uma frase que o vão saiba dizer. É lembrada pelo mesmo motivo que
+  /// [sidebarWidth], e é por isso que são dois campos: a largura que ela volta
+  /// a ter é a que você tinha deixado.
+  bool sidebarHidden = false;
+
   /// The chosen palette. Lives here because it is remembered like everything
   /// else the window keeps; [Mx.current] is what the widgets actually read.
   MxPalette get theme => Mx.palette;
@@ -530,6 +592,9 @@ class AppStore extends ChangeNotifier {
       // tempo, e "há um tempo" é uma condição que ninguém avisa -- ela chega
       // pela ausência de eventos, então alguém tem que ir olhar.
       pumpFlows();
+      // O que está parado fora da tela há tempo demais solta o processo. Ver
+      // [hibernateIdle].
+      hibernateIdle();
       // Um segundo parado em cima de um painel conta como tê-lo lido. Avisa
       // por conta própria quando de fato apaga uma marca.
       seeFocused();
@@ -590,7 +655,9 @@ class AppStore extends ChangeNotifier {
       }
       final w = (j['sidebarWidth'] as num?)?.toDouble();
       if (w != null) sidebarWidth = w.clamp(minSidebar, maxSidebar);
+      sidebarHidden = j['sidebarHidden'] as bool? ?? false;
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
+      hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
       Mx.applyId(j['theme'] as String?);
       Mx.applyType(MxType.fromJson(j['type']));
       keymap.load(j['shortcuts']);
@@ -662,9 +729,7 @@ class AppStore extends ChangeNotifier {
   /// da lateral, o cwd não existe, o documento não voltou.
   MxTab? _openPane(Map<String, dynamic> pane) {
     final root = (pane['folderRoot'] ?? pane['projectRoot']) as String?;
-    final folder = pane['loose'] == true
-        ? loose
-        : folders.firstWhereOrNull((f) => f.root == root);
+    final folder = pane['loose'] == true ? loose : folders.firstWhereOrNull((f) => f.root == root);
     final cwd = pane['cwd'] as String?;
     if (folder == null || cwd == null || !Directory(cwd).existsSync()) return null;
     final label = pane['label'] as String?;
@@ -680,13 +745,31 @@ class AppStore extends ChangeNotifier {
       );
       if (doc == null) return null;
       tab = _newReader(doc, folder: folder, cwd: cwd, project: project);
+    } else if (pane['kind'] == 'browser') {
+      // O navegador embutido saiu do app. Um config gravado enquanto ele
+      // existia ainda traz painéis desses: eles não voltam, e a linha some do
+      // arquivo no primeiro save.
+      return null;
+    } else if (pane['kind'] == 'setup') {
+      // A configuração volta na pasta que configurava, com o mesmo arquivo
+      // aberto. Sem pasta não há painel.
+      final setup = MxSetup.fromJson(
+        (pane['setup'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
+      );
+      if (setup == null || !Directory(setup.root).existsSync()) return null;
+      tab = _newSetup(setup, folder: folder, cwd: cwd, project: project);
     } else if (pane['kind'] == 'claude') {
+      final resumeId = pane['sessionId'] as String?;
+      // Hibernada ontem, hibernada hoje -- ver [MxTab.hibernated]. Sem id não
+      // há o que retomar, e aí ela volta como sempre voltou: rodando.
+      final asleep = pane['hibernated'] == true && resumeId != null;
       tab = openClaude(
         folder,
         cwd: cwd,
         label: label,
         project: project,
-        resumeId: pane['sessionId'] as String?,
+        resumeId: resumeId,
+        start: !asleep,
       );
     } else {
       // Um painel de programa volta rodando o programa: o `btop` que você
@@ -706,6 +789,18 @@ class AppStore extends ChangeNotifier {
     // desde a última vez não recebe um painel fora do limite.
     tab.zoom = Mx.type.clampZoom((pane['zoom'] as num?)?.toInt() ?? 0);
     return tab;
+  }
+
+  /// Um painel mudou por fora da store: repinta a janela e guarda o estado.
+  ///
+  /// A porta que faltava pra um painel que tem um mundo próprio dentro dele. O
+  /// editor de configuração é o caso: o arquivo aberto muda por um clique
+  /// dentro do painel, não por um método daqui, e a linha da lateral tem que
+  /// passar a dizer o nome dele. Sem isto o painel só se atualizaria sozinho
+  /// por dentro, e a lista ao lado continuaria mostrando o arquivo de antes.
+  void touch() {
+    _save();
+    notifyListeners();
   }
 
   void _save() {
@@ -740,16 +835,18 @@ class AppStore extends ChangeNotifier {
           'folders': folders.map((f) => f.toJson()).toList(),
           // Ao lado das pastas porque é delas que ele fala: a seção é um jeito
           // de desenhar um punhado delas junto. Ver [Workspace].
-          if (workspaces.isNotEmpty)
-            'workspaces': workspaces.map((w) => w.toJson()).toList(),
+          if (workspaces.isNotEmpty) 'workspaces': workspaces.map((w) => w.toJson()).toList(),
           'projects': projects.map((p) => p.toJson()).toList(),
           // Ao lado do layout e escritos com o mesmo json que ele: um grupo é
           // um layout guardado com nome. Ver [PaneGroup].
           if (groups.isNotEmpty) 'groups': groups.map((g) => g.toJson()).toList(),
-          if (launchers.isNotEmpty)
-            'launchers': launchers.map((l) => l.toJson()).toList(),
+          if (launchers.isNotEmpty) 'launchers': launchers.map((l) => l.toJson()).toList(),
           'sidebarWidth': sidebarWidth,
+          // Só quando está escondida, como os outros interruptores daqui: um
+          // config que não fala do assunto é um config com a lateral na tela.
+          if (sidebarHidden) 'sidebarHidden': true,
           if (groupsCollapsed) 'groupsCollapsed': true,
+          if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
           'theme': Mx.palette.id,
           if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
@@ -832,10 +929,10 @@ class AppStore extends ChangeNotifier {
 
   // --- ditado (vocalização) — fora desta versão ------------------------------
   // void setDictation(DictationConfig config) {
-    // if (config == dictation.config) return;
-    // dictation.config = config;
-    // _save();
-    // notifyListeners();
+  // if (config == dictation.config) return;
+  // dictation.config = config;
+  // _save();
+  // notifyListeners();
   // }
 
   // --- ditado (vocalização) — fora desta versão ------------------------------
@@ -850,38 +947,38 @@ class AppStore extends ChangeNotifier {
   // /// pro que está em foco no fim: quem fala trinta segundos pode ter clicado
   // /// em outro painel no meio, e a fala continua sendo daquele.
   // Future<void> toggleDictation() async {
-    // if (dictation.phase == DictationPhase.transcribing) return;
-    // if (dictation.busy) {
-      // final into = _byId(dictation.target);
-      // final heard = await dictation.end();
-      // if (heard.problem case final why?) {
-        // showBanner(why, sticky: true);
-        // return;
-      // }
-      // final text = heard.text ?? '';
-      // if (text.isEmpty) {
-        // showBanner('não entendi nada — nada foi colado');
-        // return;
-      // }
-      // if (into == null || into.exited) {
-        // showBanner('o painel que estava ouvindo não está mais aí: "$text"', sticky: true);
-        // return;
-      // }
-      // if (dictation.config.submit) {
-        // await into.term.submit(text);
-      // } else {
-        // into.term.terminal.paste(text);
-      // }
-      // return;
-    // }
-    // final tab = focusedTab;
-    // // Um leitor não tem prompt pra receber texto, e um painel cujo processo
-    // // saiu não tem quem o leia.
-    // if (tab == null || tab.isReader || tab.exited) {
-      // showBanner('o ditado precisa de um painel com processo vivo em foco');
-      // return;
-    // }
-    // if (await dictation.begin(tab.id) case final why?) showBanner(why, sticky: true);
+  // if (dictation.phase == DictationPhase.transcribing) return;
+  // if (dictation.busy) {
+  // final into = _byId(dictation.target);
+  // final heard = await dictation.end();
+  // if (heard.problem case final why?) {
+  // showBanner(why, sticky: true);
+  // return;
+  // }
+  // final text = heard.text ?? '';
+  // if (text.isEmpty) {
+  // showBanner('não entendi nada — nada foi colado');
+  // return;
+  // }
+  // if (into == null || into.exited) {
+  // showBanner('o painel que estava ouvindo não está mais aí: "$text"', sticky: true);
+  // return;
+  // }
+  // if (dictation.config.submit) {
+  // await into.term.submit(text);
+  // } else {
+  // into.term.terminal.paste(text);
+  // }
+  // return;
+  // }
+  // final tab = focusedTab;
+  // // Um leitor não tem prompt pra receber texto, e um painel cujo processo
+  // // saiu não tem quem o leia.
+  // if (tab == null || tab.isReader || tab.exited) {
+  // showBanner('o ditado precisa de um painel com processo vivo em foco');
+  // return;
+  // }
+  // if (await dictation.begin(tab.id) case final why?) showBanner(why, sticky: true);
   // }
 
   /// Called on every drag frame, so it bails when the clamp swallowed the
@@ -890,6 +987,18 @@ class AppStore extends ChangeNotifier {
     final w = width.clamp(minSidebar, maxSidebar);
     if (w == sidebarWidth) return;
     sidebarWidth = w;
+    _save();
+    notifyListeners();
+  }
+
+  /// Tira a lateral da tela, ou a traz de volta. Ver [sidebarHidden].
+  void toggleSidebar() => setSidebarHidden(!sidebarHidden);
+
+  /// Separado do toggle porque há quem precise dela na tela sem saber se ela
+  /// está: buscar na lateral escondida é mostrá-la primeiro. Ver [MxKeys.run].
+  void setSidebarHidden(bool hidden) {
+    if (hidden == sidebarHidden) return;
+    sidebarHidden = hidden;
     _save();
     notifyListeners();
   }
@@ -990,12 +1099,7 @@ class AppStore extends ChangeNotifier {
     }
     _save();
     if (added.isNotEmpty) await refreshGit();
-    final result = WorkspaceImport(
-      workspace: ws,
-      added: added,
-      already: already,
-      missing: missing,
-    );
+    final result = WorkspaceImport(workspace: ws, added: added, already: already, missing: missing);
     showBanner(result.summary, sticky: result.sticky);
     notifyListeners();
     return result;
@@ -1034,13 +1138,11 @@ class AppStore extends ChangeNotifier {
   // --- workspaces ---------------------------------------------------------
 
   /// As pastas de um workspace, na ordem em que a lateral as desenharia.
-  List<Folder> foldersOf(Workspace w) =>
-      folders.where((f) => f.workspace == w.path).toList();
+  List<Folder> foldersOf(Workspace w) => folders.where((f) => f.workspace == w.path).toList();
 
   /// O workspace de uma pasta, se ela tem um.
-  Workspace? workspaceOf(Folder f) => f.workspace == null
-      ? null
-      : workspaces.firstWhereOrNull((w) => w.path == f.workspace);
+  Workspace? workspaceOf(Folder f) =>
+      f.workspace == null ? null : workspaces.firstWhereOrNull((w) => w.path == f.workspace);
 
   /// O que a lateral desenha, de cima pra baixo: um [Workspace] ou uma
   /// [Folder] solta, na ordem de [folders].
@@ -1049,8 +1151,8 @@ class AppStore extends ChangeNotifier {
   /// junto -- é o que faz as sete pastas de um cliente aparecerem em bloco sem
   /// reordenar nada por baixo. A lista de pastas continua sendo a ordem
   /// verdadeira; isto é só como ela é lida.
-  List<Object> get sidebarRows {
-    final rows = <Object>[];
+  List<SidebarRow> get sidebarRows {
+    final rows = <SidebarRow>[];
     final seen = <String>{};
     for (final f in folders) {
       final w = workspaceOf(f);
@@ -1061,6 +1163,68 @@ class AppStore extends ChangeNotifier {
       }
     }
     return rows;
+  }
+
+  /// As pastas de uma linha da lateral: uma seção leva as dela, uma pasta
+  /// solta leva só a si. Juntando as de [sidebarRows] na ordem sai [folders]
+  /// de volta, que é o que faz [moveRow] poder reescrever a lista inteira.
+  List<Folder> foldersOfRow(SidebarRow row) => row is Workspace ? foldersOf(row) : [row as Folder];
+
+  /// A faixa em que uma linha se move: a raiz da lateral, ou o miolo de uma
+  /// seção.
+  ///
+  /// Uma pasta carimbada só se reordena entre as pastas do mesmo workspace --
+  /// arrastá-la pra fora seria tirá-la do workspace, que é outra operação
+  /// (o menu dela tem), e não o que quem estava arrumando a lista pediu. É a
+  /// mesma regra que segura um painel dentro da pasta dele em [moveTab].
+  String? _laneOf(SidebarRow row) => row is Folder ? row.workspace : null;
+
+  /// Se [row] pode ir pro lugar de [target]. Ver [_laneOf].
+  bool canMoveRow(SidebarRow row, SidebarRow target) =>
+      !identical(row, target) && _laneOf(row) == _laneOf(target);
+
+  /// Põe [row] na vaga de [target] na lateral, arrastando.
+  ///
+  /// A ordem das pastas é a ordem de [folders], e era a ordem em que foram
+  /// adicionadas: a pasta aberta agora caía em último e ficava lá. Isto é o
+  /// que deixa arrumá-la.
+  ///
+  /// Uma seção viaja inteira -- é uma linha só na tela, e as sete pastas de um
+  /// cliente que se separassem no caminho não seriam mais um bloco. Por isso a
+  /// conta é feita em blocos de pasta, e não em índices de [folders]: mover
+  /// uma linha é mover o bloco dela pra vaga do bloco de baixo ou de cima.
+  ///
+  /// A vaga é a mesma de [moveTab], pelo mesmo motivo: o que veio de cima
+  /// empurra o alvo pra cima e para embaixo dele; o que veio de baixo para em
+  /// cima. Nos dois casos é a linha em que se soltou.
+  void moveRow(SidebarRow row, SidebarRow target) {
+    if (!canMoveRow(row, target)) return;
+    final rows = sidebarRows;
+    final blocks = [for (final r in rows) foldersOfRow(r)];
+    // Dentro de uma seção a conta é entre as pastas dela; na raiz, entre os
+    // blocos. As duas listas são a mesma mexida -- ver [_slide].
+    if (row is Folder && row.workspace != null) {
+      final block = blocks.firstWhereOrNull((b) => b.contains(row));
+      if (block == null) return;
+      if (!_slide(block, block.indexOf(row), block.indexOf(target as Folder))) return;
+    } else {
+      if (!_slide(blocks, rows.indexOf(row), rows.indexOf(target))) return;
+    }
+    // Reescrita inteira, e não uma remoção e uma inserção: assim a lista volta
+    // com as pastas de cada seção juntas, que é como a lateral já as lê.
+    folders
+      ..clear()
+      ..addAll(blocks.expand((b) => b));
+    _save();
+    notifyListeners();
+  }
+
+  /// Tira o item de [from] e o devolve na vaga de [to]. Falso quando não há o
+  /// que mexer. Ver [moveTab], que é a mesma conta na lista de painéis.
+  bool _slide<T>(List<T> list, int from, int to) {
+    if (from < 0 || to < 0 || from == to) return false;
+    list.insert(to, list.removeAt(from));
+    return true;
   }
 
   /// Fecha um workspace: as pastas dele saem da lateral, e a seção sai com
@@ -1375,13 +1539,7 @@ class AppStore extends ChangeNotifier {
 
   // --- tabs ---------------------------------------------------------------
 
-  MxTab openShell(
-    Folder f, {
-    String? cwd,
-    String? command,
-    Project? project,
-    Launcher? launcher,
-  }) {
+  MxTab openShell(Folder f, {String? cwd, String? command, Project? project, Launcher? launcher}) {
     final tab = MxTab(
       id: 'tab${_seq++}',
       folder: f,
@@ -1419,6 +1577,7 @@ class AppStore extends ChangeNotifier {
     String? resumeId,
     Project? project,
     String? prompt,
+    bool start = true,
   }) {
     final tab = MxTab(
       id: 'tab${_seq++}',
@@ -1434,6 +1593,28 @@ class AppStore extends ChangeNotifier {
 
     final name = (label == null || label.isEmpty) ? tab.cwd.split('/').last : label;
     tab.agentName = name;
+    if (start) {
+      _launchClaude(tab, resumeId: resumeId, prompt: prompt);
+    } else {
+      // Um painel que nasce hibernado: a linha na lateral, a conversa pra
+      // retomar, e nenhum processo. Ver [MxTab.hibernated].
+      tab.hibernated = true;
+      tab.term.park();
+      tab.hooks.status = ClaudeStatus.ended;
+      tab.term.remark('hibernada — a conversa volta com um clique');
+    }
+
+    Git.branchOf(cwd).then((b) {
+      tab.branch = b;
+      notifyListeners();
+    });
+    return tab;
+  }
+
+  /// Sobe o `claude` de [tab] -- na abertura, e de novo ao acordar de uma
+  /// hibernação ([wake]), que é por que isto tem nome próprio.
+  void _launchClaude(MxTab tab, {String? resumeId, String? prompt}) {
+    final name = tab.agentName ?? tab.cwd.split('/').last;
     // The project's standing context, when the panel is in one. In the system
     // prompt rather than as a first message: it has to still be true on turn
     // forty, and a first message scrolls out of the window long before that.
@@ -1453,7 +1634,7 @@ class AppStore extends ChangeNotifier {
     ];
     tab.term.startCommand(
       parts.join(' '),
-      cwd,
+      tab.cwd,
       display:
           'claude --name ${Sh.q(name)} '
           '--settings <hooks :${hooks.port}>'
@@ -1468,12 +1649,6 @@ class AppStore extends ChangeNotifier {
       if (!tabs.contains(tab) || tab.exited) return;
       if (tab.hooks.settle()) notifyListeners();
     });
-
-    Git.branchOf(cwd).then((b) {
-      tab.branch = b;
-      notifyListeners();
-    });
-    return tab;
   }
 
   // --- histórico de conversas ---------------------------------------------
@@ -1511,9 +1686,8 @@ class AppStore extends ChangeNotifier {
   /// De onde as conversas são lidas. Sob teste, as fixtures -- pela mesma
   /// razão de [stateHome]: um `flutter test` que fosse ao `~/.claude` de
   /// verdade dependeria das conversas que a máquina de quem rodou teve.
-  static String get chatHome => Platform.environment.containsKey('FLUTTER_TEST')
-      ? 'test/fixtures/history'
-      : ChatHistory.home;
+  static String get chatHome =>
+      Platform.environment.containsKey('FLUTTER_TEST') ? 'test/fixtures/history' : ChatHistory.home;
 
   /// A pasta da lateral em que [cwd] está, quando é de alguma: a raiz dela,
   /// algo dentro dela, ou uma worktree dela -- que é outra pasta no disco e
@@ -1531,9 +1705,7 @@ class AppStore extends ChangeNotifier {
     // A raiz antes das worktrees porque é o caso de quase toda conversa, e não
     // porque uma exclua a outra: as duas listas não se cruzam.
     return folders.firstWhereOrNull((f) => inside(f.root)) ??
-        folders.firstWhereOrNull(
-          (f) => worktrees[f.root]?.any((w) => inside(w.path)) ?? false,
-        );
+        folders.firstWhereOrNull((f) => worktrees[f.root]?.any((w) => inside(w.path)) ?? false);
   }
 
   /// Em que pé está [chat] agora. Ver [ChatStanding].
@@ -1720,6 +1892,8 @@ class AppStore extends ChangeNotifier {
     if (href.trim().isEmpty) return;
     final uri = Uri.tryParse(href);
     if (uri != null && const {'http', 'https', 'mailto'}.contains(uri.scheme)) {
+      // Página e e-mail são assunto de quem cuida de links: o app escolhido
+      // pra cada um deles é o do sistema.
       final ok = await Notifier.openLink(href);
       if (!ok) showBanner('não consegui abrir $href', sticky: true);
       return;
@@ -1794,6 +1968,54 @@ class AppStore extends ChangeNotifier {
     return tab;
   }
 
+  MxTab _newSetup(MxSetup setup, {required Folder folder, String? cwd, Project? project}) {
+    final tab = MxTab(
+      id: 'tab${_seq++}',
+      folder: folder,
+      kind: TabKind.setup,
+      cwd: cwd ?? folder.root,
+      branch: '',
+      setup: setup,
+    );
+    if (project != null && project.folderRoot == folder.root) tab.projectId = project.id;
+    // Fora do [_register] pelo mesmo motivo do leitor: não há processo pra
+    // subir nem saída de processo pra escutar.
+    tabs.add(tab);
+    return tab;
+  }
+
+  // --- painéis de configuração --------------------------------------------
+
+  /// Os arquivos que o Claude Code lê em [folder], num painel que os edita.
+  /// Ver [TabKind.setup].
+  ///
+  /// Um por raiz, e não um só como o leitor: a configuração de um repo e a
+  /// de outro não são o mesmo lugar -- clicar na segunda com a primeira aberta
+  /// não pode trocar o que você estava editando na primeira. A da mesma raiz,
+  /// sim, é a mesma: pedir de novo traz a que já existe de volta pra tela.
+  ///
+  /// [cwd] é a raiz quando ela não é a da pasta -- o checkout de uma
+  /// worktree, que tem o `CLAUDE.md` versionado igual e um `settings.local`
+  /// só dele.
+  MxTab showSetup({required Folder folder, String? cwd, Project? project}) {
+    final root = cwd ?? folder.root;
+    final open = tabs.firstWhereOrNull((t) => t.isSetup && t.setup!.root == root);
+    if (open != null) {
+      if (!Panes.has(panes, open.id)) _placeBeside(open, focusedTab);
+      focusedPaneId = open.id;
+      _save();
+      notifyListeners();
+      return open;
+    }
+    final tab = _newSetup(MxSetup(root: root), folder: folder, cwd: cwd, project: project);
+    // Ao lado do que está em foco: quem abre a configuração de uma pasta
+    // quer olhar pra ela junto da sessão que está rodando ali.
+    _placeBeside(tab, focusedTab);
+    _save();
+    notifyListeners();
+    return tab;
+  }
+
   /// Encaixa [tab] à direita do painel de [beside], quando há um na tela.
   void _placeBeside(MxTab tab, MxTab? beside) {
     if (panes == null || beside == null || !Panes.has(panes, beside.id)) {
@@ -1845,7 +2067,7 @@ class AppStore extends ChangeNotifier {
         // sessão de sexta. Os de hoje não entram num relatório de ontem.
         sessions: [
           for (final t in tabs)
-            if (!t.isReader && (today || DailyReport.sameDay(t.startedAt, which))) _noteOf(t),
+            if (!t.isPassive && (today || DailyReport.sameDay(t.startedAt, which))) _noteOf(t),
         ],
         chats: today ? const [] : await _chatsOn(which),
       );
@@ -1876,8 +2098,7 @@ class AppStore extends ChangeNotifier {
   Future<List<ArchivedChat>> _chatsOn(DateTime day) async {
     final chats = await ChatHistory.read(on: day);
     return [
-      for (final c in chats)
-        ArchivedChat(title: c.title, folder: c.where, at: c.at, size: c.size),
+      for (final c in chats) ArchivedChat(title: c.title, folder: c.where, at: c.at, size: c.size),
     ];
   }
 
@@ -2043,6 +2264,8 @@ class AppStore extends ChangeNotifier {
   /// desmanchá-la sem você ter pedido; uma grade que é um grupo tem pra onde
   /// voltar, porque está guardada.
   void select(MxTab tab) {
+    // O clique numa hibernada é o "retomar" -- ver [MxTab.hibernated].
+    if (tab.hibernated) unawaited(wake(tab));
     final group = activeGroup;
     if (group != null && tab.groupId != group.id) {
       panes = PaneLeaf(tab.id);
@@ -2348,12 +2571,7 @@ class AppStore extends ChangeNotifier {
   /// Muda o que já existe, no lugar. Os painéis abertos seguram o programa por
   /// referência, então renomear já renomeia o cabeçalho deles -- e o comando
   /// novo é o que o próximo [relaunch] roda.
-  void editLauncher(
-    Launcher launcher, {
-    String? name,
-    String? command,
-    LauncherIcon? icon,
-  }) {
+  void editLauncher(Launcher launcher, {String? name, String? command, LauncherIcon? icon}) {
     final title = name?.trim();
     final run = command?.trim();
     if (title != null && title.isNotEmpty) launcher.name = title;
@@ -2386,6 +2604,110 @@ class AppStore extends ChangeNotifier {
     if (command == null || !tab.exited) return;
     tab.term.relaunch(command, tab.cwd);
     notifyListeners();
+  }
+
+  // --- hibernação -----------------------------------------------------------
+
+  /// Depois de quanto tempo parada fora da tela uma sessão hiberna sozinha.
+  /// Zero é nunca. Ver [hibernateIdle].
+  int hibernateMinutes = defaultHibernateMinutes;
+
+  static const defaultHibernateMinutes = 30;
+
+  /// A hibernação automática está ligada.
+  bool get autoHibernate => hibernateMinutes > 0;
+
+  void setHibernateMinutes(int minutes) {
+    final value = minutes.clamp(0, 24 * 60);
+    if (value == hibernateMinutes) return;
+    hibernateMinutes = value;
+    _save();
+    notifyListeners();
+  }
+
+  /// Dá pra hibernar: uma sessão do claude, com processo, com conversa pra
+  /// retomar. Ver [MxTab.hibernated].
+  bool canHibernate(MxTab tab) =>
+      tab.kind == TabKind.claude && !tab.exited && !tab.hibernated && tab.resumeId != null;
+
+  /// Desliga o processo de [tab] e fica com a conversa. Ver [MxTab.hibernated].
+  ///
+  /// O que se perde é o que estava *dentro* do processo: os servidores MCP
+  /// dele, e um `npm run dev` que uma ferramenta tenha deixado rodando -- o
+  /// hangup vai pro grupo inteiro (ver [TermSession.kill]). O que fica é o que
+  /// o `--resume` devolve, que é a conversa.
+  void hibernate(MxTab tab) {
+    if (!canHibernate(tab)) return;
+    tab.hibernated = true;
+    tab.armed = false;
+    tab.restedAt = null;
+    tab.unseen = false;
+    tab.hooks.status = ClaudeStatus.ended;
+    tab.hooks.activeTool = null;
+    tab.hooks.toolStartedAt = null;
+    tab.term.remark('hibernada — processo desligado pra liberar memória; a conversa volta com um clique');
+    // Sem await, como em [closeTab]: o hangup é atendido no tempo dele e a
+    // linha já pode dizer o que aconteceu. Sem pty não há o que desligar --
+    // é o painel que ainda não subiu --, e aí basta declará-lo desligado.
+    if (tab.term.pid == null) {
+      tab.term.park();
+    } else {
+      unawaited(tab.term.kill());
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// Religa uma sessão hibernada, na mesma conversa. Ver [MxTab.hibernated].
+  ///
+  /// Espera o processo anterior morrer de verdade antes de subir o próximo:
+  /// [hibernate] não espera, e um clique logo depois dela chegaria aqui com
+  /// o hangup ainda em curso -- dois processos no mesmo pty, com o `exitCode`
+  /// do primeiro chegando depois do segundo subir. Ver [TermSession.relaunch].
+  Future<void> wake(MxTab tab) async {
+    if (!tab.hibernated) return;
+    tab.hibernated = false;
+    tab.hooks.status = ClaudeStatus.starting;
+    notifyListeners();
+    if (!tab.exited) await tab.term.kill();
+    if (!tabs.contains(tab)) return;
+    tab.term.terminal.write('\r\n');
+    _launchClaude(tab, resumeId: tab.resumeId);
+    _save();
+    notifyListeners();
+  }
+
+  /// Hiberna o que está parado, fora da tela, há [hibernateMinutes] ou mais.
+  /// O relógio de um segundo de [init] é quem chama.
+  ///
+  /// Parada é o prompt esperando -- [ClaudeStatus.ready], que é a sessão
+  /// restaurada que ninguém tocou desde o launch, e as duas de
+  /// [ClaudeStatusUi.atRest]. Fora da tela porque desligar o que você está
+  /// olhando é o app fazendo coisa nas suas costas; e de fora ficam a que tem
+  /// pendência com você, a que tem fila pra andar, a que espera agentes e a
+  /// que outra fila vai chamar -- hibernar essa quebraria o fluxo no meio.
+  ///
+  /// [now] é pro teste, que não tem meia hora.
+  @visibleForTesting
+  void hibernateIdle({DateTime? now}) {
+    if (!autoHibernate) return;
+    final at = now ?? DateTime.now();
+    final patience = Duration(minutes: hibernateMinutes);
+    var changed = false;
+    for (final tab in [...tabs]) {
+      if (!canHibernate(tab) || isOpen(tab)) continue;
+      final status = tab.status;
+      if (status != ClaudeStatus.ready && !status.atRest) continue;
+      if (tab.armed || tab.followUps.isNotEmpty || tab.hooks.busyForks) continue;
+      if (tabs.any((t) => t.followUps.any((s) => s.targetTabId == tab.id))) continue;
+      // Desde quando ela está parada: a virada pra repouso, senão o último
+      // sinal dela, senão o launch.
+      final since = tab.restedAt ?? tab.hooks.lastEventAt ?? tab.startedAt;
+      if (at.difference(since) < patience) continue;
+      hibernate(tab);
+      changed = true;
+    }
+    if (changed) notifyListeners();
   }
 
   /// O grupo de que este painel faz parte, se faz de algum.
@@ -2518,6 +2840,11 @@ class AppStore extends ChangeNotifier {
         Panes.fromJson(group.tree, (i) => i >= 0 && i < panels.length ? panels[i]?.id : null) ??
         PaneLeaf(first.id);
     focusedPaneId = Panes.order(panes).firstOrNull;
+    // Abrir um grupo é querer os painéis dele rodando: o que entrou na tela
+    // hibernado acorda. Ver [MxTab.hibernated].
+    for (final t in openPanes) {
+      if (t.hibernated) unawaited(wake(t));
+    }
     // Os painéis que entraram são os painéis do grupo, inclusive os que foram
     // abertos agora no lugar dos que morreram. É esta marca que faz a linha
     // deles compartilhar a cor e abrir o grupo em vez de trocar o quadro.
@@ -2550,6 +2877,20 @@ class AppStore extends ChangeNotifier {
       // O apelido era o nome do documento anterior.
       reader.customLabel = null;
       return reader;
+    }
+    if (pane['kind'] == 'setup') {
+      // A configuração de uma pasta é uma só: o grupo pede a que já existe
+      // pra aquela raiz, ou nenhuma.
+      final setup = MxSetup.fromJson(
+        (pane['setup'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
+      );
+      if (setup == null) return null;
+      final open = tabs.firstWhereOrNull(
+        (t) => t.isSetup && t.setup!.root == setup.root && !taken.contains(t.id),
+      );
+      if (open == null) return null;
+      open.setup!.become(setup);
+      return open;
     }
     final root = pane['loose'] == true ? loose.root : pane['folderRoot'] as String?;
     final sessionId = pane['sessionId'] as String?;
@@ -2608,8 +2949,7 @@ class AppStore extends ChangeNotifier {
   /// foco que separa o que você está lendo dos quatro no canto do olho -- sem
   /// ele, voltar pra janela marcaria os cinco como vistos de uma vez, que é
   /// exatamente o estado de que [MxTab.unseen] veio nos tirar.
-  bool watching(MxTab tab) =>
-      windowActive && focusedPaneId == tab.id && Panes.has(panes, tab.id);
+  bool watching(MxTab tab) => windowActive && focusedPaneId == tab.id && Panes.has(panes, tab.id);
 
   /// Dá por visto o painel em foco. Chamado pelo relógio de um segundo.
   ///
@@ -2871,9 +3211,7 @@ class AppStore extends ChangeNotifier {
   FlowHold holdFor(MxTab tab, {DateTime? at}) {
     if (tab.exited || !tab.status.atRest) return FlowHold.working;
     final last = tab.hooks.lastEventAt;
-    final silence = last == null
-        ? flowPatience
-        : (at ?? DateTime.now()).difference(last);
+    final silence = last == null ? flowPatience : (at ?? DateTime.now()).difference(last);
     if (silence >= flowPatience) return FlowHold.go;
     if (tab.hooks.busyForks) return FlowHold.forks;
     return silence >= flowQuiet ? FlowHold.go : FlowHold.quiet;
@@ -3102,6 +3440,10 @@ class AppStore extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_gone) return;
+    // O relógio do `claude agents` anda no ritmo do que há pra descobrir, e
+    // toda mudança de estado passa por aqui -- é o lugar mais barato de
+    // perguntar se ainda falta o id de alguém. Ver [AgentsWatcher.eager].
+    agents.eager = tabs.any((t) => t.kind == TabKind.claude && !t.exited && t.resumeId == null);
     super.notifyListeners();
   }
 

@@ -152,28 +152,26 @@ class MxPalette {
 ///
 /// What the set is chosen for is spread. A picker of eleven near-blacks all lit
 /// blue offers eleven ways to look the same, so each theme here holds a corner
-/// nothing else does: ink, sand-on-ink, forest, indigo, brown, teal, violet,
-/// warm neon, steel, neon purple, rose — then four lights that are as far
-/// apart, paper white through cream. Two palettes that differ only in how far
-/// up the greyscale they sit are one palette; the second one goes.
+/// nothing else does: ink, sand-on-ink, greige, forest, brown, teal, mauve,
+/// warm neon, steel, neon purple, hot pink, cobalt, navy, black — then four lights
+/// that are as far apart, paper white through cream. Two palettes that differ
+/// only in how far up the greyscale they sit are one palette; the second one
+/// goes. That is why Tokyo Night is not here (it is [maestria] under another
+/// name), why Catppuccin ships as Mocha and Latte rather than all four
+/// flavours, and why Rosé Pine's dark half gave way to [dracula] and Mocha.
 ///
-/// Hue is only half of that spread, though, and the cheaper half. Thirteen
+/// Hue is only half of that spread, though, and the cheaper half. A dozen
 /// darks whose windows all sat between L\* 4 and L\* 22 read as one dark theme
-/// wearing thirteen accents, because the background is most of what you see.
-/// So the set also has to climb: [claudeDark] and [chatgptDark] sit on the
-/// grey the desktop apps they come from use, and [zenburn] goes further up
-/// than anything else here. [chatgptDark] holds the other gap those found —
-/// it is the only window with no hue in it at all.
-///
-/// Catppuccin is the one exception, and it is deliberate: its four flavours
-/// *are* one palette at four lightnesses, but people know them by flavour name
-/// and arrive already knowing which one they want, so shipping Mocha alone
-/// would read as the theme missing rather than as the set being tight. The
-/// four sit apart in the picker so the grid still reads as a range.
+/// wearing a dozen accents, because the background is most of what you see.
+/// So the set also climbs: [highContrast] is the floor at true black,
+/// [claudeDark], [slate] and [graphite] sit on the mid grey desktop apps use
+/// (warm, cool and neutral, in that order), and
+/// [zenburn] goes further up than anything else here. [graphite] holds the
+/// other gap those found — it is the only window with no hue in it at all.
 class MxThemes {
   static const maestria = MxPalette(
     id: 'maestria',
-    label: 'Maestria Dark',
+    label: 'Dark',
     dark: true,
     canvas: Color(0xFF0D0F13),
     bg: Color(0xFF16181D),
@@ -209,6 +207,12 @@ class MxThemes {
     ),
   );
 
+  /// Catppuccin Mocha. The published palette, with the accent on mauve — the
+  /// default every Catppuccin port ships (VS Code, GTK, the userstyles) and
+  /// the colour people picture when they picture the theme. On the blue it
+  /// was a near-twin of [maestria]: same ink window, same accent, and nothing
+  /// left to tell you which one you had picked. `purple` moves to pink so the
+  /// project glyphs still read apart from the accent.
   static const catppuccinMocha = MxPalette(
     id: 'catppuccin-mocha',
     label: 'Catppuccin Mocha',
@@ -222,11 +226,11 @@ class MxThemes {
     fg: Color(0xFFCDD6F4),
     fgDim: Color(0xFFA6ADC8),
     fgFaint: Color(0xFF6C7086),
-    accent: Color(0xFF89B4FA),
+    accent: Color(0xFFCBA6F7),
     green: Color(0xFFA6E3A1),
     yellow: Color(0xFFF9E2AF),
     red: Color(0xFFF38BA8),
-    purple: Color(0xFFCBA6F7),
+    purple: Color(0xFFF5C2E7),
     ansi: MxAnsi(
       black: Color(0xFF45475A),
       red: Color(0xFFF38BA8),
@@ -241,76 +245,7 @@ class MxThemes {
     ),
   );
 
-  /// Catppuccin Macchiato. Mocha's palette lifted off the black: the same
-  /// hues, a step warmer and a step lighter, on a base that is visibly blue
-  /// rather than near-ink.
-  static const catppuccinMacchiato = MxPalette(
-    id: 'catppuccin-macchiato',
-    label: 'Catppuccin Macchiato',
-    dark: true,
-    canvas: Color(0xFF181926),
-    bg: Color(0xFF24273A),
-    bgSidebar: Color(0xFF1E2030),
-    bgHover: Color(0xFF363A4F),
-    bgActive: Color(0xFF494D64),
-    border: Color(0xFF363A4F),
-    fg: Color(0xFFCAD3F5),
-    fgDim: Color(0xFFA5ADCB),
-    fgFaint: Color(0xFF6E738D),
-    accent: Color(0xFF8AADF4),
-    green: Color(0xFFA6DA95),
-    yellow: Color(0xFFEED49F),
-    red: Color(0xFFED8796),
-    purple: Color(0xFFC6A0F6),
-    ansi: MxAnsi(
-      black: Color(0xFF494D64),
-      red: Color(0xFFED8796),
-      green: Color(0xFFA6DA95),
-      yellow: Color(0xFFEED49F),
-      blue: Color(0xFF8AADF4),
-      magenta: Color(0xFFF5BDE6),
-      cyan: Color(0xFF8BD5CA),
-      white: Color(0xFFB8C0E0),
-      brightBlack: Color(0xFF5B6078),
-      brightWhite: Color(0xFFA5ADCB),
-    ),
-  );
-
-  /// Catppuccin Frappé. The light end of the family's dark half — a slate
-  /// window rather than a black one, and the softest contrast of any dark
-  /// theme here.
-  static const catppuccinFrappe = MxPalette(
-    id: 'catppuccin-frappe',
-    label: 'Catppuccin Frappé',
-    dark: true,
-    canvas: Color(0xFF232634),
-    bg: Color(0xFF303446),
-    bgSidebar: Color(0xFF292C3C),
-    bgHover: Color(0xFF414559),
-    bgActive: Color(0xFF51576D),
-    border: Color(0xFF414559),
-    fg: Color(0xFFC6D0F5),
-    fgDim: Color(0xFFA5ADCE),
-    fgFaint: Color(0xFF737994),
-    accent: Color(0xFF8CAAEE),
-    green: Color(0xFFA6D189),
-    yellow: Color(0xFFE5C890),
-    red: Color(0xFFE78284),
-    purple: Color(0xFFCA9EE6),
-    ansi: MxAnsi(
-      black: Color(0xFF51576D),
-      red: Color(0xFFE78284),
-      green: Color(0xFFA6D189),
-      yellow: Color(0xFFE5C890),
-      blue: Color(0xFF8CAAEE),
-      magenta: Color(0xFFF4B8E4),
-      cyan: Color(0xFF81C8BE),
-      white: Color(0xFFB5BFE2),
-      brightBlack: Color(0xFF626880),
-      brightWhite: Color(0xFFA5ADCE),
-    ),
-  );
-
+  /// Catppuccin Latte. Same mapping as [catppuccinMocha], on the light side.
   static const catppuccinLatte = MxPalette(
     id: 'catppuccin-latte',
     label: 'Catppuccin Latte',
@@ -324,11 +259,11 @@ class MxThemes {
     fg: Color(0xFF4C4F69),
     fgDim: Color(0xFF6C6F85),
     fgFaint: Color(0xFF9CA0B0),
-    accent: Color(0xFF1E66F5),
+    accent: Color(0xFF8839EF),
     green: Color(0xFF40A02B),
     yellow: Color(0xFFDF8E1D),
     red: Color(0xFFD20F39),
-    purple: Color(0xFF8839EF),
+    purple: Color(0xFFEA76CB),
     ansi: MxAnsi(
       black: Color(0xFF5C5F77),
       red: Color(0xFFD20F39),
@@ -373,38 +308,6 @@ class MxThemes {
       brightBlack: Color(0xFF4C566A),
       brightCyan: Color(0xFF8FBCBB),
       brightWhite: Color(0xFFECEFF4),
-    ),
-  );
-
-  static const tokyoNight = MxPalette(
-    id: 'tokyo-night',
-    label: 'Tokyo Night',
-    dark: true,
-    canvas: Color(0xFF13141F),
-    bg: Color(0xFF1A1B26),
-    bgSidebar: Color(0xFF16161E),
-    bgHover: Color(0xFF292E42),
-    bgActive: Color(0xFF343B58),
-    border: Color(0xFF292E42),
-    fg: Color(0xFFC0CAF5),
-    fgDim: Color(0xFF9AA5CE),
-    fgFaint: Color(0xFF565F89),
-    accent: Color(0xFF7AA2F7),
-    green: Color(0xFF9ECE6A),
-    yellow: Color(0xFFE0AF68),
-    red: Color(0xFFF7768E),
-    purple: Color(0xFFBB9AF7),
-    ansi: MxAnsi(
-      black: Color(0xFF414868),
-      red: Color(0xFFF7768E),
-      green: Color(0xFF9ECE6A),
-      yellow: Color(0xFFE0AF68),
-      blue: Color(0xFF7AA2F7),
-      magenta: Color(0xFFBB9AF7),
-      cyan: Color(0xFF7DCFFF),
-      white: Color(0xFFA9B1D6),
-      brightBlack: Color(0xFF565F89),
-      brightWhite: Color(0xFFC0CAF5),
     ),
   );
 
@@ -481,38 +384,6 @@ class MxThemes {
       brightMagenta: Color(0xFFFF92DF),
       brightCyan: Color(0xFFA4FFFF),
       brightWhite: Color(0xFFFFFFFF),
-    ),
-  );
-
-  static const rosePine = MxPalette(
-    id: 'rose-pine',
-    label: 'Rosé Pine',
-    dark: true,
-    canvas: Color(0xFF121016),
-    bg: Color(0xFF1F1D2E),
-    bgSidebar: Color(0xFF191724),
-    bgHover: Color(0xFF26233A),
-    bgActive: Color(0xFF403D52),
-    border: Color(0xFF26233A),
-    fg: Color(0xFFE0DEF4),
-    fgDim: Color(0xFF908CAA),
-    fgFaint: Color(0xFF6E6A86),
-    accent: Color(0xFFC4A7E7),
-    green: Color(0xFF9CCFD8),
-    yellow: Color(0xFFF6C177),
-    red: Color(0xFFEB6F92),
-    purple: Color(0xFFEBBCBA),
-    ansi: MxAnsi(
-      black: Color(0xFF26233A),
-      red: Color(0xFFEB6F92),
-      green: Color(0xFF31748F),
-      yellow: Color(0xFFF6C177),
-      blue: Color(0xFF9CCFD8),
-      magenta: Color(0xFFC4A7E7),
-      cyan: Color(0xFFEBBCBA),
-      white: Color(0xFFE0DEF4),
-      brightBlack: Color(0xFF6E6A86),
-      brightWhite: Color(0xFFE0DEF4),
     ),
   );
 
@@ -841,16 +712,99 @@ class MxThemes {
     ),
   );
 
-  /// ChatGPT. The one window here with no hue in it at all: every grey is
+  /// Night Owl. A deep, saturated navy — darker than [cobalt] and bluer than
+  /// anything near-black here — under the palette's soft blue, mint and
+  /// lavender. Published palette throughout; `green` is the theme's own
+  /// lime-leaning green rather than the neon it puts in the terminal, so the
+  /// status glyphs stay in the family.
+  static const nightOwl = MxPalette(
+    id: 'night-owl',
+    label: 'Night Owl',
+    dark: true,
+    canvas: Color(0xFF010E1A),
+    bg: Color(0xFF011627),
+    bgSidebar: Color(0xFF011221),
+    bgHover: Color(0xFF0B2942),
+    bgActive: Color(0xFF1D3B53),
+    border: Color(0xFF122D42),
+    fg: Color(0xFFD6DEEB),
+    fgDim: Color(0xFF8FA4BE),
+    fgFaint: Color(0xFF5F7E97),
+    accent: Color(0xFF82AAFF),
+    green: Color(0xFFADDB67),
+    yellow: Color(0xFFECC48D),
+    red: Color(0xFFEF5350),
+    purple: Color(0xFFC792EA),
+    ansi: MxAnsi(
+      black: Color(0xFF1D3B53),
+      red: Color(0xFFEF5350),
+      green: Color(0xFF22DA6E),
+      yellow: Color(0xFFADDB67),
+      blue: Color(0xFF82AAFF),
+      magenta: Color(0xFFC792EA),
+      cyan: Color(0xFF21C7A8),
+      white: Color(0xFFD6DEEB),
+      brightBlack: Color(0xFF5F7E97),
+      brightYellow: Color(0xFFFFEB95),
+      brightCyan: Color(0xFF7FDBCA),
+      brightWhite: Color(0xFFFFFFFF),
+    ),
+  );
+
+  /// Slate. The cool grey: a mid-grey window like [graphite]'s, but tinted
+  /// blue throughout rather than neutral — every grey here has more blue than
+  /// red in it, and nothing in the accents is warm except the yellow, which is
+  /// kept dusty for the same reason. It is the counterweight to [claudeDark],
+  /// which is the same lightness leaning the other way. Not a published
+  /// palette; drawn as a ramp around the greys the way the default is.
+  static const slate = MxPalette(
+    id: 'slate',
+    label: 'Slate',
+    dark: true,
+    canvas: Color(0xFF1E2126),
+    bg: Color(0xFF2A2E35),
+    bgSidebar: Color(0xFF24282E),
+    bgHover: Color(0xFF353A43),
+    bgActive: Color(0xFF414751),
+    border: Color(0xFF3A404A),
+    fg: Color(0xFFE2E7EE),
+    fgDim: Color(0xFFA0AAB8),
+    fgFaint: Color(0xFF6B7584),
+    accent: Color(0xFF7FB2E5),
+    green: Color(0xFF7DC9A5),
+    yellow: Color(0xFFD4BC7A),
+    red: Color(0xFFE27A88),
+    purple: Color(0xFFA6A0E0),
+    ansi: MxAnsi(
+      black: Color(0xFF353A43),
+      red: Color(0xFFE27A88),
+      green: Color(0xFF7DC9A5),
+      yellow: Color(0xFFD4BC7A),
+      blue: Color(0xFF7FB2E5),
+      magenta: Color(0xFFA6A0E0),
+      cyan: Color(0xFF7CC7D6),
+      white: Color(0xFFCBD2DC),
+      brightBlack: Color(0xFF6B7584),
+      brightRed: Color(0xFFF0929E),
+      brightGreen: Color(0xFF97DDBA),
+      brightYellow: Color(0xFFE6D094),
+      brightBlue: Color(0xFF9CC6F0),
+      brightMagenta: Color(0xFFBDB7EE),
+      brightCyan: Color(0xFF98DAE7),
+      brightWhite: Color(0xFFE2E7EE),
+    ),
+  );
+
+  /// Graphite. The one window here with no hue in it at all: every grey is
   /// r == g == b, which is what makes it read as grey rather than as a very
-  /// dark blue — the trap every other dark theme in this set falls into.
+  /// dark blue — the trap most other dark themes in this set fall into.
   ///
-  /// Same caveat as [claudeDark]: the greys are the app's, the ansi half is
-  /// derived. It is deliberately the flat, saturated set a modern web app
+  /// Same caveat as [claudeDark]: the greys are a desktop app's, the ansi half
+  /// is derived. It is deliberately the flat, saturated set a modern web app
   /// would use, because a muted one disappears against a neutral background.
-  static const chatgptDark = MxPalette(
-    id: 'chatgpt-dark',
-    label: 'ChatGPT Dark',
+  static const graphite = MxPalette(
+    id: 'graphite',
+    label: 'Graphite',
     dark: true,
     canvas: Color(0xFF212121),
     bg: Color(0xFF303030),
@@ -886,8 +840,133 @@ class MxThemes {
     ),
   );
 
+  /// SynthWave '84. Pink on deep purple — the one dark window here that is
+  /// violet rather than blue-black or grey, and the only pink accent in the
+  /// set. Published palette for the surfaces and the accents; the theme has no
+  /// blue of its own, so ansi `blue` is a periwinkle chosen to keep a listing
+  /// readable while staying in the family.
+  static const synthwave = MxPalette(
+    id: 'synthwave-84',
+    label: "SynthWave '84",
+    dark: true,
+    canvas: Color(0xFF1A1727),
+    bg: Color(0xFF262335),
+    bgSidebar: Color(0xFF241B2F),
+    bgHover: Color(0xFF34294F),
+    bgActive: Color(0xFF463465),
+    border: Color(0xFF34294F),
+    fg: Color(0xFFF0EFF1),
+    fgDim: Color(0xFFAFA9D3),
+    fgFaint: Color(0xFF848BBD),
+    accent: Color(0xFFFF7EDB),
+    green: Color(0xFF72F1B8),
+    yellow: Color(0xFFFEDE5D),
+    red: Color(0xFFFE4450),
+    purple: Color(0xFFB893CE),
+    ansi: MxAnsi(
+      black: Color(0xFF34294F),
+      red: Color(0xFFFE4450),
+      green: Color(0xFF72F1B8),
+      yellow: Color(0xFFFEDE5D),
+      blue: Color(0xFF8C8CFF),
+      magenta: Color(0xFFFF7EDB),
+      cyan: Color(0xFF36F9F6),
+      white: Color(0xFFF0EFF1),
+      brightBlack: Color(0xFF848BBD),
+      brightRed: Color(0xFFF97E72),
+      brightYellow: Color(0xFFF3E70F),
+      brightBlue: Color(0xFFA6A6FF),
+      brightCyan: Color(0xFF03EDF9),
+      brightWhite: Color(0xFFFFFFFF),
+    ),
+  );
+
+  /// Cobalt. A real blue window, not a navy one — the only theme in the set
+  /// whose background is a colour you would name — with the yellow that is
+  /// its signature as the accent. `yellow` therefore takes the palette's
+  /// orange, so a search hit and the current hit stay two colours.
+  static const cobalt = MxPalette(
+    id: 'cobalt',
+    label: 'Cobalt',
+    dark: true,
+    canvas: Color(0xFF122738),
+    bg: Color(0xFF193549),
+    bgSidebar: Color(0xFF15232D),
+    bgHover: Color(0xFF1F4662),
+    bgActive: Color(0xFF245A7E),
+    border: Color(0xFF234E6D),
+    fg: Color(0xFFFFFFFF),
+    fgDim: Color(0xFF9FB8CF),
+    fgFaint: Color(0xFF5B87AD),
+    accent: Color(0xFFFFC600),
+    green: Color(0xFF3AD900),
+    yellow: Color(0xFFFF9D00),
+    red: Color(0xFFFF628C),
+    purple: Color(0xFFFB94FF),
+    ansi: MxAnsi(
+      black: Color(0xFF1F4662),
+      red: Color(0xFFFF628C),
+      green: Color(0xFF3AD900),
+      yellow: Color(0xFFFFC600),
+      blue: Color(0xFF0088FF),
+      magenta: Color(0xFFFB94FF),
+      cyan: Color(0xFF80FCFF),
+      white: Color(0xFFE0E8F0),
+      brightBlack: Color(0xFF5B87AD),
+      brightRed: Color(0xFFFF2C6D),
+      brightGreen: Color(0xFFA5FF90),
+      brightYellow: Color(0xFFFFE50A),
+      brightBlue: Color(0xFF55AAFF),
+      brightCyan: Color(0xFF9EFFFF),
+      brightWhite: Color(0xFFFFFFFF),
+    ),
+  );
+
+  /// High Contrast. True black, true white, and colours saturated enough to
+  /// clear WCAG AAA on both — the Modus Vivendi set, which was built for
+  /// exactly that. Nothing else here is black: [ayuDark] is the closest and
+  /// still a step off it. The panels lift off the canvas by a few points so
+  /// the gutters survive, and the border is the one deliberately loud grey.
+  static const highContrast = MxPalette(
+    id: 'high-contrast',
+    label: 'High Contrast',
+    dark: true,
+    canvas: Color(0xFF000000),
+    bg: Color(0xFF0F0F0F),
+    bgSidebar: Color(0xFF080808),
+    bgHover: Color(0xFF1E1E1E),
+    bgActive: Color(0xFF2E2E2E),
+    border: Color(0xFF4A4A4A),
+    fg: Color(0xFFFFFFFF),
+    fgDim: Color(0xFFC6C6C6),
+    fgFaint: Color(0xFF8A8A8A),
+    accent: Color(0xFF2FAFFF),
+    green: Color(0xFF44BC44),
+    yellow: Color(0xFFD0BC00),
+    red: Color(0xFFFF5F59),
+    purple: Color(0xFFB6A0FF),
+    ansi: MxAnsi(
+      black: Color(0xFF595959),
+      red: Color(0xFFFF5F59),
+      green: Color(0xFF44BC44),
+      yellow: Color(0xFFD0BC00),
+      blue: Color(0xFF2FAFFF),
+      magenta: Color(0xFFFF66FF),
+      cyan: Color(0xFF00D3D0),
+      white: Color(0xFFE0E0E0),
+      brightBlack: Color(0xFF8A8A8A),
+      brightRed: Color(0xFFFF8F88),
+      brightGreen: Color(0xFF70D73F),
+      brightYellow: Color(0xFFFEC43F),
+      brightBlue: Color(0xFF79A8FF),
+      brightMagenta: Color(0xFFF78FE7),
+      brightCyan: Color(0xFF6AE4B9),
+      brightWhite: Color(0xFFFFFFFF),
+    ),
+  );
+
   /// Zenburn. The lightest window in the set by a clear margin — an olive-grey
-  /// panel where everything else is a near-black one — and the only theme here
+  /// panel where most others are near-black ones — and the only theme here
   /// that is low-contrast on purpose: its foreground is a soft bone, not white,
   /// and its red is dusty enough to point at an error without shouting.
   ///
@@ -939,28 +1018,41 @@ class MxThemes {
     maestria,
     ayuDark,
     claudeDark,
+    cobalt,
     everforest,
-    tokyoNight,
+    highContrast,
+    nightOwl,
     gruvbox,
-    solarizedDark,
     catppuccinMocha,
-    chatgptDark,
+    solarizedDark,
+    graphite,
+    synthwave,
+    slate,
     monokaiPro,
     nord,
     dracula,
-    catppuccinMacchiato,
-    rosePine,
     zenburn,
-    catppuccinFrappe,
     githubLight,
     catppuccinLatte,
     rosePineDawn,
     gruvboxLight,
   ];
 
+  /// Ids that earlier builds wrote and this one no longer ships, each sent to
+  /// the theme it most looked like — so a config file from before the cut
+  /// comes up in the same window it had, not in the default.
+  static const Map<String, MxPalette> _retired = {
+    'tokyo-night': maestria,
+    'catppuccin-macchiato': catppuccinMocha,
+    'catppuccin-frappe': catppuccinMocha,
+    'rose-pine': catppuccinMocha,
+    'chatgpt-dark': graphite,
+  };
+
   /// An id from a config file written by a newer build — or by a hand — is not
   /// a reason to fail to start: fall back to the default.
-  static MxPalette byId(String? id) => all.where((p) => p.id == id).firstOrNull ?? maestria;
+  static MxPalette byId(String? id) =>
+      all.where((p) => p.id == id).firstOrNull ?? _retired[id] ?? maestria;
 }
 
 /// Uma face monoespaçada que a tela de configurações oferece.

@@ -408,6 +408,13 @@ enum MxAction {
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.digit0, meta: true)],
   ),
+  toggleSidebar(
+    id: 'sidebar',
+    label: 'esconder ou mostrar a lateral',
+    hint: 'a aba na borda esquerda a traz de volta, e esta tecla também',
+    group: MxGroup.view,
+    defaults: [MxChord(LogicalKeyboardKey.keyS, meta: true, alt: true)],
+  ),
   settings(
     id: 'settings',
     label: 'configurações',

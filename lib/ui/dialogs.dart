@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -296,6 +297,16 @@ Future<void> showPanelMenu(
         ),
         mxDivider(),
       ],
+      // Pelo mesmo motivo, na hibernada: religar é a única coisa que se quer
+      // fazer com ela. Ver [MxTab.hibernated].
+      if (tab.hibernated) ...[
+        mxItem(
+          'wake',
+          glyph: Icon(Icons.play_arrow, size: 14, color: Mx.accent),
+          label: 'retomar a conversa',
+        ),
+        mxDivider(),
+      ],
       // O bloco do que este painel *tem*: o nome dele, e o que a sessão
       // escreveu pra ser lido. Doze linhas seguidas eram uma parede; os riscos
       // são o que deixa o olho pular pro terço certo dela.
@@ -393,17 +404,18 @@ Future<void> showPanelMenu(
           glyph: Icon(Icons.grid_off, size: 14, color: group.color),
           label: 'desagrupar "${group.name}"',
         ),
-      // Um leitor não vai pra projeto nem se marca como concluído: as duas
-      // coisas se dizem de um trabalho, e ele é uma folha de papel. Estar fora
-      // de pasta não impede mais: a bandeja também tem projeto. Ver
-      // [showMoveToProject], que é quem diz quando ainda não tem nenhum.
-      if (!tab.isReader)
+      // Um leitor e uma configuração não vão pra projeto nem se marcam como
+      // concluídos: as duas coisas se dizem de um trabalho, e eles são uma
+      // folha de papel e um editor. Estar fora de pasta não impede mais: a
+      // bandeja também tem projeto. Ver [showMoveToProject], que é quem diz
+      // quando ainda não tem nenhum.
+      if (!tab.isPassive)
         mxItem(
           'move',
-          glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.purple),
+          glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
           label: 'mover pro projeto…',
         ),
-      if (!tab.isReader)
+      if (!tab.isPassive)
         mxItem(
           'done',
           glyph: Icon(
@@ -414,10 +426,22 @@ Future<void> showPanelMenu(
           label: tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
         ),
       mxDivider(),
+      // Desligar sem fechar: a conversa fica, a memória volta. Só o que dá
+      // pra retomar -- ver [AppStore.canHibernate].
+      if (store.canHibernate(tab))
+        mxItem(
+          'hibernate',
+          glyph: Icon(Icons.bedtime_outlined, size: 14, color: Mx.fgDim),
+          label: 'hibernar (libera a memória)',
+        ),
       mxItem(
         'close',
         glyph: Icon(Icons.close, size: 14, color: Mx.red),
-        label: tab.isReader ? 'fechar o leitor' : 'fechar painel',
+        label: switch (tab.kind) {
+          TabKind.reader => 'fechar o leitor',
+          TabKind.setup => 'fechar a configuração',
+          _ => 'fechar painel',
+        },
         color: Mx.red,
         // A tecla vem do mapa: ela é editável, e um menu que ensinasse ⌘⌫ a
         // quem trocou por outra estaria mentindo.
@@ -430,6 +454,10 @@ Future<void> showPanelMenu(
   switch (choice) {
     case 'relaunch':
       store.relaunch(tab);
+    case 'hibernate':
+      store.hibernate(tab);
+    case 'wake':
+      unawaited(store.wake(tab));
     case 'group':
       final group = store.groupPanes();
       if (group != null) {
@@ -555,7 +583,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                     },
                   ),
                   TextButton.icon(
-                    icon: const Icon(Icons.workspaces_outline, size: 15),
+                    icon: const Icon(Icons.hexagon_outlined, size: 15),
                     label: const Text('escolher workspace…'),
                     onPressed: () async {
                       final picked = await Notifier.chooseWorkspace();
@@ -796,6 +824,13 @@ Future<void> showWorktreeMenu(
           glyph: Icon(Icons.code, size: 14, color: Mx.fgDim),
           label: 'abrir no vscode',
         ),
+        // Sobre este checkout, e não sobre a pasta-mãe: o `CLAUDE.md` é o
+        // mesmo versionado, mas o `settings.local.json` é deste diretório.
+        mxItem(
+          'setup',
+          glyph: Icon(Icons.tune, size: 14, color: Mx.fgDim),
+          label: 'configuração do claude',
+        ),
       ],
       mxItem(
         'copy',
@@ -834,6 +869,8 @@ Future<void> showWorktreeMenu(
   switch (choice) {
     case 'code':
       await store.openInEditor(worktree.path);
+    case 'setup':
+      store.showSetup(folder: folder, cwd: worktree.isMain ? null : worktree.path);
     case 'copy':
       await Clipboard.setData(ClipboardData(text: worktree.path));
       store.showBanner('caminho copiado');
@@ -1224,6 +1261,14 @@ Future<void> showProjectMenu(
       // existiam lá. Ver [openHereItems].
       ...openHereItems(store),
       mxDivider(),
+      // A mesma linha do menu da pasta: a configuração é da pasta, e o
+      // projeto mora nela. Na bandeja não há pasta pra configurar.
+      if (!folder.isLoose)
+        mxItem(
+          'setup',
+          glyph: Icon(Icons.tune, size: 14, color: Mx.fgDim),
+          label: 'configuração do claude',
+        ),
       // Uma worktree precisa de um repo pra ser worktree de -- ver
       // [MxKeys.run]. No projeto da bandeja a linha não aparece: ela abriria
       // um diálogo de branch e pasta que não tem onde acontecer.
@@ -1255,7 +1300,7 @@ Future<void> showProjectMenu(
       ),
       mxItem(
         'dissolve',
-        glyph: Icon(Icons.workspaces_outline, size: 14, color: Mx.red),
+        glyph: Icon(Icons.track_changes, size: 14, color: Mx.red),
         label: 'dissolver projeto',
         color: Mx.red,
       ),
@@ -1267,6 +1312,8 @@ Future<void> showProjectMenu(
   if (!context.mounted) return;
 
   switch (choice) {
+    case 'setup':
+      store.showSetup(folder: folder, project: project);
     case 'task':
       await showNewTask(context, store, folder, project: project);
     case 'brief':
@@ -1408,7 +1455,7 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
             child: Row(
               children: [
                 Icon(
-                  Icons.workspaces_outline,
+                  Icons.track_changes,
                   size: 15,
                   color: tab.projectId == p.id ? Mx.accent : Mx.purple,
                 ),
@@ -1500,7 +1547,7 @@ class _FilterSheet extends StatelessWidget {
               for (final p in store.projectsOf(f))
                 _FilterRow(
                   label: p.name,
-                  icon: Icons.workspaces_outline,
+                  icon: Icons.track_changes,
                   color: Mx.purple,
                   indent: 14,
                   on: store.filterProjects.contains(p.id),
@@ -1527,7 +1574,7 @@ class _FilterSheet extends StatelessWidget {
               for (final p in store.projectsOf(store.loose))
                 _FilterRow(
                   label: p.name,
-                  icon: Icons.workspaces_outline,
+                  icon: Icons.track_changes,
                   color: Mx.purple,
                   indent: 14,
                   on: store.filterProjects.contains(p.id),

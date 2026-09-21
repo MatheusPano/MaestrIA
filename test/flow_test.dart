@@ -22,6 +22,7 @@ class NoPty extends AppStore {
     String? resumeId,
     Project? project,
     String? prompt,
+    bool start = true,
   }) {
     abertas.add({'cwd': cwd, 'label': label, 'prompt': prompt});
     final tab = MxTab(

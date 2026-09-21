@@ -48,6 +48,7 @@ class NoPty extends AppStore {
     String? resumeId,
     Project? project,
     String? prompt,
+    bool start = true,
   }) {
     asked.add({'folder': f.root, 'cwd': cwd, 'label': label, 'resumeId': resumeId});
     final tab = MxTab(

@@ -62,7 +62,27 @@ class TermSession {
   /// A dim line in the buffer itself, so the exact command is never a mystery.
   void note(String text) => terminal.write('\x1b[2m\$ $text\x1b[0m\r\n');
 
+  /// Uma linha apagada que não é comando: o que o app tem a dizer sobre esta
+  /// sessão, no lugar onde quem olha pra ela vai ler.
+  void remark(String text) => terminal.write('\x1b[2m[$text]\x1b[0m\r\n');
+
+  /// Deixa a sessão desligada sem nunca ter subido.
+  ///
+  /// Pro painel que volta hibernado (ver `AppStore.hibernate`): ele tem
+  /// scrollback vazio, tem conversa pra retomar e não tem processo -- e um
+  /// [exited] falso aqui o faria parecer uma sessão viva que não responde.
+  /// Só vale antes do primeiro [_start]; depois disso quem desliga é [kill].
+  void park() {
+    if (_pty != null) return;
+    exited = true;
+    exitCode = null;
+  }
+
   void _start(List<String> args, String cwd, Map<String, String>? env) {
+    // Uma vida nova: o que o processo anterior deixou aqui (ver [relaunch] e
+    // `AppStore.wake`) não é o estado deste.
+    exited = false;
+    exitCode = null;
     // Never hand the pty a folder that is not there.
     //
     // flutter_pty's child ignores a failed `chdir` (flutter_pty_unix.c) and

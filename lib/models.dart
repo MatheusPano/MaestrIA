@@ -1,8 +1,17 @@
 import 'theme.dart';
 import 'package:flutter/material.dart';
 
+/// Uma linha de primeiro nível da lateral: uma pasta solta ou uma seção de
+/// workspace (que leva as pastas dela junto).
+///
+/// Existe pra que uma coisa só: arrastar. As duas linhas se reordenam entre
+/// si -- ver `AppStore.sidebarRows` e `AppStore.moveRow` --, e um arrasto
+/// precisa de um tipo que seja as duas. Não tem membro nenhum de propósito:
+/// o que uma linha *é* continua sendo [Folder] ou [Workspace].
+mixin SidebarRow {}
+
 /// A repo the user works in. Worktrees of the same repo group under one folder.
-class Folder {
+class Folder with SidebarRow {
   Folder({required this.root, required this.name, this.collapsed = false, this.workspace})
     : isLoose = false;
 
@@ -11,11 +20,7 @@ class Folder {
   /// to the config, and git never looks at it — a session you opened just to
   /// ask something is not a checkout. Its [root] is only the folder a panel
   /// starts in when you do not pick one.
-  Folder.loose(this.root)
-    : name = 'avulsos',
-      isLoose = true,
-      collapsed = false,
-      workspace = null;
+  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false, workspace = null;
 
   /// Main checkout path. Also the identity: worktrees resolve back to it.
   final String root;
@@ -162,7 +167,7 @@ class Project {
 /// juntas" -- e a resposta não é nossa: está escrita num arquivo que o VS Code
 /// mantém. Ver [CodeWorkspace], que é o arquivo, e `AppStore.importWorkspace`,
 /// que é quem cria isto.
-class Workspace {
+class Workspace with SidebarRow {
   Workspace({required this.path, required this.name, this.collapsed = false});
 
   /// O arquivo. Também a identidade: é isto que as pastas guardam, e é por
@@ -177,11 +182,7 @@ class Workspace {
 
   bool collapsed;
 
-  Map<String, dynamic> toJson() => {
-    'path': path,
-    'name': name,
-    if (collapsed) 'collapsed': true,
-  };
+  Map<String, dynamic> toJson() => {'path': path, 'name': name, if (collapsed) 'collapsed': true};
 
   /// Null pro registro que não desenharia nada -- sem caminho ou sem nome.
   /// Nulo e não exceção pelo mesmo motivo de [PaneGroup.fromJson]: quem lê é o
@@ -856,12 +857,7 @@ class Launcher {
     return tints[sum % tints.length];
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'command': command,
-    'icon': icon.name,
-  };
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'command': command, 'icon': icon.name};
 
   /// Null pro registro que não abriria nada -- sem id, sem nome ou sem
   /// comando. Nulo e não exceção pelo mesmo motivo de [PaneGroup.fromJson]:

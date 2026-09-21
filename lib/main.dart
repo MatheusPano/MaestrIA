@@ -5,6 +5,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 
+import 'services/shortcuts.dart';
 import 'services/store.dart';
 import 'theme.dart';
 import 'ui/icons.dart';
@@ -98,14 +99,23 @@ class _MaestriaAppState extends State<MaestriaApp> {
                     // negative space to lay out in.
                     builder: (context, box) => Row(
                       children: [
-                        SizedBox(
-                          width: store.sidebarWidth.clamp(
-                            AppStore.minSidebar,
-                            (box.maxWidth - 280).clamp(AppStore.minSidebar, double.infinity),
+                        // Escondida, a lateral sai da fileira inteira -- não
+                        // fica com largura zero. Um `Sidebar` de 0px continua
+                        // montado, e uma lista de trinta linhas que ninguém vê
+                        // é trinta linhas sendo medidas a cada quadro. Ver
+                        // [AppStore.sidebarHidden].
+                        if (store.sidebarHidden)
+                          _SidebarTab(store: store)
+                        else ...[
+                          SizedBox(
+                            width: store.sidebarWidth.clamp(
+                              AppStore.minSidebar,
+                              (box.maxWidth - 280).clamp(AppStore.minSidebar, double.infinity),
+                            ),
+                            child: Sidebar(store: store),
                           ),
-                          child: Sidebar(store: store),
-                        ),
-                        _SidebarGrip(store: store),
+                          _SidebarGrip(store: store),
+                        ],
                         Expanded(
                           // O recado flutua por cima dos painéis em vez de ser
                           // uma faixa embaixo deles. Como filho da Column ele
@@ -141,6 +151,62 @@ class _MaestriaAppState extends State<MaestriaApp> {
                       ],
                     ),
                   ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A aba que traz a lateral de volta, no lugar onde ela estava.
+///
+/// A única saída de [AppStore.sidebarHidden] que não é uma tecla: uma lateral
+/// que só volta por atalho é uma lateral que alguém vai dar por perdida. Ela
+/// custa os mesmos 8px de vão que o [_SidebarGrip] custava, mais os 18 do
+/// glifo -- é uma borda da janela, não uma coluna.
+///
+/// O desenho é o mesmo do botão que a escondeu (ver `_Footer`): são os dois
+/// lados de um interruptor só, e dois glifos fariam pensar que são dois.
+class _SidebarTab extends StatefulWidget {
+  const _SidebarTab({required this.store});
+  final AppStore store;
+
+  @override
+  State<_SidebarTab> createState() => _SidebarTabState();
+}
+
+class _SidebarTabState extends State<_SidebarTab> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: Mx.gap),
+      child: Tooltip(
+        message: [
+          'mostrar a lateral',
+          ...widget.store.keymap[MxAction.toggleSidebar].map((c) => c.label),
+        ].join('  '),
+        waitDuration: const Duration(milliseconds: 500),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.store.toggleSidebar,
+            child: SizedBox(
+              width: 18,
+              // A coluna inteira é o alvo: a mão que procura a lateral vai à
+              // borda esquerda, não a um botão de 18 por 18 no meio dela.
+              child: Center(
+                child: Icon(
+                  Icons.view_sidebar_outlined,
+                  size: 16,
+                  color: _hover ? Mx.fg : Mx.fgFaint,
                 ),
               ),
             ),

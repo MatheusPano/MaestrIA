@@ -51,9 +51,27 @@
 ///    survived the clipboard. [selectedText] reads them as the spaces they
 ///    are on screen.
 ///
+///  * **`ESC[3J`, and the line that no longer knows which row it is on.**
+///    Erasing the scrollback trims the lines above the viewport with
+///    `IndexAwareCircularBuffer.trimStart`, which moves the start of the list
+///    without telling the list that it moved: `_absoluteStartIndex` stays
+///    where it was (`utils/circular_buffer.dart`). A line works out its own
+///    row by subtracting that number from its own (`IndexedItem.index`), so
+///    every line that survives the trim goes on reporting the row it had
+///    *before* it — thirty too many, if thirty fell off. Nothing paints by
+///    that number, which is why the text itself stays put; the only thing
+///    that reads it is [CellAnchor], and a selection and an `OSC 8` link are
+///    made of anchors. That is "o mouse fica no lugar errado": the region you
+///    drag lights up thirty lines below the mouse, and the link under the
+///    pointer belongs to another cell. `claude` writes `ESC[3J` on `/clear`,
+///    and so does the shell's `clear`. [VtTerminal] puts every line back on
+///    the row it is on.
+///
 /// None has a hook to override, so one is fixed on the stream, before the
-/// parser gets to see it, two on the terminal on the way out and one on the
-/// way in — and the last one by reading the buffer here instead of asking it.
+/// parser gets to see it, two on the terminal on the way out, one on the way
+/// in, one by putting the buffer back in order after the sequence that
+/// disarranged it — and the last one by reading the buffer here instead of
+/// asking it.
 library;
 
 import 'package:xterm/xterm.dart';
@@ -93,6 +111,40 @@ class VtTerminal extends Terminal {
   void useMainBuffer() {
     super.useMainBuffer();
     resetCursorStyle();
+  }
+
+  /// `ESC[3J` — o scrollback apagado, e as linhas que sobraram recolocadas.
+  ///
+  /// Ver o sexto item no topo: quem apara a lista não lhe conta quantas
+  /// linhas caíram, e cada linha que ficou continua dizendo a fila que tinha
+  /// antes do corte.
+  @override
+  void eraseScrollbackOnly() {
+    super.eraseScrollbackOnly();
+    _reseat();
+  }
+
+  /// O mesmo corte, pelo outro caminho: na tela alternativa, mudar de tamanho
+  /// apara o scrollback dela (`Terminal.resize`, `if (buffer == _altBuffer)`)
+  /// — e num cockpit dividir um painel é mudar o tamanho do outro.
+  @override
+  void resize(int newWidth, int newHeight, [int? pixelWidth, int? pixelHeight]) {
+    super.resize(newWidth, newHeight, pixelWidth, pixelHeight);
+    _reseat();
+  }
+
+  /// Cada linha de volta à fila em que ela de fato está.
+  ///
+  /// `lines[i] = lines[i]` não é o nada que parece: escrever na lista é o que
+  /// faz a lista dizer à linha onde a linha está (`_adoptChild` → `_attach`),
+  /// e é o único jeito de acertar isso de fora — `_absoluteStartIndex` é
+  /// privado. Custa uma volta na lista -- curta no caso que importa, porque
+  /// o corte deixa nela só a altura da janela.
+  void _reseat() {
+    final lines = buffer.lines;
+    for (var i = 0; i < lines.length; i++) {
+      lines[i] = lines[i];
+    }
   }
 
   /// A key went down, so the next text to arrive was typed by someone.

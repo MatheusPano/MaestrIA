@@ -6,6 +6,7 @@ import '../services/layout.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'doc_pane.dart';
+import 'setup_pane.dart';
 import 'terminal_pane.dart';
 
 /// Onde o mouse está, reconstruído do que o [DragTarget] entrega.
@@ -165,14 +166,23 @@ class _PaneSlotState extends State<_PaneSlot> {
       builder: (context, _, _) => Stack(
         fit: StackFit.expand,
         children: [
-          // Duas coisas cabem num painel: um terminal e um documento. O resto
-          // -- o corte, o drop, o anel de foco, o arraste -- não sabe a
-          // diferença, e é por isso que um leitor se comporta como um painel.
+          // Três coisas cabem num painel: um terminal, um documento e a
+          // configuração de uma pasta. O resto -- o corte, o drop, o anel de
+          // foco, o arraste -- não sabe a diferença, e é por isso que um
+          // leitor se comporta como um painel.
           // Pelo [AppStore.focusedTab], não pelo id cru: com um foco que
           // aponta pra uma sessão que já saiu da tela, nenhum painel
           // acenderia o anel e o teclado pareceria não estar em lugar nenhum.
           if (widget.tab.isReader)
             DocPane(
+              store: store,
+              tab: widget.tab,
+              focused: store.focusedTab?.id == widget.tab.id,
+              showFocus: store.paneCount > 1,
+              onFocus: () => store.focusPane(widget.tab),
+            )
+          else if (widget.tab.isSetup)
+            SetupPane(
               store: store,
               tab: widget.tab,
               focused: store.focusedTab?.id == widget.tab.id,

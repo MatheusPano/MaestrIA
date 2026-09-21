@@ -78,6 +78,25 @@ void main() {
       expect(MxThemes.byId(null).id, MxThemes.maestria.id);
     });
 
+    test('an id from a retired theme lands on its nearest look-alike', () {
+      // A config file from before the cut should come up in the window it
+      // had, not in the default — Tokyo Night was the default's twin, the
+      // other Catppuccin flavours are Mocha, and the renamed grey is itself.
+      expect(MxThemes.byId('tokyo-night'), MxThemes.maestria);
+      expect(MxThemes.byId('catppuccin-macchiato'), MxThemes.catppuccinMocha);
+      expect(MxThemes.byId('catppuccin-frappe'), MxThemes.catppuccinMocha);
+      expect(MxThemes.byId('chatgpt-dark'), MxThemes.graphite);
+    });
+
+    test('no theme uses the same colour for a search hit and the current one', () {
+      // The pty paints every hit in `yellow` and the current one in `accent`;
+      // a palette whose accent is its yellow would make them one colour.
+      for (final p in MxThemes.all) {
+        expect(p.accent, isNot(p.yellow), reason: p.id);
+        expect(p.accent, isNot(p.purple), reason: p.id);
+      }
+    });
+
     test('the pty inherits the pane it sits in', () {
       expect(MxThemes.nord.terminal.background, MxThemes.nord.bg);
       expect(MxThemes.catppuccinLatte.terminal.foreground, MxThemes.catppuccinLatte.fg);

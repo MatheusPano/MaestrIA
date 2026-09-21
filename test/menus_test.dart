@@ -54,6 +54,7 @@ class NoPty extends AppStore {
     String? resumeId,
     Project? project,
     String? prompt,
+    bool start = true,
   }) {
     pedidos.add(Pedido('claude', cwd, label: label, project: project?.name));
     return _fake(cwd, label: label);

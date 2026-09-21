@@ -73,9 +73,19 @@ class MxKeys {
       case MxAction.prevSession:
         store.cycle(-1);
       case MxAction.search:
+        // Escondida, a lateral não tem campo pra focar: mostrá-la é parte de
+        // buscar nela. O foco espera o quadro em que o campo passa a existir
+        // -- um [FocusNode] que não está na árvore não tem como recebê-lo.
+        if (store.sidebarHidden) {
+          store.setSidebarHidden(false);
+          WidgetsBinding.instance.addPostFrameCallback((_) => SidebarSearch.reveal());
+          return;
+        }
         // A lateral é uma, e o campo dela sabe se dizer onde está: ver
         // [SidebarSearch]. Nada aqui precisa saber se ele está montado.
         SidebarSearch.reveal();
+      case MxAction.toggleSidebar:
+        store.toggleSidebar();
       case MxAction.openMarkdown:
         store.openMarkdown();
       // --- ditado (vocalização) — fora desta versão --------------------------
