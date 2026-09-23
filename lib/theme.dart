@@ -157,8 +157,9 @@ class MxPalette {
 /// that are as far apart, paper white through cream. Two palettes that differ
 /// only in how far up the greyscale they sit are one palette; the second one
 /// goes. That is why Tokyo Night is not here (it is [maestria] under another
-/// name), why Catppuccin ships as Mocha and Latte rather than all four
-/// flavours, and why Rosé Pine's dark half gave way to [dracula] and Mocha.
+/// name), why Catppuccin ships as Mocha, Macchiato and Latte rather than all
+/// four flavours — Frappé sits between the two darks and would be the third
+/// telling of the same window — and why Rosé Pine's dark half gave way to [dracula] and Mocha.
 ///
 /// Hue is only half of that spread, though, and the cheaper half. A dozen
 /// darks whose windows all sat between L\* 4 and L\* 22 read as one dark theme
@@ -242,6 +243,43 @@ class MxThemes {
       white: Color(0xFFBAC2DE),
       brightBlack: Color(0xFF585B70),
       brightWhite: Color(0xFFA6ADC8),
+    ),
+  );
+
+  /// Catppuccin Macchiato. Mocha's palette one step up the greyscale, and not
+  /// only that: the whole set is a touch less saturated and a touch bluer, so
+  /// the window reads as slate-violet where Mocha reads as ink. Same role
+  /// mapping as [catppuccinMocha], down to `purple` sitting on pink to keep it
+  /// off the mauve accent.
+  static const catppuccinMacchiato = MxPalette(
+    id: 'catppuccin-macchiato',
+    label: 'Catppuccin Macchiato',
+    dark: true,
+    canvas: Color(0xFF181926),
+    bg: Color(0xFF24273A),
+    bgSidebar: Color(0xFF1E2030),
+    bgHover: Color(0xFF363A4F),
+    bgActive: Color(0xFF494D64),
+    border: Color(0xFF363A4F),
+    fg: Color(0xFFCAD3F5),
+    fgDim: Color(0xFFA5ADCB),
+    fgFaint: Color(0xFF6E738D),
+    accent: Color(0xFFC6A0F6),
+    green: Color(0xFFA6DA95),
+    yellow: Color(0xFFEED49F),
+    red: Color(0xFFED8796),
+    purple: Color(0xFFF5BDE6),
+    ansi: MxAnsi(
+      black: Color(0xFF494D64),
+      red: Color(0xFFED8796),
+      green: Color(0xFFA6DA95),
+      yellow: Color(0xFFEED49F),
+      blue: Color(0xFF8AADF4),
+      magenta: Color(0xFFF5BDE6),
+      cyan: Color(0xFF8BD5CA),
+      white: Color(0xFFB8C0E0),
+      brightBlack: Color(0xFF5B6078),
+      brightWhite: Color(0xFFA5ADCB),
     ),
   );
 
@@ -1028,6 +1066,7 @@ class MxThemes {
     graphite,
     synthwave,
     slate,
+    catppuccinMacchiato,
     monokaiPro,
     nord,
     dracula,
@@ -1043,7 +1082,6 @@ class MxThemes {
   /// comes up in the same window it had, not in the default.
   static const Map<String, MxPalette> _retired = {
     'tokyo-night': maestria,
-    'catppuccin-macchiato': catppuccinMocha,
     'catppuccin-frappe': catppuccinMocha,
     'rose-pine': catppuccinMocha,
     'chatgpt-dark': graphite,

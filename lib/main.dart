@@ -10,7 +10,6 @@ import 'services/store.dart';
 import 'theme.dart';
 import 'ui/icons.dart';
 import 'ui/keys.dart';
-import 'ui/panel.dart';
 import 'ui/panes.dart';
 import 'ui/sidebar.dart';
 
@@ -296,6 +295,40 @@ class _Keys extends StatelessWidget {
   }
 }
 
+/// O x do recado: quadradinho que acende no hover, como o do VS Code.
+class _BannerClose extends StatefulWidget {
+  const _BannerClose({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  State<_BannerClose> createState() => _BannerCloseState();
+}
+
+class _BannerCloseState extends State<_BannerClose> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: _hover ? Mx.bgHover : null,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Icon(Icons.close, size: 14, color: _hover ? Mx.fg : Mx.fgDim),
+        ),
+      ),
+    );
+  }
+}
+
 /// O recado da janela: um cartão no canto de baixo, por [AppStore.bannerLife].
 ///
 /// Encolhe pro tamanho do texto — `mainAxisSize.min` — porque um "caminho
@@ -320,24 +353,38 @@ class _Banner extends StatelessWidget {
           // não aparece do nada em cima do painel.
           child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: child),
         ),
-        child: MxPanel(
-          color: Mx.bgActive,
-          radius: 8,
+        // O cartão das notificações do VS Code: fundo da janela, contorno na
+        // cor de destaque do tema e uma sombra que o descola dos painéis. O
+        // cinza sobre cinza de antes sumia em cima de um terminal escuro.
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Mx.bgSidebar,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Mx.accent.withValues(alpha: 0.7)),
+            boxShadow: [
+              BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6)),
+            ],
+          ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
             child: Row(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline, size: 14, color: Mx.fgDim),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(store.banner!, style: TextStyle(fontSize: 11.5, color: Mx.fgDim)),
+                Padding(
+                  // Alinha o ícone com a primeira linha, não com o meio do bloco.
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(Icons.info_outline, size: 16, color: Mx.accent),
                 ),
                 const SizedBox(width: 10),
-                InkWell(
-                  onTap: store.clearBanner,
-                  child: Icon(Icons.close, size: 13, color: Mx.fgFaint),
+                Flexible(
+                  child: Text(
+                    store.banner!,
+                    style: TextStyle(fontSize: 12.5, height: 1.4, color: Mx.fg),
+                  ),
                 ),
+                const SizedBox(width: 12),
+                _BannerClose(onTap: store.clearBanner),
               ],
             ),
           ),

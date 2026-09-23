@@ -80,12 +80,15 @@ void main() {
 
     test('an id from a retired theme lands on its nearest look-alike', () {
       // A config file from before the cut should come up in the window it
-      // had, not in the default — Tokyo Night was the default's twin, the
-      // other Catppuccin flavours are Mocha, and the renamed grey is itself.
+      // had, not in the default — Tokyo Night was the default's twin, Frappé
+      // is Mocha, and the renamed grey is itself.
       expect(MxThemes.byId('tokyo-night'), MxThemes.maestria);
-      expect(MxThemes.byId('catppuccin-macchiato'), MxThemes.catppuccinMocha);
       expect(MxThemes.byId('catppuccin-frappe'), MxThemes.catppuccinMocha);
       expect(MxThemes.byId('chatgpt-dark'), MxThemes.graphite);
+
+      // Macchiato was one of those aliases and is now a theme of its own, so
+      // the id a config file already holds has to land on the real palette.
+      expect(MxThemes.byId('catppuccin-macchiato'), MxThemes.catppuccinMacchiato);
     });
 
     test('no theme uses the same colour for a search hit and the current one', () {
