@@ -552,6 +552,58 @@ extension ClaudeStatusUi on ClaudeStatus {
   };
 }
 
+/// Por que um painel entrou no sino. Ver [MxNotice].
+enum MxNoticeKind {
+  /// Parou numa `AskUserQuestion` -- [ClaudeStatus.waitingAnswer].
+  question,
+
+  /// Parou pedindo aprovação -- [ClaudeStatus.waitingPermission].
+  permission,
+
+  /// Terminou o turno: a virada pra [ClaudeStatusUi.atRest].
+  finished;
+
+  /// O verbo da linha, depois do nome do painel.
+  String get verb => switch (this) {
+    MxNoticeKind.question => 'te fez uma pergunta',
+    MxNoticeKind.permission => 'quer aprovação',
+    MxNoticeKind.finished => 'terminou o trabalho',
+  };
+
+  /// A cor e o glifo são os da lateral pro mesmo estado: a linha do sino e a
+  /// linha do painel dizem a mesma coisa, então se desenham igual.
+  Color get color => switch (this) {
+    MxNoticeKind.question => Mx.yellow,
+    MxNoticeKind.permission => Mx.red,
+    MxNoticeKind.finished => Mx.green,
+  };
+
+  IconData get icon => switch (this) {
+    MxNoticeKind.question => Icons.question_mark_rounded,
+    MxNoticeKind.permission => Icons.lock_rounded,
+    MxNoticeKind.finished => Icons.check_rounded,
+  };
+}
+
+/// Uma linha do sino: tal painel fez tal coisa, a tal hora.
+///
+/// Guarda o id do painel e não o título, porque o título é o que você chamou
+/// o painel *agora* -- renomear depois do aviso tem que renomear o aviso. O
+/// [title] é só o que sobra pra mostrar quando o painel já foi fechado.
+class MxNotice {
+  MxNotice({required this.tabId, required this.kind, required this.title, DateTime? at})
+    : at = at ?? DateTime.now();
+
+  final String tabId;
+  final MxNoticeKind kind;
+  final String title;
+  final DateTime at;
+
+  /// Você já viu: abriu pelo sino, ou ficou olhando o painel. Ver
+  /// [AppStore.readNoticesOf].
+  bool read = false;
+}
+
 /// Um plano que a sessão escreveu, do jeito que ela escreveu.
 ///
 /// O `ExitPlanMode` carrega o plano inteiro em markdown no `tool_input`, e o

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,11 +7,14 @@ import '../models.dart';
 // --- ditado (vocalização) — fora desta versão --------------------------------
 // Ver o cabeçalho de `services/dictation.dart`.
 // import '../services/dictation.dart';
+import '../services/notify.dart';
+import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../services/usage.dart';
 import '../theme.dart';
 import 'dialogs.dart';
+import 'plugin_dialogs.dart';
 import 'theme_gallery.dart';
 
 /// As quatro metades da tela: como a janela se parece, o que o teclado faz, o
@@ -22,6 +27,7 @@ enum MxSection {
   appearance('aparência', Icons.palette_outlined),
   shortcuts('atalhos', Icons.keyboard_outlined),
   launchers('programas', Icons.rocket_launch_outlined),
+  plugins('plugins', Icons.extension_outlined),
   sessions('sessões', Icons.bedtime_outlined),
   account('conta & uso', Icons.speed_outlined);
   // --- ditado (vocalização) — fora desta versão -------------------------------
@@ -118,6 +124,7 @@ class _SettingsState extends State<_Settings> {
                               MxSection.appearance => _Appearance(store: widget.store),
                               MxSection.shortcuts => _Shortcuts(store: widget.store),
                               MxSection.launchers => _Launchers(store: widget.store),
+                              MxSection.plugins => _Plugins(store: widget.store),
                               MxSection.sessions => _Sessions(store: widget.store),
                               MxSection.account => const _Account(),
                               // --- ditado (vocalização) — fora desta versão ---
@@ -384,7 +391,8 @@ class _Typography extends StatelessWidget {
             Expanded(
               child: _Heading(
                 'tipografia do pty',
-                hint: 'vale pra todo painel. ⌘= e ⌘− mexem em um só, a partir '
+                hint: 'vale pra todo painel. ${MxAction.zoomIn.defaults.first.label} e '
+                    '${MxAction.zoomOut.defaults.first.label} mexem em um só, a partir '
                     'daqui — e o painel lembra o que você deixou.',
               ),
             ),
@@ -1014,12 +1022,22 @@ class _Fixed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final linux = MxChord.linux;
     final fixed = <(String, String)>[
-      ('⌘1 … ⌘9', 'ir pra enésima sessão da lateral'),
-      ('⌘V', 'colar no painel — imagem inclusa, que o claude recebe como ^V'),
-      ('⇧⏎', 'quebrar linha no prompt sem enviar'),
-      ('⌃C', 'do processo, como em qualquer terminal'),
-      ('⌘Q ⌘W ⌘H ⌘M', 'do macOS: sair, fechar, esconder, minimizar'),
+      ('${MxChord.slot(0).label} … ${MxChord.slot(8).label}', 'ir pra enésima sessão da lateral'),
+      (
+        MxChord.paste.take(2).map((c) => c.label).join('  '),
+        'colar no painel — imagem inclusa, que o claude recebe como ^V',
+      ),
+      // No macOS copiar é ⌘C e ninguém precisa ler isso; no Linux o Ctrl+C
+      // é do processo, e a primeira coisa que alguém tenta.
+      if (linux) (MxChord.copy.label, 'copiar a seleção — o Ctrl+C é do processo'),
+      (const MxChord(LogicalKeyboardKey.enter, shift: true).label, 'quebrar linha no prompt sem enviar'),
+      (const MxChord(LogicalKeyboardKey.keyC, control: true).label, 'do processo, como em qualquer terminal'),
+      if (linux)
+        ('Alt+F4', 'do desktop: fechar a janela')
+      else
+        ('⌘Q ⌘W ⌘H ⌘M', 'do macOS: sair, fechar, esconder, minimizar'),
     ];
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -1048,7 +1066,7 @@ class _Fixed extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 96,
+                    width: linux ? 150 : 96,
                     child: Text(
                       keys,
                       style: TextStyle(fontFamily: Mx.mono, fontSize: 11.5, color: Mx.fgDim),
@@ -1200,6 +1218,289 @@ class _LauncherRowState extends State<_LauncherRow> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Os plugins instalados. Ver `services/plugins.dart` e `docs/plugins.md`.
+class _Plugins extends StatelessWidget {
+  const _Plugins({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final plugins = store.plugins;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Heading(
+          'plugins',
+          hint: 'temas, comandos e janelas que vêm de fora, instalados em '
+              '~/.maestria/plugins. Um plugin com programa roda com as suas '
+              'permissões — instale só o que você confia. Como escrever um: '
+              'docs/plugins.md, no repositório da maestria.',
+        ),
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: [
+            TextButton.icon(
+              icon: const Icon(Icons.add, size: 15),
+              label: const Text('instalar…'),
+              onPressed: () => showInstallPlugin(context, store),
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.folder_open_outlined, size: 15),
+              label: const Text('abrir a pasta'),
+              onPressed: () async {
+                await Directory(plugins.root).create(recursive: true);
+                await Notifier.reveal(plugins.root);
+              },
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.refresh, size: 15),
+              label: const Text('reler'),
+              onPressed: () {
+                plugins.scan();
+                plugins.startup();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (plugins.all.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+            decoration: BoxDecoration(
+              color: Mx.bg,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: Mx.border),
+            ),
+            child: Text(
+              'nenhum ainda. Os exemplos do repositório (examples/plugins) são um '
+              'bom começo: um tema com atalhos, e um plugin completo em node com '
+              'comandos, hooks e uma janela.',
+              style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.5),
+            ),
+          ),
+        for (final plugin in plugins.all) _PluginRow(store: store, plugin: plugin),
+        // Fora da fileira de cima de propósito: é coisa de quem escreve plugin,
+        // não de quem usa. Fica à vista pra quem procura, sem competir com
+        // "instalar…".
+        const SizedBox(height: 4),
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            foregroundColor: Mx.fgFaint,
+            textStyle: const TextStyle(fontSize: 11.5),
+          ),
+          icon: const Icon(Icons.code, size: 13),
+          label: const Text('escrevendo um plugin? carregar pasta de desenvolvimento…'),
+          onPressed: () => linkDevPlugin(store),
+        ),
+      ],
+    );
+  }
+}
+
+class _PluginRow extends StatefulWidget {
+  const _PluginRow({required this.store, required this.plugin});
+
+  final AppStore store;
+  final MxPlugin plugin;
+
+  @override
+  State<_PluginRow> createState() => _PluginRowState();
+}
+
+class _PluginRowState extends State<_PluginRow> {
+  /// Fechado, a descrição fica em duas linhas e comandos e temas em uma cada,
+  /// pra que os cartões tenham mais ou menos a mesma altura. Erros e teclas em
+  /// conflito nunca são cortados: são o que a pessoa precisa ler.
+  bool _open = false;
+
+  AppStore get store => widget.store;
+  MxPlugin get plugin => widget.plugin;
+
+  /// Descrição, comandos e temas, com o "ver mais" só quando algo não coube.
+  Widget _details(PluginManifest m, TextStyle line) {
+    final parts = [
+      if (m.description.isNotEmpty) (m.description, 2),
+      if (m.commands.isNotEmpty)
+        (
+          'comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} ${c.key!.label}').join(' · ')}',
+          1,
+        ),
+      if (plugin.palettes.isNotEmpty)
+        ('temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 1),
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(
+      builder: (context, box) {
+        final cut = parts.any((p) {
+          final painter = TextPainter(
+            text: TextSpan(text: p.$1, style: line),
+            maxLines: p.$2,
+            textDirection: TextDirection.ltr,
+            textScaler: MediaQuery.textScalerOf(context),
+          )..layout(maxWidth: box.maxWidth);
+          final over = painter.didExceedMaxLines;
+          painter.dispose();
+          return over;
+        });
+        final shut = cut && !_open;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (text, lines) in parts)
+              Text(
+                text,
+                style: line,
+                maxLines: shut ? lines : null,
+                overflow: shut ? TextOverflow.ellipsis : null,
+              ),
+            if (cut)
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => setState(() => _open = !_open),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      _open ? 'ver menos' : 'ver mais',
+                      style: line.copyWith(color: Mx.purple),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Color get _tone => switch (plugin.state) {
+    PluginState.running => Mx.green,
+    PluginState.crashed || PluginState.invalid => Mx.red,
+    PluginState.starting => Mx.yellow,
+    PluginState.disabled => Mx.fgFaint,
+    PluginState.idle => Mx.fgDim,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final m = plugin.manifest;
+    final state = plugin.state;
+    // As teclas pedidas que o app já usa: ficam sem efeito, e aqui é o único
+    // lugar em que isso é dito. Ver [MxKeys.bindings].
+    final clashes = [
+      for (final c in m?.commands ?? const <PluginCommand>[])
+        if (c.key case final k? when store.keymap.owner(k) != null)
+          '${k.label} já é "${store.keymap.owner(k)!.label}" — "${c.title}" fica sem tecla',
+    ];
+    final line = TextStyle(fontSize: 11.5, color: Mx.fgDim, height: 1.4);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Mx.bg,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: Mx.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(Icons.extension_outlined, size: 17, color: _tone),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      plugin.name,
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+                    ),
+                    if (m != null)
+                      Text(
+                        m.version,
+                        style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                      ),
+                    Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
+                    if (plugin.linked)
+                      Text('desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                if (plugin.problem case final why?)
+                  Text(why, style: line.copyWith(color: Mx.red))
+                else
+                  _details(m!, line),
+                if (plugin.crash case final why? when state == PluginState.crashed)
+                  Text(why, style: line.copyWith(color: Mx.red)),
+                for (final c in clashes) Text(c, style: line.copyWith(color: Mx.yellow)),
+              ],
+            ),
+          ),
+          if (m != null && m.hasProcess && plugin.enabled)
+            IconButton(
+              tooltip: 'reiniciar — relê a pasta e sobe o processo de novo',
+              iconSize: 15,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              onPressed: () => store.plugins.restart(plugin),
+              icon: Icon(Icons.restart_alt, color: Mx.fgDim),
+            ),
+          if (m != null && m.settings.isNotEmpty)
+            IconButton(
+              tooltip: 'configurar',
+              iconSize: 15,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              onPressed: () => showPluginSettings(context, store, plugin),
+              icon: Icon(Icons.tune, color: Mx.fgDim),
+            ),
+          IconButton(
+            tooltip: 'log',
+            iconSize: 15,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: () => showPluginLog(context, store, plugin),
+            icon: Icon(Icons.receipt_long_outlined, color: Mx.fgDim),
+          ),
+          IconButton(
+            tooltip: 'mostrar no Finder',
+            iconSize: 15,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: () => Notifier.reveal(plugin.dir),
+            icon: Icon(Icons.folder_open_outlined, color: Mx.fgDim),
+          ),
+          IconButton(
+            tooltip: 'remover',
+            iconSize: 15,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: () => confirmUninstallPlugin(context, store, plugin),
+            icon: Icon(Icons.delete_outline, color: Mx.fgDim),
+          ),
+          if (m != null)
+            Transform.scale(
+              scale: 0.75,
+              child: Switch(
+                value: plugin.enabled,
+                onChanged: (on) => store.setPluginEnabled(plugin, on),
+              ),
+            ),
+        ],
       ),
     );
   }

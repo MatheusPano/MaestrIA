@@ -16,8 +16,12 @@ import 'shell.dart';
 class Editor {
   static const app = 'Visual Studio Code';
 
-  static Future<bool> open(String path) async {
-    final r = await Sh.run('code ${Sh.q(path)}');
+  /// [line] abre o arquivo já naquela linha (`code -g`) -- é o que um plugin
+  /// de depuração quer quando mostra onde o app parou.
+  static Future<bool> open(String path, {int? line}) async {
+    final r = await Sh.run(
+      line == null ? 'code ${Sh.q(path)}' : 'code -g ${Sh.q('$path:$line')}',
+    );
     if (r.ok) return true;
     if (Platform.isLinux) {
       final insiders = await Sh.run('code-insiders ${Sh.q(path)}');

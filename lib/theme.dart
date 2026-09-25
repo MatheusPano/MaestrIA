@@ -7,6 +7,16 @@ import 'package:xterm/xterm.dart';
 /// The bright half is optional: several palettes (the Catppuccin family, most
 /// notably) publish one set and let bright fall back onto it, and spelling
 /// sixteen literals out to say eight of them twice helps nobody.
+/// `#RRGGBB` ou `#AARRGGBB`, como um arquivo de tema escreve uma cor. Null no
+/// que não for isso -- quem chama é quem sabe dizer de qual campo se tratava.
+Color? parseHexColor(String raw) {
+  final hex = raw.trim().replaceFirst('#', '');
+  if (hex.length != 6 && hex.length != 8) return null;
+  final value = int.tryParse(hex, radix: 16);
+  if (value == null) return null;
+  return Color(hex.length == 6 ? 0xFF000000 | value : value);
+}
+
 @immutable
 class MxAnsi {
   const MxAnsi({
@@ -111,6 +121,70 @@ class MxPalette {
 
   final MxAnsi ansi;
 
+  /// Uma paleta escrita em json — é como um plugin entrega um tema.
+  ///
+  /// As cores vão como `#RRGGBB` ou `#AARRGGBB`. Nenhuma é opcional fora dos
+  /// oito `bright*` do `ansi`, que caem na cor normal como nas embutidas: um
+  /// tema pela metade pintaria metade da janela com a paleta anterior. O que
+  /// faltar ou não for cor vira um [FormatException] que diz qual campo foi,
+  /// porque quem lê o erro é quem escreveu o arquivo.
+  factory MxPalette.fromJson(Map<String, dynamic> j) {
+    Color color(Map<String, dynamic> from, String key, {String prefix = ''}) {
+      final raw = from[key];
+      final parsed = raw is String ? parseHexColor(raw) : null;
+      if (parsed == null) throw FormatException('"$prefix$key" precisa ser uma cor #RRGGBB');
+      return parsed;
+    }
+
+    Color? maybe(Map<String, dynamic> from, String key) =>
+        from[key] is String ? parseHexColor(from[key] as String) : null;
+
+    final id = j['id'];
+    final label = j['label'];
+    if (id is! String || id.isEmpty) throw const FormatException('"id" é obrigatório');
+    if (label is! String || label.isEmpty) throw const FormatException('"label" é obrigatório');
+    final ansi = j['ansi'];
+    if (ansi is! Map<String, dynamic>) throw const FormatException('"ansi" é obrigatório');
+    const a = 'ansi.';
+    return MxPalette(
+      id: id,
+      label: label,
+      dark: j['dark'] != false,
+      canvas: color(j, 'canvas'),
+      bg: color(j, 'bg'),
+      bgSidebar: color(j, 'bgSidebar'),
+      bgHover: color(j, 'bgHover'),
+      bgActive: color(j, 'bgActive'),
+      border: color(j, 'border'),
+      fg: color(j, 'fg'),
+      fgDim: color(j, 'fgDim'),
+      fgFaint: color(j, 'fgFaint'),
+      accent: color(j, 'accent'),
+      green: color(j, 'green'),
+      yellow: color(j, 'yellow'),
+      red: color(j, 'red'),
+      purple: color(j, 'purple'),
+      ansi: MxAnsi(
+        black: color(ansi, 'black', prefix: a),
+        red: color(ansi, 'red', prefix: a),
+        green: color(ansi, 'green', prefix: a),
+        yellow: color(ansi, 'yellow', prefix: a),
+        blue: color(ansi, 'blue', prefix: a),
+        magenta: color(ansi, 'magenta', prefix: a),
+        cyan: color(ansi, 'cyan', prefix: a),
+        white: color(ansi, 'white', prefix: a),
+        brightBlack: maybe(ansi, 'brightBlack'),
+        brightRed: maybe(ansi, 'brightRed'),
+        brightGreen: maybe(ansi, 'brightGreen'),
+        brightYellow: maybe(ansi, 'brightYellow'),
+        brightBlue: maybe(ansi, 'brightBlue'),
+        brightMagenta: maybe(ansi, 'brightMagenta'),
+        brightCyan: maybe(ansi, 'brightCyan'),
+        brightWhite: maybe(ansi, 'brightWhite'),
+      ),
+    );
+  }
+
   /// A light theme lit from the same angle would look bruised: the drop shadow
   /// under a panel has to be a hint there, not the slab that works on black.
   Color get shadow => dark ? const Color(0x59000000) : const Color(0x14101828);
@@ -152,14 +226,17 @@ class MxPalette {
 ///
 /// What the set is chosen for is spread. A picker of eleven near-blacks all lit
 /// blue offers eleven ways to look the same, so each theme here holds a corner
-/// nothing else does: ink, sand-on-ink, greige, forest, brown, teal, mauve,
-/// warm neon, steel, neon purple, hot pink, cobalt, navy, black — then four lights
+/// nothing else does: ink, sand-on-ink, greige, forest, brown, teal,
+/// warm neon, steel, neon purple, hot pink, cobalt, navy, black — then three lights
 /// that are as far apart, paper white through cream. Two palettes that differ
 /// only in how far up the greyscale they sit are one palette; the second one
 /// goes. That is why Tokyo Night is not here (it is [maestria] under another
-/// name), why Catppuccin ships as Mocha, Macchiato and Latte rather than all
-/// four flavours — Frappé sits between the two darks and would be the third
-/// telling of the same window — and why Rosé Pine's dark half gave way to [dracula] and Mocha.
+/// name), and why Rosé Pine's dark half gave way to [dracula].
+///
+/// Catppuccin is not here either, though for another reason: it moved out to
+/// the `maestria.catppuccin` plugin (in `maestria-plugins`), under the same
+/// ids it had here, so a config file that picked it opens in it again as soon
+/// as the plugin is installed.
 ///
 /// Hue is only half of that spread, though, and the cheaper half. A dozen
 /// darks whose windows all sat between L\* 4 and L\* 22 read as one dark theme
@@ -205,114 +282,6 @@ class MxThemes {
       brightMagenta: Color(0xFFCDB2FF),
       brightCyan: Color(0xFF96DBFF),
       brightWhite: Color(0xFFFFFFFF),
-    ),
-  );
-
-  /// Catppuccin Mocha. The published palette, with the accent on mauve — the
-  /// default every Catppuccin port ships (VS Code, GTK, the userstyles) and
-  /// the colour people picture when they picture the theme. On the blue it
-  /// was a near-twin of [maestria]: same ink window, same accent, and nothing
-  /// left to tell you which one you had picked. `purple` moves to pink so the
-  /// project glyphs still read apart from the accent.
-  static const catppuccinMocha = MxPalette(
-    id: 'catppuccin-mocha',
-    label: 'Catppuccin Mocha',
-    dark: true,
-    canvas: Color(0xFF11111B),
-    bg: Color(0xFF1E1E2E),
-    bgSidebar: Color(0xFF181825),
-    bgHover: Color(0xFF313244),
-    bgActive: Color(0xFF45475A),
-    border: Color(0xFF313244),
-    fg: Color(0xFFCDD6F4),
-    fgDim: Color(0xFFA6ADC8),
-    fgFaint: Color(0xFF6C7086),
-    accent: Color(0xFFCBA6F7),
-    green: Color(0xFFA6E3A1),
-    yellow: Color(0xFFF9E2AF),
-    red: Color(0xFFF38BA8),
-    purple: Color(0xFFF5C2E7),
-    ansi: MxAnsi(
-      black: Color(0xFF45475A),
-      red: Color(0xFFF38BA8),
-      green: Color(0xFFA6E3A1),
-      yellow: Color(0xFFF9E2AF),
-      blue: Color(0xFF89B4FA),
-      magenta: Color(0xFFF5C2E7),
-      cyan: Color(0xFF94E2D5),
-      white: Color(0xFFBAC2DE),
-      brightBlack: Color(0xFF585B70),
-      brightWhite: Color(0xFFA6ADC8),
-    ),
-  );
-
-  /// Catppuccin Macchiato. Mocha's palette one step up the greyscale, and not
-  /// only that: the whole set is a touch less saturated and a touch bluer, so
-  /// the window reads as slate-violet where Mocha reads as ink. Same role
-  /// mapping as [catppuccinMocha], down to `purple` sitting on pink to keep it
-  /// off the mauve accent.
-  static const catppuccinMacchiato = MxPalette(
-    id: 'catppuccin-macchiato',
-    label: 'Catppuccin Macchiato',
-    dark: true,
-    canvas: Color(0xFF181926),
-    bg: Color(0xFF24273A),
-    bgSidebar: Color(0xFF1E2030),
-    bgHover: Color(0xFF363A4F),
-    bgActive: Color(0xFF494D64),
-    border: Color(0xFF363A4F),
-    fg: Color(0xFFCAD3F5),
-    fgDim: Color(0xFFA5ADCB),
-    fgFaint: Color(0xFF6E738D),
-    accent: Color(0xFFC6A0F6),
-    green: Color(0xFFA6DA95),
-    yellow: Color(0xFFEED49F),
-    red: Color(0xFFED8796),
-    purple: Color(0xFFF5BDE6),
-    ansi: MxAnsi(
-      black: Color(0xFF494D64),
-      red: Color(0xFFED8796),
-      green: Color(0xFFA6DA95),
-      yellow: Color(0xFFEED49F),
-      blue: Color(0xFF8AADF4),
-      magenta: Color(0xFFF5BDE6),
-      cyan: Color(0xFF8BD5CA),
-      white: Color(0xFFB8C0E0),
-      brightBlack: Color(0xFF5B6078),
-      brightWhite: Color(0xFFA5ADCB),
-    ),
-  );
-
-  /// Catppuccin Latte. Same mapping as [catppuccinMocha], on the light side.
-  static const catppuccinLatte = MxPalette(
-    id: 'catppuccin-latte',
-    label: 'Catppuccin Latte',
-    dark: false,
-    canvas: Color(0xFFDCE0E8),
-    bg: Color(0xFFEFF1F5),
-    bgSidebar: Color(0xFFE6E9EF),
-    bgHover: Color(0xFFCCD0DA),
-    bgActive: Color(0xFFBCC0CC),
-    border: Color(0xFFCCD0DA),
-    fg: Color(0xFF4C4F69),
-    fgDim: Color(0xFF6C6F85),
-    fgFaint: Color(0xFF9CA0B0),
-    accent: Color(0xFF8839EF),
-    green: Color(0xFF40A02B),
-    yellow: Color(0xFFDF8E1D),
-    red: Color(0xFFD20F39),
-    purple: Color(0xFFEA76CB),
-    ansi: MxAnsi(
-      black: Color(0xFF5C5F77),
-      red: Color(0xFFD20F39),
-      green: Color(0xFF40A02B),
-      yellow: Color(0xFFDF8E1D),
-      blue: Color(0xFF1E66F5),
-      magenta: Color(0xFFEA76CB),
-      cyan: Color(0xFF179299),
-      white: Color(0xFFACB0BE),
-      brightBlack: Color(0xFF6C6F85),
-      brightWhite: Color(0xFFBCC0CC),
     ),
   );
 
@@ -663,7 +632,7 @@ class MxThemes {
   ///
   /// Gruvbox's published light mapping swaps `black` and `white` so that ansi
   /// black paints the background — the same trade [solarizedDark] refuses, and
-  /// refused here too: black stays a dark, as it does in [catppuccinLatte].
+  /// refused here too: black stays a dark, as it does in Catppuccin Latte.
   static const gruvboxLight = MxPalette(
     id: 'gruvbox-light',
     label: 'Gruvbox Light',
@@ -1061,36 +1030,53 @@ class MxThemes {
     highContrast,
     nightOwl,
     gruvbox,
-    catppuccinMocha,
     solarizedDark,
     graphite,
     synthwave,
     slate,
-    catppuccinMacchiato,
     monokaiPro,
     nord,
     dracula,
     zenburn,
     githubLight,
-    catppuccinLatte,
     rosePineDawn,
     gruvboxLight,
   ];
 
   /// Ids that earlier builds wrote and this one no longer ships, each sent to
-  /// the theme it most looked like — so a config file from before the cut
-  /// comes up in the same window it had, not in the default.
-  static const Map<String, MxPalette> _retired = {
-    'tokyo-night': maestria,
-    'catppuccin-frappe': catppuccinMocha,
-    'rose-pine': catppuccinMocha,
-    'chatgpt-dark': graphite,
+  /// the id of the theme it most looked like — so a config file from before
+  /// the cut comes up in the same window it had, not in the default.
+  ///
+  /// Ids, not palettes: Frappé and Rosé Pine went to Mocha, and Mocha is now a
+  /// plugin's theme. Without the plugin they land on the default like any
+  /// other id nobody knows.
+  static const Map<String, String> _retired = {
+    'tokyo-night': 'maestria',
+    'catppuccin-frappe': 'catppuccin-mocha',
+    'rose-pine': 'catppuccin-mocha',
+    'chatgpt-dark': 'graphite',
   };
+
+  /// Os temas que vieram de plugins. Ver `services/plugins.dart`.
+  ///
+  /// Fora de [all] de propósito: [all] é o conjunto curado, com as regras de
+  /// espaçamento que o comentário da classe descreve, e um tema de plugin não
+  /// passou por nenhuma delas. A galeria os desenha depois, num bloco próprio.
+  /// Quem mexe nesta lista é só o [Plugins], que a remonta inteira a cada
+  /// carga -- ligar, desligar ou remover um plugin tira os temas dele daqui.
+  static final List<MxPalette> extra = [];
 
   /// An id from a config file written by a newer build — or by a hand — is not
   /// a reason to fail to start: fall back to the default.
-  static MxPalette byId(String? id) =>
-      all.where((p) => p.id == id).firstOrNull ?? _retired[id] ?? maestria;
+  static MxPalette byId(String? id) => _find(id) ?? _find(_retired[id]) ?? maestria;
+
+  static MxPalette? _find(String? id) =>
+      all.where((p) => p.id == id).firstOrNull ?? extra.where((p) => p.id == id).firstOrNull;
+
+  /// Se [id] já é de um tema embutido — ou de um que foi aposentado e ainda
+  /// responde por ele. Um plugin não pode tomar esse nome: o config de quem
+  /// escolheu o embutido passaria a abrir no tema do plugin.
+  static bool isBuiltIn(String id) => all.any((p) => p.id == id) || _retired.containsKey(id);
 }
 
 /// Uma face monoespaçada que a tela de configurações oferece.

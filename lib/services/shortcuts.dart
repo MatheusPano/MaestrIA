@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 // Pelo [SingleActivator], que mora nos widgets — é o único pedaço de Flutter
@@ -20,6 +22,15 @@ class MxChord {
     this.shift = false,
   });
 
+  /// Se o teclado é o do Linux, e não o do macOS.
+  ///
+  /// Muda os padrões e a escrita, não o modelo: um atalho continua sendo a
+  /// tecla e quatro modificadores. O que muda é que lá o ⌘ vira Super, que o
+  /// desktop pega pra si (Super+1…9 abre os apps da dock no Ubuntu), e o que
+  /// um terminal usa no lugar dele é Ctrl+Shift. Variável e não `final` pros
+  /// testes poderem ver a tela dos dois lados sem trocar de máquina.
+  static bool linux = Platform.isLinux;
+
   final LogicalKeyboardKey key;
   final bool meta;
   final bool control;
@@ -34,9 +45,54 @@ class MxChord {
 
   bool accepts(KeyEvent event) => activator.accepts(event, HardwareKeyboard.instance);
 
-  /// Como se escreve na tela, na ordem em que o macOS escreve: ⌃⌥⇧⌘.
-  String get label =>
-      '${control ? '⌃' : ''}${alt ? '⌥' : ''}${shift ? '⇧' : ''}${meta ? '⌘' : ''}$_glyph';
+  /// Como se escreve na tela: na ordem e com os glifos do macOS (⌃⌥⇧⌘), ou
+  /// por extenso no Linux (Ctrl+Shift+T), onde ninguém conhece os glifos.
+  String get label => linux
+      ? [
+          if (control) 'Ctrl',
+          if (shift) 'Shift',
+          if (alt) 'Alt',
+          if (meta) 'Super',
+          _linuxGlyphs[key] ?? _glyph,
+        ].join('+')
+      : '${control ? '⌃' : ''}${alt ? '⌥' : ''}${shift ? '⇧' : ''}${meta ? '⌘' : ''}$_glyph';
+
+  /// Esta combinação traduzida pro teclado da máquina.
+  ///
+  /// Pros atalhos que vêm escritos por outra pessoa — o manifesto de um
+  /// plugin diz `meta+alt+g` pensando no ⌘. No Linux o ⌘ vira Ctrl+Shift, o
+  /// mesmo lugar em que os padrões do app moram lá.
+  MxChord get forHost => linux && meta
+      ? MxChord(key, control: true, shift: true, alt: alt)
+      : this;
+
+  /// A tecla da enésima sessão da lateral, contada de zero: ⌘1 no macOS,
+  /// Alt+1 no Linux — que é onde o gnome-terminal põe as abas, e porque lá o
+  /// Super+1 é da dock.
+  static MxChord slot(int index) =>
+      MxChord(LogicalKeyboardKey(0x31 + index), meta: !linux, alt: linux);
+
+  /// Copiar a seleção do painel. No Linux o Ctrl+C é do processo, então é
+  /// Ctrl+Shift+C, como em todo terminal de lá.
+  static MxChord get copy => linux
+      ? const MxChord(LogicalKeyboardKey.keyC, control: true, shift: true)
+      : const MxChord(LogicalKeyboardKey.keyC, meta: true);
+
+  /// Colar no painel, com a imagem inclusa. A primeira é a que os menus
+  /// ensinam.
+  ///
+  /// No Linux são três porque cada mão chega de um lugar: Ctrl+Shift+V é o de
+  /// terminal, Shift+Insert o do X, e Ctrl+V o de todo o resto do desktop —
+  /// este último não fica com o pty porque o ^V que ele mandaria (o "inserir
+  /// literal" do readline) é justamente o que o claude lê como "cole a
+  /// imagem", e [TermSession.pasteClipboard] já manda ^V quando não há texto.
+  static List<MxChord> get paste => linux
+      ? const [
+          MxChord(LogicalKeyboardKey.keyV, control: true, shift: true),
+          MxChord(LogicalKeyboardKey.keyV, control: true),
+          MxChord(LogicalKeyboardKey.insert, shift: true),
+        ]
+      : const [MxChord(LogicalKeyboardKey.keyV, meta: true)];
 
   /// Como se escreve no disco: `meta+shift+t`, `ctrl+tab`, `meta+alt+right`.
   ///
@@ -59,10 +115,15 @@ class MxChord {
     if (!_known) return 'essa tecla não dá pra usar num atalho';
     if (reserved[this] case final why?) return why;
     if (!meta && !control && !alt && !_isFunction) {
-      return 'precisa de ⌘, ⌃ ou ⌥ — sem modificador a tecla sumiria do terminal';
+      return linux
+          ? 'precisa de Ctrl ou Alt — sem modificador a tecla sumiria do terminal'
+          : 'precisa de ⌘, ⌃ ou ⌥ — sem modificador a tecla sumiria do terminal';
     }
-    if (control && !meta && !alt && _printable) {
-      return 'o terminal manda ⌃$_glyph pro processo como código de controle';
+    // Só as letras: é delas que o xterm faz ^A…^Z, e só sem o shift — Ctrl+=
+    // ou Ctrl+Shift+T não mandam nada pro pty, e no Linux é ali que moram os
+    // atalhos de qualquer terminal.
+    if (control && !shift && !meta && !alt && _isLetter) {
+      return 'o terminal manda $label pro processo como código de controle';
     }
     return null;
   }
@@ -110,7 +171,9 @@ class MxChord {
   /// O AppKit resolve os equivalentes de menu contra a responder chain antes
   /// de oferecer a tecla a qualquer view (foi o que engoliu o ⌘V até o menu
   /// Editar sair do MainMenu.xib), e o ⌘V daqui é do painel.
-  static final Map<MxChord, String> reserved = {
+  static Map<MxChord, String> get reserved => linux ? _linuxReserved : _macReserved;
+
+  static final Map<MxChord, String> _macReserved = {
     const MxChord(LogicalKeyboardKey.keyQ, meta: true): 'o macOS encerra o app com ⌘Q',
     const MxChord(LogicalKeyboardKey.keyW, meta: true): 'o macOS fecha a janela com ⌘W',
     const MxChord(LogicalKeyboardKey.keyH, meta: true): 'o macOS esconde o app com ⌘H',
@@ -121,6 +184,33 @@ class MxChord {
         'o macOS usa ⌥⌘H pra esconder os outros apps',
     const MxChord(LogicalKeyboardKey.keyV, meta: true): 'o painel cola com ⌘V',
     const MxChord(LogicalKeyboardKey.keyC, meta: true): 'o painel copia a seleção com ⌘C',
+  };
+
+  /// O mesmo no Linux, onde quem engole a tecla é o desktop (GNOME e
+  /// parecidos) e o IBus, que intercepta antes de a janela ver.
+  static final Map<MxChord, String> _linuxReserved = {
+    const MxChord(LogicalKeyboardKey.keyC, control: true, shift: true):
+        'o painel copia a seleção com Ctrl+Shift+C',
+    const MxChord(LogicalKeyboardKey.keyV, control: true, shift: true):
+        'o painel cola com Ctrl+Shift+V',
+    const MxChord(LogicalKeyboardKey.keyE, control: true, shift: true):
+        'o IBus abre o seletor de emoji com Ctrl+Shift+E',
+    const MxChord(LogicalKeyboardKey.keyU, control: true, shift: true):
+        'o IBus usa Ctrl+Shift+U pra digitar um caractere pelo código',
+    const MxChord(LogicalKeyboardKey.keyT, control: true, alt: true):
+        'o desktop abre um terminal com Ctrl+Alt+T',
+    const MxChord(LogicalKeyboardKey.delete, control: true, alt: true):
+        'o desktop usa Ctrl+Alt+Del',
+    for (final arrow in [
+      LogicalKeyboardKey.arrowLeft,
+      LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.arrowUp,
+      LogicalKeyboardKey.arrowDown,
+    ])
+      MxChord(arrow, control: true, alt: true):
+          'o desktop troca de área de trabalho com Ctrl+Alt+setas',
+    const MxChord(LogicalKeyboardKey.f4, alt: true): 'o desktop fecha a janela com Alt+F4',
+    const MxChord(LogicalKeyboardKey.tab, alt: true): 'o desktop alterna as janelas com Alt+Tab',
   };
 
   @override
@@ -141,6 +231,7 @@ class MxChord {
   bool get _known => _names.containsKey(key) || _printable;
   bool get _printable => key.keyLabel.length == 1;
   bool get _isFunction => _functions.contains(key);
+  bool get _isLetter => key.keyId >= 0x61 && key.keyId <= 0x7a;
   String get _name => _names[key] ?? key.keyLabel.toLowerCase();
   String get _glyph => _glyphs[key] ?? key.keyLabel.toUpperCase();
 
@@ -181,6 +272,23 @@ class MxChord {
     LogicalKeyboardKey.f10: 'f10',
     LogicalKeyboardKey.f11: 'f11',
     LogicalKeyboardKey.f12: 'f12',
+    // Por nome e não pelo caractere: o `+` é o separador do id.
+    LogicalKeyboardKey.add: 'plus',
+  };
+
+  /// Os glifos que o Linux escreve por extenso. As setas continuam setas.
+  static final Map<LogicalKeyboardKey, String> _linuxGlyphs = {
+    LogicalKeyboardKey.tab: 'Tab',
+    LogicalKeyboardKey.enter: 'Enter',
+    LogicalKeyboardKey.space: 'Space',
+    LogicalKeyboardKey.backspace: 'Backspace',
+    LogicalKeyboardKey.delete: 'Del',
+    LogicalKeyboardKey.escape: 'Esc',
+    LogicalKeyboardKey.home: 'Home',
+    LogicalKeyboardKey.end: 'End',
+    LogicalKeyboardKey.pageUp: 'PgUp',
+    LogicalKeyboardKey.pageDown: 'PgDn',
+    LogicalKeyboardKey.insert: 'Insert',
   };
 
   static final Map<LogicalKeyboardKey, String> _glyphs = {
@@ -269,6 +377,9 @@ enum MxAction {
     hint: 'na pasta e no projeto do painel em foco',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyT, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyT, control: true, shift: true),
+    ],
   ),
   newShell(
     id: 'shell',
@@ -276,6 +387,9 @@ enum MxAction {
     hint: 'um terminal comum, no mesmo lugar',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyT, meta: true, shift: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.enter, control: true, shift: true),
+    ],
   ),
   newTask(
     id: 'task',
@@ -283,6 +397,9 @@ enum MxAction {
     hint: 'abre a worktree e sobe uma sessão nela',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyN, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyN, control: true, shift: true),
+    ],
   ),
   renamePane(
     id: 'rename',
@@ -290,12 +407,28 @@ enum MxAction {
     hint: 'o título dele; em branco, volta a ser o da branch ou da pasta',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyE, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.f2),
+    ],
+  ),
+  pinPane(
+    id: 'pin',
+    label: 'prender o painel em foco',
+    hint: 'a lateral para de trocá-lo; de novo, solta',
+    group: MxGroup.sessions,
+    defaults: [MxChord(LogicalKeyboardKey.keyP, meta: true, alt: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyP, control: true, alt: true),
+    ],
   ),
   closePane(
     id: 'close',
     label: 'fechar o painel em foco',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.backspace, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyW, control: true, shift: true),
+    ],
   ),
   closeSettled(
     id: 'close-settled',
@@ -303,6 +436,9 @@ enum MxAction {
     hint: 'as que já foram marcadas como prontas',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyK, meta: true, shift: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyK, control: true, shift: true),
+    ],
   ),
   nextPane(
     id: 'next-pane',
@@ -313,6 +449,10 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.tab, control: true),
       MxChord(LogicalKeyboardKey.arrowDown, meta: true, alt: true),
     ],
+    linux: [
+      MxChord(LogicalKeyboardKey.tab, control: true),
+      MxChord(LogicalKeyboardKey.pageDown, control: true),
+    ],
   ),
   prevPane(
     id: 'prev-pane',
@@ -322,6 +462,10 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.tab, control: true, shift: true),
       MxChord(LogicalKeyboardKey.arrowUp, meta: true, alt: true),
     ],
+    linux: [
+      MxChord(LogicalKeyboardKey.tab, control: true, shift: true),
+      MxChord(LogicalKeyboardKey.pageUp, control: true),
+    ],
   ),
   nextSession(
     id: 'next-session',
@@ -329,12 +473,18 @@ enum MxAction {
     hint: 'percorre a lateral inteira, painel aberto ou não',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.arrowRight, meta: true, alt: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.arrowRight, control: true, shift: true),
+    ],
   ),
   prevSession(
     id: 'prev-session',
     label: 'sessão anterior',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.arrowLeft, meta: true, alt: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.arrowLeft, control: true, shift: true),
+    ],
   ),
   search(
     id: 'search',
@@ -342,6 +492,9 @@ enum MxAction {
     hint: 'foca o campo de busca; Esc limpa e devolve o teclado',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyF, control: true, shift: true),
+    ],
   ),
   openMarkdown(
     id: 'markdown',
@@ -349,6 +502,9 @@ enum MxAction {
     hint: 'escolhe um arquivo e o desenha num painel de leitura',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyO, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyO, control: true, shift: true),
+    ],
   ),
   // --- ditado (vocalização) — fora desta versão ------------------------------
   // Ver o cabeçalho de `services/dictation.dart`.
@@ -367,6 +523,9 @@ enum MxAction {
     hint: 'abre o último plano num painel de leitura, ao lado dela',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyL, meta: true, shift: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyL, control: true, shift: true),
+    ],
   ),
   refreshGit(
     id: 'refresh',
@@ -374,13 +533,9 @@ enum MxAction {
     hint: 'worktrees e branches, sem esperar os dez segundos',
     group: MxGroup.window,
     defaults: [MxChord(LogicalKeyboardKey.keyR, meta: true)],
-  ),
-  dailyReport(
-    id: 'report',
-    label: 'relatório do dia',
-    hint: 'reúne o dia e pede a prosa ao claude, num painel de leitura',
-    group: MxGroup.window,
-    defaults: [MxChord(LogicalKeyboardKey.keyR, meta: true, shift: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyR, control: true, shift: true),
+    ],
   ),
   zoomIn(
     id: 'zoom-in',
@@ -394,19 +549,32 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.equal, meta: true),
       MxChord(LogicalKeyboardKey.equal, meta: true, shift: true),
     ],
+    // O mesmo par do macOS, e mais o `+` que o GTK entrega quando o shift
+    // desce — lá a tecla lógica é o que ela escreve, e ⇧= escreve +.
+    linux: [
+      MxChord(LogicalKeyboardKey.equal, control: true),
+      MxChord(LogicalKeyboardKey.equal, control: true, shift: true),
+      MxChord(LogicalKeyboardKey.add, control: true, shift: true),
+    ],
   ),
   zoomOut(
     id: 'zoom-out',
     label: 'diminuir o corpo do painel',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.minus, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.minus, control: true),
+    ],
   ),
   zoomReset(
     id: 'zoom-reset',
     label: 'voltar o painel ao corpo base',
-    hint: '⌘0 fica livre: ⌘1 a ⌘9 são as nove sessões da lateral',
+    hint: 'o 0 fica livre: do 1 ao 9 são as nove sessões da lateral',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.digit0, meta: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.digit0, control: true),
+    ],
   ),
   toggleSidebar(
     id: 'sidebar',
@@ -414,6 +582,9 @@ enum MxAction {
     hint: 'a aba na borda esquerda a traz de volta, e esta tecla também',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.keyS, meta: true, alt: true)],
+    linux: [
+      MxChord(LogicalKeyboardKey.keyB, control: true, shift: true),
+    ],
   ),
   settings(
     id: 'settings',
@@ -424,15 +595,21 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.comma, meta: true),
       MxChord(LogicalKeyboardKey.keyP, meta: true, shift: true),
     ],
+    linux: [
+      MxChord(LogicalKeyboardKey.comma, control: true),
+      MxChord(LogicalKeyboardKey.keyP, control: true, shift: true),
+    ],
   );
 
   const MxAction({
     required this.id,
     required this.label,
     required this.group,
-    required this.defaults,
+    required List<MxChord> defaults,
+    List<MxChord>? linux,
     this.hint,
-  });
+  }) : _mac = defaults,
+       _linux = linux;
 
   /// A chave no config. Não é o `name` de propósito: renomear a constante é
   /// refactor, e um refactor não pode apagar os atalhos de ninguém.
@@ -440,7 +617,15 @@ enum MxAction {
   final String label;
   final String? hint;
   final MxGroup group;
-  final List<MxChord> defaults;
+  final List<MxChord> _mac;
+
+  /// Os padrões no Linux, escolhidos um a um e não traduzidos do ⌘: ⌘T e
+  /// ⇧⌘T viram o mesmo Ctrl+Shift+T numa regra só, e metade do resto cairia
+  /// em cima do desktop (Ctrl+Alt+setas) ou do IBus (Ctrl+Shift+E).
+  final List<MxChord>? _linux;
+
+  /// As teclas de fábrica, as da máquina em que o app está rodando.
+  List<MxChord> get defaults => MxChord.linux ? (_linux ?? _mac) : _mac;
 }
 
 /// O mapa de teclas, do jeito que o usuário deixou.

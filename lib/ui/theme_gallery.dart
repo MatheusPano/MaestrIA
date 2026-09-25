@@ -20,14 +20,31 @@ class ThemeGallery extends StatelessWidget {
       // Rotas guardam a página que construíram, então o diálogo continuaria
       // nas cores velhas enquanto o app atrás dele muda. É isto que o repinta.
       valueListenable: Mx.current,
-      builder: (context, palette, _) => Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          for (final p in MxThemes.all)
-            _Swatch(palette: p, selected: p.id == palette.id, onTap: () => store.setTheme(p)),
-        ],
-      ),
+      builder: (context, palette, _) {
+        Widget grid(List<MxPalette> of) => Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final p in of)
+              _Swatch(palette: p, selected: p.id == palette.id, onTap: () => store.setTheme(p)),
+          ],
+        );
+        // Os de plugin num bloco próprio, com o nome da origem em cima: são
+        // temas que ninguém daqui curou, e misturá-los na grade faria parecer
+        // que sim. Ver [MxThemes.extra].
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            grid(MxThemes.all),
+            if (MxThemes.extra.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              Text('de plugins', style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
+              const SizedBox(height: 10),
+              grid(MxThemes.extra),
+            ],
+          ],
+        );
+      },
     );
   }
 }

@@ -13,7 +13,6 @@ import '../services/git.dart';
 import '../services/history.dart';
 import '../services/notify.dart';
 import '../services/paths.dart';
-import '../services/report.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../services/workspace.dart';
@@ -180,7 +179,8 @@ Future<String?> promptText(
 /// The right-click menu of the terminal itself.
 ///
 /// A second way in for copy and paste, one that owes nothing to AppKit's key
-/// equivalents -- if ⌘V is ever swallowed again, this still works.
+/// equivalents -- if ⌘V is ever swallowed again, this still works. On Linux
+/// it was for a while the only way to paste at all.
 Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosition) async {
   final hasSelection = tab.term.controller.selection != null;
   final choice = await mxMenu<String>(
@@ -191,14 +191,14 @@ Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosi
         'copy',
         glyph: Icon(Icons.content_copy, size: 13, color: Mx.fgDim),
         label: 'copiar',
-        chord: '⌘C',
+        chord: MxChord.copy.label,
         enabled: hasSelection,
       ),
       mxItem(
         'paste',
         glyph: Icon(Icons.content_paste, size: 13, color: Mx.fgDim),
         label: 'colar',
-        chord: '⌘V',
+        chord: MxChord.paste.first.label,
       ),
     ],
   );
@@ -388,6 +388,19 @@ Future<void> showPanelMenu(
       // novo, e sem isto não haveria como guardá-lo. A tela que *é* o grupo
       // não oferece -- ali agrupar seria salvar de novo o que já está salvo,
       // e quem atualiza um grupo é o menu dele.
+      // Prender também é de onde o painel mora: o lugar dele na tela deixa de
+      // ser trocado pelo clique na lateral. Ver [MxTab.pinned].
+      if (store.isOpen(tab))
+        mxItem(
+          'pin',
+          glyph: Icon(
+            store.isPinned(tab) ? Icons.push_pin : Icons.push_pin_outlined,
+            size: 14,
+            color: store.isPinned(tab) ? Mx.accent : Mx.fgDim,
+          ),
+          label: store.isPinned(tab) ? 'soltar o painel' : 'prender o painel',
+          chord: store.keymap[MxAction.pinPane].firstOrNull?.label,
+        ),
       if (store.paneCount > 1 &&
           store.isOpen(tab) &&
           (grouped == null || !store.showing(grouped)))
@@ -425,6 +438,20 @@ Future<void> showPanelMenu(
           ),
           label: tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
         ),
+      // Os comandos dos plugins, num submenu: são de fora, e dez linhas de
+      // plugin soltas no meio deste menu o fariam ler como um menu de outro
+      // app. Rodam sobre este painel -- é o `tabId` e o `cwd` que eles recebem.
+      if (store.plugins.commands.isNotEmpty) ...[
+        mxDivider(),
+        MxSubmenuItem(
+          label: 'plugins',
+          glyph: Icon(Icons.extension_outlined, size: 14, color: Mx.fgDim),
+          items: () => [
+            for (final c in store.plugins.commands)
+              MxSubItem(value: 'plugin:${c.fullId}', label: c.title),
+          ],
+        ),
+      ],
       mxDivider(),
       // Desligar sem fechar: a conversa fica, a memória volta. Só o que dá
       // pra retomar -- ver [AppStore.canHibernate].
@@ -440,6 +467,7 @@ Future<void> showPanelMenu(
         label: switch (tab.kind) {
           TabKind.reader => 'fechar o leitor',
           TabKind.setup => 'fechar a configuração',
+          TabKind.plugin => 'fechar a janela do plugin',
           _ => 'fechar painel',
         },
         color: Mx.red,
@@ -467,6 +495,8 @@ Future<void> showPanelMenu(
       }
     case 'ungroup':
       if (grouped != null) store.ungroup(grouped);
+    case 'pin':
+      store.togglePin(tab);
     // --- ditado (vocalização) — fora desta versão ----------------------------
     // case 'dictate':
       // await store.toggleDictation();
@@ -486,6 +516,10 @@ Future<void> showPanelMenu(
       markDone(context, store, tab, done: !tab.done, from: globalPosition);
     case 'close':
       store.closeTab(tab);
+    case final pick when pick.startsWith('plugin:'):
+      if (store.plugins.commandById(pick.substring('plugin:'.length)) case final command?) {
+        await store.runPluginCommand(command, on: tab);
+      }
   }
 }
 
@@ -2295,210 +2329,6 @@ class _IconChip extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// --- relatório do dia -------------------------------------------------------
-
-/// De que dia é o relatório.
-///
-/// Ele sempre foi de hoje, e hoje era o dia errado quase sempre: o relatório é
-/// falado na daily da manhã seguinte, quando o dia que interessa é ontem -- e
-/// de vez em quando o que se quer é o dia 25 de agosto, que alguém precisa
-/// lembrar. Então o clique pergunta antes, com os dois botões que respondem
-/// quase toda vez e um mês pra andar quando não respondem.
-///
-/// O calendário é desenhado aqui em vez de ser o `showDatePicker` do Material
-/// por dois motivos. Ele fala inglês -- "August 2025", "CANCEL" -- enquanto o
-/// `flutter_localizations` não estiver no projeto, e o app é todo em
-/// português. E ele é muito diálogo pra uma pergunta de um clique: vem com
-/// cabeçalho colorido, campo pra digitar a data e seletor de ano, três coisas
-/// que aqui não têm o que fazer.
-///
-/// [today] existe pros testes: em uso é sempre agora.
-Future<void> showDailyReport(BuildContext context, AppStore store, {DateTime? today}) async {
-  if (store.writingReport) {
-    store.showBanner('já estou escrevendo um relatório — esse leva alguns minutos');
-    return;
-  }
-  final day = await showDialog<DateTime>(
-    context: context,
-    builder: (_) => _DayPicker(today: today ?? DateTime.now()),
-  );
-  if (day == null) return;
-  await store.openDailyReport(day: day);
-}
-
-class _DayPicker extends StatefulWidget {
-  const _DayPicker({required this.today});
-
-  /// Hoje, lido uma vez na abertura: um `DateTime.now()` consultado a cada
-  /// repintura mudaria de resposta num diálogo aberto na virada da meia-noite.
-  final DateTime today;
-
-  @override
-  State<_DayPicker> createState() => _DayPickerState();
-}
-
-class _DayPickerState extends State<_DayPicker> {
-  DateTime get _today => widget.today;
-
-  /// O mês na tela, sempre no dia 1.
-  late DateTime _month = DateTime(_today.year, _today.month);
-
-  /// As iniciais dos dias, começando no domingo -- que é como um calendário se
-  /// lê em português.
-  static const _initials = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-
-  /// O lado de uma casa do calendário. Sete delas são a largura do diálogo.
-  ///
-  /// Bem maior que os 12 px de fonte do resto do chrome, e de propósito: o
-  /// diálogo tem uma pergunta só e é o alvo de um clique de mira -- um mês
-  /// desenhado no corpo dos rótulos da lateral virava um selinho no meio de
-  /// uma janela de mil pixels, e acertar 25 num quadrado de 34 é pontaria.
-  static const _cell = 46.0;
-
-  void _step(int months) => setState(() => _month = DateTime(_month.year, _month.month + months));
-
-  /// Se há mês pra frente. Amanhã não teve dia nenhum ainda.
-  bool get _ahead => _month.isBefore(DateTime(_today.year, _today.month));
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Mx.bgSidebar,
-      // Um mês de seis semanas -- agosto de 2025, que começa numa sexta -- é
-      // 46 px mais alto que um de cinco, e numa janela baixa isso não cabia:
-      // o mês saía cortado por onde o `Column` estourava. Rolar é a saída
-      // certa pra uma casa desse tamanho; encolher a casa pra caber no pior
-      // caso seria pagar o mês inteiro pelo mês raro.
-      scrollable: true,
-      title: const Text('relatório de que dia?', style: TextStyle(fontSize: 16)),
-      content: SizedBox(
-        width: _cell * 7,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(child: _quick('hoje', _today)),
-                const SizedBox(width: Mx.gap),
-                // Pela aritmética do calendário, não por 24 horas: no domingo
-                // em que o horário de verão entra as duas contas divergem.
-                Expanded(
-                  child: _quick('ontem', DateTime(_today.year, _today.month, _today.day - 1)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _arrow(Icons.chevron_left_rounded, () => _step(-1)),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      DailyReport.monthName(_month),
-                      style: TextStyle(fontSize: 14, color: Mx.fg, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ),
-                _arrow(Icons.chevron_right_rounded, _ahead ? () => _step(1) : null),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                for (final initial in _initials)
-                  SizedBox(
-                    width: _cell,
-                    height: 24,
-                    child: Center(
-                      child: Text(initial, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
-                    ),
-                  ),
-              ],
-            ),
-            _grid(),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
-      ],
-    );
-  }
-
-  /// Um dos dois dias que respondem a pergunta quase toda vez.
-  Widget _quick(String label, DateTime day) => OutlinedButton(
-    style: OutlinedButton.styleFrom(
-      foregroundColor: Mx.fg,
-      side: BorderSide(color: Mx.border),
-      padding: EdgeInsets.zero,
-      minimumSize: const Size(0, 36),
-      textStyle: const TextStyle(fontSize: 13),
-    ),
-    onPressed: () => Navigator.pop(context, day),
-    child: Text(label),
-  );
-
-  Widget _arrow(IconData icon, VoidCallback? onPressed) => IconButton(
-    icon: Icon(icon, color: onPressed == null ? Mx.fgFaint : Mx.fgDim),
-    onPressed: onPressed,
-    iconSize: 22,
-    splashRadius: 17,
-    visualDensity: VisualDensity.compact,
-    constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-    padding: EdgeInsets.zero,
-  );
-
-  Widget _grid() {
-    final first = DateTime(_month.year, _month.month);
-    // O dia 0 do mês seguinte é o último deste: é a conta que acerta fevereiro
-    // sem ninguém aqui escrever a regra do ano bissexto.
-    final days = DateTime(_month.year, _month.month + 1, 0).day;
-    // `weekday` é segunda=1 e domingo=7, e a grade começa no domingo.
-    final lead = first.weekday % 7;
-    return Wrap(
-      children: [
-        for (var i = 0; i < lead; i++) const SizedBox(width: _cell, height: _cell),
-        for (var d = 1; d <= days; d++) _day(DateTime(_month.year, _month.month, d)),
-      ],
-    );
-  }
-
-  Widget _day(DateTime day) {
-    final ahead = day.isAfter(_today);
-    final today = DailyReport.sameDay(day, _today);
-    final text = Text(
-      '${day.day}',
-      style: TextStyle(
-        fontSize: 14,
-        color: ahead ? Mx.fgFaint : Mx.fg,
-        fontWeight: today ? FontWeight.w600 : FontWeight.normal,
-      ),
-    );
-    return SizedBox(
-      width: _cell,
-      height: _cell,
-      // Um dia que ainda não chegou fica escrito e morto: apagá-lo da grade
-      // desalinharia o mês, e deixá-lo clicável abriria um relatório vazio.
-      child: ahead
-          ? Center(child: text)
-          : InkWell(
-              onTap: () => Navigator.pop(context, day),
-              borderRadius: BorderRadius.circular(10),
-              child: DecoratedBox(
-                decoration: today
-                    ? BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Mx.accent),
-                      )
-                    : const BoxDecoration(),
-                child: Center(child: text),
-              ),
-            ),
     );
   }
 }

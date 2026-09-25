@@ -1,0 +1,18 @@
+{
+  "id": "exemplo.completo",
+  "name": "Exemplo completo",
+  "version": "1.0.0",
+  "description": "Comandos atendidos por um processo node, os hooks das sessões, notificação e uma janela com blocos.",
+  "author": "maestria",
+  "maestria": 1,
+  "main": ["node", "main.js"],
+  "activationEvents": ["onCommand:painel", "onCommand:resumo", "onCommand:markdown", "onHook:Stop"],
+  "permissions": ["hooks", "notifications", "terminal.write"],
+  "contributes": {
+    "commands": [
+      { "id": "painel", "title": "abrir o painel do exemplo", "key": "meta+alt+e" },
+      { "id": "resumo", "title": "resumo das sessões" },
+      { "id": "markdown", "title": "mostrar o contexto do comando" }
+    ]
+  }
+}

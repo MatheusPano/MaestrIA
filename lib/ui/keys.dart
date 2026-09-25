@@ -22,12 +22,14 @@ class MxKeys {
   /// O mapa como o [CallbackShortcuts] quer, montado do que o usuário deixou.
   static Map<ShortcutActivator, VoidCallback> bindings(AppStore store, BuildContext context) => {
     for (final action in MxAction.values)
-      for (final chord in store.keymap[action])
-        chord.activator: () => run(action, store, context),
+      for (final chord in store.keymap[action]) chord.activator: () => run(action, store, context),
     // Os únicos que não passam pelas configurações: são nove teclas que dizem
     // "a enésima sessão", e escolher uma a uma seria configurar uma régua.
-    for (var i = 0; i < digits.length; i++)
-      SingleActivator(digits[i], meta: true): () => store.selectIndex(i),
+    for (var i = 0; i < digits.length; i++) MxChord.slot(i).activator: () => store.selectIndex(i),
+    // As teclas dos plugins não entram aqui: um [SingleActivator] só casa a
+    // tecla lógica, e é justamente ela que as teclas mortas do macOS trocam.
+    // Quem as atende é o [Focus] de `_Keys` (em `main.dart`) e o terminal --
+    // ver [Plugins.chordHits].
   };
 
   static void run(MxAction action, AppStore store, BuildContext context) {
@@ -45,9 +47,7 @@ class MxKeys {
       case MxAction.newTask:
         // Uma worktree precisa de um repo pra ser worktree de.
         if (folder.isLoose) {
-          store.showBanner(
-            'nova task precisa de uma pasta — o painel em foco não está em nenhuma',
-          );
+          store.showBanner('nova task precisa de uma pasta — o painel em foco não está em nenhuma');
           return;
         }
         showNewTask(context, store, folder, project: store.focusedProject);
@@ -60,6 +60,13 @@ class MxKeys {
           return;
         }
         showRenamePanel(context, store, focused);
+      case MxAction.pinPane:
+        final focused = store.focusedTab;
+        if (focused == null) {
+          store.showBanner('nenhum painel em foco pra prender');
+          return;
+        }
+        store.togglePin(focused);
       case MxAction.closePane:
         store.closeFocused();
       case MxAction.closeSettled:
@@ -76,7 +83,11 @@ class MxKeys {
         // Escondida, a lateral não tem campo pra focar: mostrá-la é parte de
         // buscar nela. O foco espera o quadro em que o campo passa a existir
         // -- um [FocusNode] que não está na árvore não tem como recebê-lo.
-        if (store.sidebarHidden) {
+        //
+        // Numa aba de plugin, também: a busca é das sessões, e buscar é voltar
+        // pra elas.
+        if (store.sidebarHidden || store.shownPlugin != null) {
+          if (store.shownPlugin != null) store.showSidebarView(null);
           store.setSidebarHidden(false);
           WidgetsBinding.instance.addPostFrameCallback((_) => SidebarSearch.reveal());
           return;
@@ -109,8 +120,6 @@ class MxKeys {
         store.zoomFocused(-1);
       case MxAction.zoomReset:
         store.resetZoomFocused();
-      case MxAction.dailyReport:
-        showDailyReport(context, store);
       case MxAction.refreshGit:
         store.refreshGit();
       case MxAction.settings:

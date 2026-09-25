@@ -51,14 +51,15 @@ Future<void> press(
   WidgetTester tester,
   LogicalKeyboardKey key, {
   List<LogicalKeyboardKey> holding = const [],
+  String platform = 'macos',
 }) async {
   for (final m in holding) {
-    await tester.sendKeyDownEvent(m, platform: 'macos');
+    await tester.sendKeyDownEvent(m, platform: platform);
   }
-  await tester.sendKeyDownEvent(key, platform: 'macos');
-  await tester.sendKeyUpEvent(key, platform: 'macos');
+  await tester.sendKeyDownEvent(key, platform: platform);
+  await tester.sendKeyUpEvent(key, platform: platform);
   for (final m in holding.reversed) {
-    await tester.sendKeyUpEvent(m, platform: 'macos');
+    await tester.sendKeyUpEvent(m, platform: platform);
   }
   await tester.pumpAndSettle();
 }
@@ -169,6 +170,87 @@ void main() {
     test('os ids do config não colidem', () {
       final ids = MxAction.values.map((a) => a.id).toList();
       expect(ids.toSet().length, ids.length);
+    });
+  });
+
+  group('no Linux', () {
+    // O mapa lê a plataforma ao nascer, então a troca vem antes de qualquer
+    // store ou keymap do teste.
+    setUp(() => MxChord.linux = true);
+    tearDown(() => MxChord.linux = false);
+
+    test('se escreve por extenso, como o desktop de lá escreve', () {
+      const chord = MxChord(LogicalKeyboardKey.keyT, control: true, shift: true);
+      expect(chord.label, 'Ctrl+Shift+T');
+      expect(chord.id, 'ctrl+shift+t');
+      expect(MxChord.slot(0).label, 'Alt+1');
+      expect(const MxChord(LogicalKeyboardKey.pageDown, control: true).label, 'Ctrl+PgDn');
+      expect(MxChord.paste.first.label, 'Ctrl+Shift+V');
+    });
+
+    test('nenhum padrão usa o Super, que é do desktop', () {
+      for (final action in MxAction.values) {
+        for (final chord in action.defaults) {
+          expect(chord.meta, isFalse, reason: '${action.label}: ${chord.label}');
+        }
+      }
+    });
+
+    test('os padrões sobrevivem ao config e não têm dois donos', () {
+      final all = [for (final a in MxAction.values) ...a.defaults];
+      expect(all.toSet().length, all.length);
+      for (final action in MxAction.values) {
+        expect(action.defaults, isNotEmpty, reason: action.label);
+        for (final chord in action.defaults) {
+          expect(MxChord.parse(chord.id), chord, reason: chord.label);
+          expect(chord.rejection, isNull, reason: '${action.label}: ${chord.label}');
+        }
+      }
+    });
+
+    test('nenhum padrão pisa no copiar, no colar ou nas nove sessões', () {
+      final fixed = {MxChord.copy, ...MxChord.paste, for (var i = 0; i < 9; i++) MxChord.slot(i)};
+      for (final action in MxAction.values) {
+        for (final chord in action.defaults) {
+          expect(fixed, isNot(contains(chord)), reason: '${action.label}: ${chord.label}');
+        }
+      }
+    });
+
+    test('Ctrl+Shift+letra é atalho; Ctrl+letra continua do processo', () {
+      expect(const MxChord(LogicalKeyboardKey.keyJ, control: true, shift: true).rejection, isNull);
+      expect(
+        const MxChord(LogicalKeyboardKey.keyJ, control: true).rejection,
+        contains('Ctrl+J'),
+      );
+      // O IBus e o desktop pegam antes da janela.
+      expect(
+        const MxChord(LogicalKeyboardKey.keyE, control: true, shift: true).rejection,
+        contains('IBus'),
+      );
+      expect(
+        const MxChord(LogicalKeyboardKey.arrowLeft, control: true, alt: true).rejection,
+        isNotNull,
+      );
+    });
+
+    test('o meta de um manifesto de plugin vira Ctrl+Shift', () {
+      expect(
+        MxChord.parse('meta+alt+g')!.forHost,
+        const MxChord(LogicalKeyboardKey.keyG, control: true, shift: true, alt: true),
+      );
+      expect(MxChord.parse('ctrl+alt+g')!.forHost, MxChord.parse('ctrl+alt+g'));
+    });
+
+    testWidgets('F2 pergunta o nome do painel em foco', (tester) async {
+      final store = await pumpKeys(tester, AppStore());
+      focusedPanel(store);
+
+      await press(tester, LogicalKeyboardKey.f2, platform: 'linux');
+      expect(find.text('renomear painel'), findsOneWidget);
+
+      await tester.tap(find.text('cancelar'));
+      await closeWindow(tester, store);
     });
   });
 

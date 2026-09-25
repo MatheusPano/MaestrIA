@@ -8,7 +8,7 @@ SHELL := /bin/bash
 # A versão do Flutter, num lugar só: daqui ela vai tanto pra análise local
 # quanto pro container que compila o .deb. Se as duas divergirem, o erro
 # aparece depois de sete minutos de build em vez de um segundo de analyze.
-FLUTTER_VERSION ?= 3.35.7
+FLUTTER_VERSION ?= 3.47.4
 export FLUTTER_VERSION
 
 # O flutter da máquina: o do PATH, se houver; senão o que o fvm guarda -- e o

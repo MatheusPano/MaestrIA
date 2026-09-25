@@ -24,7 +24,7 @@ mkdir -p "$DIST"
 
 # A versão vem de fora quando o Makefile a manda, pra que o SDK que compila o
 # .deb seja o mesmo que analisou o código aqui fora.
-FLUTTER_VERSION="${FLUTTER_VERSION:-3.35.7}"
+FLUTTER_VERSION="${FLUTTER_VERSION:-3.47.4}"
 
 echo "==> imagem ($PLATFORM, flutter $FLUTTER_VERSION)"
 docker build --platform "$PLATFORM" --build-arg "FLUTTER_VERSION=$FLUTTER_VERSION" -t "$IMAGE" "$HERE"

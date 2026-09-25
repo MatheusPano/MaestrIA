@@ -1,0 +1,774 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../services/notify.dart';
+import '../services/plugins.dart';
+import '../services/store.dart';
+import '../theme.dart';
+
+/// Instalar um plugin, em dois passos: de onde, e se você confia nele.
+///
+/// O segundo passo é o motivo de isto ser um diálogo e não um campo na tela
+/// de configurações. Um plugin é um programa que vai rodar com as suas
+/// permissões, e o momento de ler o que ele pede é antes de ele estar
+/// instalado -- ver [StagedPlugin].
+Future<void> showInstallPlugin(BuildContext context, AppStore store) => showDialog<void>(
+  context: context,
+  builder: (ctx) => _Install(store: store),
+);
+
+class _Install extends StatefulWidget {
+  const _Install({required this.store});
+
+  final AppStore store;
+
+  @override
+  State<_Install> createState() => _InstallState();
+}
+
+class _InstallState extends State<_Install> {
+  final _source = TextEditingController();
+  bool _busy = false;
+  String? _error;
+  StagedPlugin? _staged;
+
+  @override
+  void dispose() {
+    // Fechar o diálogo por fora -- esc, clique na barreira -- com um plugin
+    // já baixado é desistir dele: o rascunho não pode ficar pra trás.
+    if (_staged case final s?) widget.store.plugins.discard(s);
+    _source.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetch() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final staged = await widget.store.plugins.stage(_source.text);
+      if (!mounted) {
+        await widget.store.plugins.discard(staged);
+        return;
+      }
+      setState(() => _staged = staged);
+    } on PluginInstallError catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickFolder() async {
+    final path = await Notifier.chooseFolder();
+    if (path == null || !mounted) return;
+    _source.text = path;
+    await _fetch();
+  }
+
+  Future<void> _install() async {
+    final staged = _staged;
+    if (staged == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final plugin = await widget.store.installPlugin(staged);
+      _staged = null;
+      widget.store.showBanner(
+        staged.replacing == null
+            ? '${plugin.name} ${plugin.manifest?.version ?? ''} instalado'
+            : '${plugin.name} atualizado de ${staged.replacing} pra ${plugin.manifest?.version}',
+      );
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      _staged = null;
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final staged = _staged;
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text(
+        staged == null
+            ? 'instalar plugin'
+            : staged.replacing == null
+            ? 'instalar ${staged.manifest.name}?'
+            : 'atualizar ${staged.manifest.name}?',
+        style: const TextStyle(fontSize: 15),
+      ),
+      content: SizedBox(
+        width: 480,
+        child: staged == null ? _where() : PluginTrust(manifest: staged.manifest, staged: staged),
+      ),
+      actions: staged == null
+          ? [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
+              FilledButton(onPressed: _busy ? null : _fetch, child: const Text('continuar')),
+            ]
+          : [
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () {
+                        widget.store.plugins.discard(staged);
+                        setState(() => _staged = null);
+                      },
+                child: const Text('voltar'),
+              ),
+              FilledButton(
+                onPressed: _busy ? null : _install,
+                child: Text(staged.replacing == null ? 'confio, instalar' : 'confio, atualizar'),
+              ),
+            ],
+    );
+  }
+
+  Widget _where() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'uma URL de git, um .zip ou uma pasta com um $mxManifestName na raiz.',
+          style: TextStyle(fontSize: 12, color: Mx.fgDim, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _source,
+          autofocus: true,
+          enabled: !_busy,
+          style: TextStyle(fontSize: 13, fontFamily: Mx.mono),
+          onSubmitted: (_) => _fetch(),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'https://github.com/voce/maestria-plugin-x.git',
+            hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _busy ? null : _pickFolder,
+              icon: const Icon(Icons.folder_open_outlined, size: 15),
+              label: const Text('escolher pasta…'),
+            ),
+            const Spacer(),
+            if (_busy)
+              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          ],
+        ),
+        if (_error case final why?) ...[
+          const SizedBox(height: 8),
+          Text(why, style: TextStyle(fontSize: 12, color: Mx.red, height: 1.4)),
+        ],
+      ],
+    );
+  }
+}
+
+/// O que um plugin é e o que ele pede, do jeito que se lê antes de confiar.
+///
+/// Público porque são dois lugares: a instalação e o carregamento de uma
+/// pasta de desenvolvimento.
+class PluginTrust extends StatelessWidget {
+  const PluginTrust({super.key, required this.manifest, this.staged});
+
+  final PluginManifest manifest;
+  final StagedPlugin? staged;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = manifest;
+    Widget fact(IconData icon, Color color, String text, {bool mono = false}) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 15, color: color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.4,
+                color: Mx.fg,
+                fontFamily: mono ? Mx.mono : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          [
+            '${m.id} ${m.version}',
+            if (m.author.isNotEmpty) 'de ${m.author}',
+            if (staged?.replacing case final v?) 'no lugar da $v',
+          ].join(' · '),
+          style: TextStyle(fontSize: 11.5, fontFamily: Mx.mono, color: Mx.fgDim),
+        ),
+        if (m.description.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(m.description, style: TextStyle(fontSize: 12.5, color: Mx.fg, height: 1.4)),
+        ],
+        const SizedBox(height: 16),
+        if (m.hasProcess)
+          fact(
+            Icons.terminal,
+            Mx.yellow,
+            'roda um programa seu, com as suas permissões: ${m.main!.join(' ')}',
+          )
+        else
+          fact(Icons.check_rounded, Mx.green, 'só declarações — nenhum programa roda'),
+        for (final perm in m.permissions) fact(Icons.key_outlined, Mx.yellow, 'pode ${perm.label}'),
+        if (m.commands.isNotEmpty)
+          fact(
+            Icons.bolt_outlined,
+            Mx.fgDim,
+            'comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} (${c.key!.label})').join(', ')}',
+          ),
+        if (m.themes.isNotEmpty)
+          fact(
+            Icons.palette_outlined,
+            Mx.fgDim,
+            m.themes.length == 1 ? 'um tema' : '${m.themes.length} temas',
+          ),
+        for (final w in m.warnings) fact(Icons.warning_amber_outlined, Mx.yellow, w),
+      ],
+    );
+  }
+}
+
+/// O log de um plugin, ao vivo: o stderr dele, o que ele mandou pelo `log`, e
+/// o que a janela disse sobre ele. É onde quem escreve o plugin depura.
+Future<void> showPluginLog(BuildContext context, AppStore store, MxPlugin plugin) =>
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Mx.bgSidebar,
+        title: Text('log de ${plugin.name}', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: 640,
+          height: 380,
+          child: ValueListenableBuilder<int>(
+            valueListenable: store.plugins.logs,
+            builder: (context, _, _) => Container(
+              decoration: BoxDecoration(
+                color: Mx.bg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Mx.border),
+              ),
+              child: plugin.log.isEmpty
+                  ? Center(
+                      child: Text('nada ainda', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+                    )
+                  : ListView.builder(
+                      reverse: true,
+                      padding: const EdgeInsets.all(10),
+                      itemCount: plugin.log.length,
+                      itemBuilder: (context, i) => SelectableText(
+                        plugin.log[plugin.log.length - 1 - i],
+                        style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fg, height: 1.45),
+                      ),
+                    ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Clipboard.setData(ClipboardData(text: plugin.log.join('\n'))),
+            child: const Text('copiar'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('fechar')),
+        ],
+      ),
+    );
+
+Future<void> confirmUninstallPlugin(BuildContext context, AppStore store, MxPlugin plugin) async {
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text('remover ${plugin.name}?', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 420,
+        child: Text(
+          plugin.linked
+              ? 'sai da maestria o link pra ${plugin.dir.split('/').last}. A sua pasta de '
+                    'desenvolvimento fica onde está, intocada.'
+              : 'a pasta do plugin e o que ele guardou vão embora. Pra ter de volta, '
+                    'instale de novo.',
+          style: TextStyle(fontSize: 12.5, color: Mx.fg, height: 1.45),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Mx.red),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('remover'),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+  await store.uninstallPlugin(plugin);
+  store.showBanner('${plugin.name} removido');
+}
+
+/// Carrega um plugin da pasta em que ele está sendo escrito. Ver
+/// [Plugins.link].
+Future<void> linkDevPlugin(AppStore store) async {
+  final path = await Notifier.chooseFolder();
+  if (path == null) return;
+  try {
+    final plugin = await store.plugins.link(path);
+    store.showBanner('${plugin.name} carregado de ${path.split('/').last} — reinicie pra pegar mudanças');
+  } on PluginInstallError catch (e) {
+    store.showBanner('não deu pra carregar: ${e.message}', sticky: true);
+  }
+}
+
+/// Uma opção do seletor rápido: o que volta pro plugin, o nome e uma linha
+/// embaixo dele.
+typedef QuickPickItem = ({String value, String label, String? detail});
+
+/// O seletor rápido de um plugin (`window.pick`): o quick pick do VS Code.
+///
+/// Um campo que filtra e a lista embaixo, com as setas andando e o enter
+/// escolhendo -- é o que se espera de "escolha um projeto" quando a mão já está
+/// no teclado. Null é o esc, ou o clique fora.
+Future<String?> showQuickPick(
+  BuildContext context, {
+  required String title,
+  String? placeholder,
+  required List<QuickPickItem> items,
+}) => showDialog<String>(
+  context: context,
+  barrierColor: const Color(0x33000000),
+  builder: (ctx) => _QuickPick(title: title, placeholder: placeholder, items: items),
+);
+
+class _QuickPick extends StatefulWidget {
+  const _QuickPick({required this.title, this.placeholder, required this.items});
+
+  final String title;
+  final String? placeholder;
+  final List<QuickPickItem> items;
+
+  @override
+  State<_QuickPick> createState() => _QuickPickState();
+}
+
+class _QuickPickState extends State<_QuickPick> {
+  final _query = TextEditingController();
+  int _at = 0;
+
+  List<QuickPickItem> get _shown {
+    final terms = _query.text.toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    return [
+      for (final it in widget.items)
+        if (terms.every((t) => '${it.label} ${it.detail ?? ''}'.toLowerCase().contains(t))) it,
+    ];
+  }
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _key(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final n = _shown.length;
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown && n > 0) {
+      setState(() => _at = (_at + 1) % n);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && n > 0) {
+      setState(() => _at = (_at - 1 + n) % n);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _pick() {
+    final shown = _shown;
+    if (shown.isEmpty) return;
+    Navigator.pop(context, shown[_at.clamp(0, shown.length - 1)].value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _shown;
+    return Dialog(
+      backgroundColor: Mx.bgSidebar,
+      alignment: const Alignment(0, -0.6),
+      child: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              child: Text(widget.title, style: TextStyle(fontSize: 12, color: Mx.fgDim)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+              child: Focus(
+                onKeyEvent: _key,
+                child: TextField(
+                  controller: _query,
+                  autofocus: true,
+                  style: const TextStyle(fontSize: 13),
+                  onChanged: (_) => setState(() => _at = 0),
+                  onSubmitted: (_) => _pick(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: widget.placeholder ?? 'filtrar',
+                    hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: shown.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Text('nada com esse nome', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 8),
+                      itemCount: shown.length,
+                      itemBuilder: (context, i) {
+                        final it = shown[i];
+                        final lit = i == _at;
+                        return InkWell(
+                          onTap: () => Navigator.pop(context, it.value),
+                          onHover: (h) {
+                            if (h && _at != i) setState(() => _at = i);
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: lit ? Mx.bgActive : null,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(it.label, style: TextStyle(fontSize: 13, color: Mx.fg)),
+                                if (it.detail case final d? when d.isNotEmpty)
+                                  Text(
+                                    d,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// As configurações de um plugin, desenhadas do que o manifesto declarou
+/// (`contributes.settings`). Ver [PluginSetting].
+///
+/// Como o resto da tela de configurações, vale na hora: cada mudança é
+/// guardada e chega no plugin (`settings.changed`) sem botão de salvar.
+Future<void> showPluginSettings(BuildContext context, AppStore store, MxPlugin plugin) =>
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AnimatedBuilder(
+        animation: store,
+        builder: (context, _) => _PluginSettings(store: store, plugin: plugin),
+      ),
+    );
+
+/// A cor de um valor de configuração: hex, um nome do tema, ou vazio (o texto
+/// do tema). Null quando não é nenhum dos três -- o campo fica vermelho.
+Color? pluginColor(String value) {
+  final v = value.trim();
+  if (v.isEmpty) return Mx.fg;
+  if (v.startsWith('#')) return parseHexColor(v);
+  return switch (v) {
+    'red' => Mx.red,
+    'green' => Mx.green,
+    'yellow' => Mx.yellow,
+    'accent' => Mx.accent,
+    'purple' => Mx.purple,
+    'faint' => Mx.fgFaint,
+    'dim' => Mx.fgDim,
+    _ => null,
+  };
+}
+
+class _PluginSettings extends StatelessWidget {
+  const _PluginSettings({required this.store, required this.plugin});
+
+  final AppStore store;
+  final MxPlugin plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = plugin.manifest?.settings ?? const <PluginSetting>[];
+    final values = store.plugins.settingsOf(plugin);
+    final rows = <Widget>[];
+    String? group;
+    for (final s in settings) {
+      if (s.group != null && s.group != group) {
+        rows.add(
+          Padding(
+            padding: EdgeInsets.only(top: rows.isEmpty ? 0 : 18, bottom: 8),
+            child: Text(
+              s.group!,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+            ),
+          ),
+        );
+      }
+      group = s.group;
+      rows.add(
+        _SettingRow(
+          key: ValueKey(s.id),
+          setting: s,
+          value: values[s.id],
+          changed: values[s.id] != s.resolve(null),
+          onChanged: (v) => store.setPluginSetting(plugin, s.id, v),
+        ),
+      );
+    }
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text('configurar ${plugin.name}', style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: rows,
+          ),
+        ),
+      ),
+      actions: [
+        Text('vale na hora', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('pronto')),
+      ],
+    );
+  }
+}
+
+class _SettingRow extends StatefulWidget {
+  const _SettingRow({
+    super.key,
+    required this.setting,
+    required this.value,
+    required this.changed,
+    required this.onChanged,
+  });
+
+  final PluginSetting setting;
+  final Object? value;
+
+  /// Se o valor não é o padrão -- e aí aparece o "voltar ao padrão".
+  final bool changed;
+
+  /// Null volta pro padrão.
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  State<_SettingRow> createState() => _SettingRowState();
+}
+
+class _SettingRowState extends State<_SettingRow> {
+  late final _text = TextEditingController(text: _shown(widget.value));
+  bool _invalid = false;
+
+  /// As cores do debug console do VS Code, pra não precisar saber o hex de cor.
+  static const _presets = ['#4FC1FF', '#89D185', '#F48771', '#CCA700', '#C586C0', '#9DA5B4'];
+
+  static String _shown(Object? v) => v == null ? '' : '$v';
+
+  @override
+  void didUpdateWidget(_SettingRow old) {
+    super.didUpdateWidget(old);
+    // O valor mudou por fora -- um preset, o "voltar ao padrão": o campo
+    // acompanha, a menos que seja o que você está digitando agora.
+    final now = _shown(widget.value);
+    if (old.value != widget.value && _text.text != now) {
+      _text.text = now;
+      _invalid = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _typed(String raw) {
+    final s = widget.setting;
+    switch (s.type) {
+      case PluginSettingType.color:
+        final ok = pluginColor(raw) != null;
+        setState(() => _invalid = !ok);
+        if (ok) widget.onChanged(raw.trim());
+      case PluginSettingType.number:
+        final n = num.tryParse(raw.trim());
+        setState(() => _invalid = n == null);
+        if (n != null) widget.onChanged(n);
+      default:
+        widget.onChanged(raw);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.setting;
+    final label = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(s.title, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
+        if (s.description.isNotEmpty)
+          Text(s.description, style: TextStyle(fontSize: 11, color: Mx.fgFaint, height: 1.35)),
+      ],
+    );
+    final reset = widget.changed
+        ? IconButton(
+            tooltip: 'voltar ao padrão',
+            iconSize: 14,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+            onPressed: () => widget.onChanged(null),
+            icon: Icon(Icons.restart_alt, color: Mx.fgDim),
+          )
+        : const SizedBox(width: 26);
+    final field = switch (s.type) {
+      PluginSettingType.boolean => Transform.scale(
+        scale: 0.75,
+        child: Switch(value: widget.value == true, onChanged: widget.onChanged),
+      ),
+      PluginSettingType.select => SizedBox(
+        width: 200,
+        child: DropdownButton<String>(
+          value: widget.value as String?,
+          isExpanded: true,
+          isDense: true,
+          dropdownColor: Mx.bgSidebar,
+          style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          items: [
+            for (final o in s.options) DropdownMenuItem(value: o.value, child: Text(o.label)),
+          ],
+          onChanged: widget.onChanged,
+        ),
+      ),
+      PluginSettingType.color => _color(),
+      _ => SizedBox(width: 200, child: _input()),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: label),
+          const SizedBox(width: 12),
+          field,
+          reset,
+        ],
+      ),
+    );
+  }
+
+  Widget _input({String? hint}) => TextField(
+    controller: _text,
+    style: TextStyle(fontSize: 12.5, fontFamily: widget.setting.type == PluginSettingType.color ? Mx.mono : null),
+    onChanged: _typed,
+    decoration: InputDecoration(
+      isDense: true,
+      hintText: hint,
+      hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12),
+      errorText: _invalid ? '' : null,
+      errorStyle: const TextStyle(height: 0, fontSize: 0),
+      border: const OutlineInputBorder(),
+    ),
+  );
+
+  Widget _color() {
+    final color = pluginColor(_text.text) ?? Mx.fgFaint;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final hex in _presets)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: InkWell(
+              onTap: () => widget.onChanged(hex),
+              borderRadius: BorderRadius.circular(4),
+              child: Tooltip(
+                message: hex,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: parseHexColor(hex),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(width: 6),
+        // A amostra: a cor como ela vai sair no console, num pedaço de log.
+        Container(
+          width: 64,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          decoration: BoxDecoration(
+            color: Mx.canvas,
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(color: Mx.border),
+          ),
+          child: Text(
+            'Aa log',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: color),
+          ),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(width: 96, child: _input(hint: 'do tema')),
+      ],
+    );
+  }
+}

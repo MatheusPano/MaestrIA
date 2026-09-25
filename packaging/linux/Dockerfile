@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Fixo, não `stable`: o canal se move e um build que muda de compilador sozinho
-# não é reproduzível. 3.35.7 é a mesma versão do fvm da máquina de origem.
-ARG FLUTTER_VERSION=3.35.7
+# não é reproduzível. 3.47.4 é a mesma versão do fvm da máquina de origem.
+ARG FLUTTER_VERSION=3.47.4
 RUN curl -fsSL -o /tmp/flutter.tar.xz \
       "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz" \
     && tar -C /opt -xf /tmp/flutter.tar.xz \

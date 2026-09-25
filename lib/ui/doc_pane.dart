@@ -321,6 +321,7 @@ class _DocHeader extends StatelessWidget {
     DocSource.file => Icons.article_outlined,
     DocSource.message => Icons.chat_bubble_outline,
     DocSource.report => Icons.summarize_outlined,
+    DocSource.plugin => Icons.extension_outlined,
   };
 
   /// O mesmo apagado do cabeçalho do terminal, e pelo mesmo motivo: o nome de
@@ -394,6 +395,12 @@ class _DocHeader extends StatelessWidget {
                   tooltip: 'copiar o markdown',
                   onPressed: onCopy,
                 ),
+                if (store.isPinned(tab) || store.paneCount > 1)
+                  PanePinButton(
+                    pinned: store.isPinned(tab),
+                    onPressed: () => store.togglePin(tab),
+                    iconSize: 15,
+                  ),
                 _Action(
                   icon: Icons.close,
                   tooltip: 'fechar este leitor',

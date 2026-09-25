@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/shortcuts.dart';
 import '../theme.dart';
 
 /// A floating panel: the one shape every region of the window is made of.
@@ -134,8 +135,44 @@ class PaneKeyHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(left: 8, right: 2),
       child: Text(
-        '⌘${index + 1}',
+        MxChord.slot(index).label,
         style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: Mx.fgFaint),
+      ),
+    );
+  }
+}
+
+/// O alfinete do cabeçalho: prende o painel no lugar, ou solta.
+///
+/// Preso, a lateral para de trocá-lo -- o clique numa sessão cai no painel
+/// solto do lado. Ver [MxTab.pinned]. Um desenho só pros quatro cabeçalhos,
+/// pelo mesmo motivo do [paneHeaderBox]: é o mesmo gesto em todos eles.
+class PanePinButton extends StatelessWidget {
+  const PanePinButton({
+    super.key,
+    required this.pinned,
+    required this.onPressed,
+    this.iconSize = 16,
+  });
+
+  final bool pinned;
+  final VoidCallback onPressed;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: pinned
+          ? 'preso — a lateral não troca este painel. clique pra soltar'
+          : 'prender este painel — a lateral passa a trocar só os outros',
+      iconSize: iconSize,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+      onPressed: onPressed,
+      icon: Icon(
+        pinned ? Icons.push_pin : Icons.push_pin_outlined,
+        color: pinned ? Mx.accent : Mx.fgDim,
       ),
     );
   }

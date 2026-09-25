@@ -18,8 +18,13 @@ enum DocSource {
   /// Markdown desde sempre — só era desenhado como texto cru.
   message,
 
-  /// O relatório do dia, escrito pelo `DailyReport`.
-  report;
+  /// O relatório do dia, de quando ele era do app. Hoje ele é o plugin
+  /// `maestria.relatorio-do-dia` e abre como [plugin]; a origem fica pra que
+  /// um relatório salvo num config de antes ainda volte.
+  report,
+
+  /// Um markdown que um plugin mandou mostrar (`pane.openMarkdown`).
+  plugin;
 
   /// Como a origem se apresenta no cabeçalho do painel.
   String get label => switch (this) {
@@ -27,6 +32,7 @@ enum DocSource {
     DocSource.file => 'arquivo',
     DocSource.message => 'recado',
     DocSource.report => 'relatório',
+    DocSource.plugin => 'plugin',
   };
 
   /// Se o conteúdo vive no disco e portanto tem que ser relido. Os outros três

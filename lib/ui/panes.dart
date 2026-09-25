@@ -6,6 +6,7 @@ import '../services/layout.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'doc_pane.dart';
+import 'plugin_pane.dart';
 import 'setup_pane.dart';
 import 'terminal_pane.dart';
 
@@ -175,6 +176,14 @@ class _PaneSlotState extends State<_PaneSlot> {
           // acenderia o anel e o teclado pareceria não estar em lugar nenhum.
           if (widget.tab.isReader)
             DocPane(
+              store: store,
+              tab: widget.tab,
+              focused: store.focusedTab?.id == widget.tab.id,
+              showFocus: store.paneCount > 1,
+              onFocus: () => store.focusPane(widget.tab),
+            )
+          else if (widget.tab.isPluginView)
+            PluginPane(
               store: store,
               tab: widget.tab,
               focused: store.focusedTab?.id == widget.tab.id,

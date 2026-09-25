@@ -529,6 +529,12 @@ class _SetupHeader extends StatelessWidget {
                   tooltip: 'abrir a pasta no vscode',
                   onPressed: () => store.openInEditor(setup.root),
                 ),
+                if (store.isPinned(tab) || store.paneCount > 1)
+                  PanePinButton(
+                    pinned: store.isPinned(tab),
+                    onPressed: () => store.togglePin(tab),
+                    iconSize: 15,
+                  ),
                 _Action(
                   icon: Icons.close,
                   tooltip: 'fechar esta configuração',

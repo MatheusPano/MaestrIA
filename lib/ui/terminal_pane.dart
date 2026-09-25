@@ -230,6 +230,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
         textStyle: Mx.ptyStyle(widget.tab.zoom),
         simulateScroll: false,
         onKeyEvent: _onKeyEvent,
+        shortcuts: _xtermShortcuts,
         onSecondaryTapDown: (d, _) => showTerminalMenu(context, widget.tab, d.globalPosition),
       ),
     );
@@ -297,7 +298,9 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     }
   }
 
-  /// ⌘C and ⌘V, ahead of everything else.
+  /// ⌘C and ⌘V, ahead of everything else -- Ctrl+Shift+C and Ctrl+V (or
+  /// Ctrl+Shift+V, or Shift+Insert) on Linux: see [MxChord.copy] and
+  /// [MxChord.paste].
   ///
   /// xterm copies and pastes too, and gets both halves wrong. It only ever
   /// asks the clipboard for text, so an image on the clipboard reaches the
@@ -324,11 +327,11 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       tab.term.newline();
       return KeyEventResult.handled;
     }
-    if (_paste.accepts(event, keyboard)) {
+    if (MxChord.paste.any((c) => c.accepts(event))) {
       tab.term.pasteClipboard(imagesViaCtrlV: tab.kind == TabKind.claude);
       return KeyEventResult.handled;
     }
-    if (_copy.accepts(event, keyboard)) {
+    if (MxChord.copy.accepts(event)) {
       tab.term.copySelection();
       return KeyEventResult.handled;
     }
@@ -342,11 +345,31 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       MxKeys.run(action, widget.store, context);
       return KeyEventResult.handled;
     }
+    // Depois do mapa do app, pelo mesmo motivo: as teclas de plugin também
+    // seriam engolidas pela keytab antes de chegar lá em cima.
+    if (widget.store.plugins.commandFor(event, except: widget.store.keymap) case final command?) {
+      widget.store.runPluginCommand(command, on: widget.tab);
+      return KeyEventResult.handled;
+    }
     return KeyEventResult.ignored;
   }
 
-  static const _copy = SingleActivator(LogicalKeyboardKey.keyC, meta: true);
-  static const _paste = SingleActivator(LogicalKeyboardKey.keyV, meta: true);
+  /// O que sobra dos atalhos do próprio xterm.
+  ///
+  /// No macOS, os dele (⌘C ⌘V ⌘A) — os dois primeiros nunca chegam lá, que
+  /// [_onKeyEvent] os pega antes, e o ⌘A fica. No Linux os dele são Ctrl+V,
+  /// Ctrl+A e Ctrl+Shift+C, e dois deles quebram o painel: o Ctrl+V cola só
+  /// texto e engole a tecla, de modo que o ^V com que o claude lê uma imagem
+  /// do clipboard nunca chegava no pty; e o Ctrl+A seleciona tudo em vez de ir
+  /// pro começo da linha. Lá fica só o selecionar tudo, com o shift.
+  static final Map<ShortcutActivator, Intent>? _xtermShortcuts = MxChord.linux
+      ? const {
+          SingleActivator(LogicalKeyboardKey.keyA, control: true, shift: true): SelectAllTextIntent(
+            SelectionChangedCause.keyboard,
+          ),
+        }
+      : null;
+
   static const _newline = SingleActivator(LogicalKeyboardKey.enter, shift: true);
 }
 
@@ -502,6 +525,14 @@ class _PaneHeader extends StatelessWidget {
                     ),
                   if (tab.agentName != null || tab.sessionId != null)
                     _AgentHandle(store: store, tab: tab),
+                  // Preso é o painel que a lateral não troca -- ver
+                  // [MxTab.pinned]. Com um painel só, fica no menu: não há
+                  // outro pra ele estar fixo ao lado.
+                  if (store.isPinned(tab) || store.paneCount > 1)
+                    PanePinButton(
+                      pinned: store.isPinned(tab),
+                      onPressed: () => store.togglePin(tab),
+                    ),
                   // O tique fica antes do x porque é a outra forma de acabar
                   // com um painel — e a que fica com ele. Quem leu a resposta
                   // está olhando pra este header; é daqui que ele diz "essa
@@ -586,8 +617,11 @@ class _AgentHandle extends StatelessWidget {
   void _copy() {
     final name = tab.agentName;
     final id = tab.sessionId;
-    // ⌥ pede o id; sem nome pra copiar, o id é o que há.
-    final wantsId = HardwareKeyboard.instance.isAltPressed || name == null;
+    // ⌥ pede o id; sem nome pra copiar, o id é o que há. No Linux é o Ctrl:
+    // Alt+clique é do gerenciador de janelas, que arrasta a janela com ele.
+    final keyboard = HardwareKeyboard.instance;
+    final held = MxChord.linux ? keyboard.isControlPressed : keyboard.isAltPressed;
+    final wantsId = held || name == null;
     final value = wantsId ? id : name;
     if (value == null) return;
     Clipboard.setData(ClipboardData(text: value));
@@ -614,7 +648,7 @@ class _AgentHandle extends StatelessWidget {
     return IconButton(
       tooltip: [
         if (name != null) 'nome: $name  ·  clique pra copiar',
-        if (id != null) 'sessão: $id  ·  ⌥ clique pra copiar',
+        if (id != null) 'sessão: $id  ·  ${MxChord.linux ? 'Ctrl+clique' : '⌥ clique'} pra copiar',
       ].join('\n'),
       iconSize: 15,
       padding: EdgeInsets.zero,
@@ -762,7 +796,7 @@ class EmptyPane extends StatelessWidget {
       if ((store?.keymap[action] ?? action.defaults) case final chords when chords.isNotEmpty)
         (chords.map((c) => c.label).join('  '), action.label),
     // Fixo, e por isso escrito: são nove teclas, não uma escolha.
-    ('⌘1…9', 'ir pra enésima sessão'),
+    ('${MxChord.slot(0).label}…9', 'ir pra enésima sessão'),
   ];
 
   String get _headline {
@@ -772,55 +806,64 @@ class EmptyPane extends StatelessWidget {
     return '$live sessões rodando na lateral — clique numa pra trazer de volta';
   }
 
+  // Larga o bastante pras duas combinações de uma ação que tem duas — ⌃⇥ e
+  // ⌥⌘↓ são a mesma linha.
+  static double get _keysWidth => MxChord.linux ? 170 : 104;
+  static double get _cheatWidth => _keysWidth + 14 + 210;
+
   @override
   Widget build(BuildContext context) {
     return MxPanel(
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.grid_view_rounded, size: 30, color: Mx.fgFaint),
-            const SizedBox(height: 14),
-            Text(_headline, style: TextStyle(color: Mx.fgDim, fontSize: 13)),
-            const SizedBox(height: 8),
-            // A tela se divide por arraste e só por arraste, então é aqui que
-            // isso é dito: sem um atalho pra listar, era o único gesto do app
-            // que não aparecia em lugar nenhum.
-            SizedBox(
-              width: 330,
-              child: Text(
-                'arraste uma sessão da lateral pra cá — pela borda de um painel, '
-                'ela divide a tela; pelo meio, toma o lugar dele',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
-              ),
-            ),
-            const SizedBox(height: 22),
-            for (final (keys, what) in _keys)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      // Larga o bastante pras duas combinações de uma ação que
-                      // tem duas — ⌃⇥ e ⌥⌘↓ são a mesma linha.
-                      width: 104,
-                      child: Text(
-                        keys,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(fontFamily: Mx.mono, fontSize: 11.5, color: Mx.fg),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    SizedBox(
-                      width: 210,
-                      child: Text(what, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
-                    ),
-                  ],
+      child: LayoutBuilder(
+        builder: (context, box) => Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.grid_view_rounded, size: 30, color: Mx.fgFaint),
+              const SizedBox(height: 14),
+              Text(_headline, style: TextStyle(color: Mx.fgDim, fontSize: 13)),
+              const SizedBox(height: 8),
+              // A tela se divide por arraste e só por arraste, então é aqui que
+              // isso é dito: sem um atalho pra listar, era o único gesto do app
+              // que não aparecia em lugar nenhum.
+              SizedBox(
+                width: 330,
+                child: Text(
+                  'arraste uma sessão da lateral pra cá — pela borda de um painel, '
+                  'ela divide a tela; pelo meio, toma o lugar dele',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
                 ),
               ),
-          ],
+              // Num painel estreito a cola não cabe, e cortada ela ensina metade
+              // de um atalho: melhor não mostrar nada que mostrar isso.
+              if (box.maxWidth >= _cheatWidth) ...[
+                const SizedBox(height: 22),
+                for (final (keys, what) in _keys)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: _keysWidth,
+                          child: Text(
+                            keys,
+                            textAlign: TextAlign.right,
+                            style: TextStyle(fontFamily: Mx.mono, fontSize: 11.5, color: Mx.fg),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        SizedBox(
+                          width: 210,
+                          child: Text(what, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
         ),
       ),
     );

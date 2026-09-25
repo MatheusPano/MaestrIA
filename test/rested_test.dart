@@ -163,8 +163,24 @@ void main() {
 
       store.setWindowActive(true);
 
+      // O cartão do sino esperou a volta e conta a mesma coisa, com nome: o
+      // recado ficaria repetindo ele.
+      expect(store.toasts, hasLength(1));
+      expect(store.banner, isNull);
+      // A marca continua até você olhar pro painel.
+      expect(tab.unseen, isTrue);
+      store.dispose();
+    });
+
+    test('sem o cartão na tela, o recado conta o que parou', () {
+      final (store, tab) = storeWithPanel();
+      store.setWindowActive(false);
+      turn(store, tab);
+      store.dismissToast(store.toasts.single);
+
+      store.setWindowActive(true);
+
       expect(store.banner, 'implementa terminou enquanto você estava fora');
-      // A faixa é o aviso; a marca continua até você olhar pro painel.
       expect(tab.unseen, isTrue);
       store.dispose();
     });

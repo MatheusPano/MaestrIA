@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -80,15 +82,29 @@ void main() {
 
     test('an id from a retired theme lands on its nearest look-alike', () {
       // A config file from before the cut should come up in the window it
-      // had, not in the default — Tokyo Night was the default's twin, Frappé
-      // is Mocha, and the renamed grey is itself.
+      // had, not in the default — Tokyo Night was the default's twin and the
+      // renamed grey is itself.
       expect(MxThemes.byId('tokyo-night'), MxThemes.maestria);
-      expect(MxThemes.byId('catppuccin-frappe'), MxThemes.catppuccinMocha);
       expect(MxThemes.byId('chatgpt-dark'), MxThemes.graphite);
+    });
 
-      // Macchiato was one of those aliases and is now a theme of its own, so
-      // the id a config file already holds has to land on the real palette.
-      expect(MxThemes.byId('catppuccin-macchiato'), MxThemes.catppuccinMacchiato);
+    test('catppuccin comes from its plugin, retired aliases included', () {
+      // Without the plugin, Mocha is an id nobody knows — and so is Frappé,
+      // which points at it.
+      expect(MxThemes.byId('catppuccin-mocha'), MxThemes.maestria);
+      expect(MxThemes.byId('catppuccin-frappe'), MxThemes.maestria);
+      expect(MxThemes.isBuiltIn('catppuccin-mocha'), isFalse);
+
+      final mocha = MxPalette.fromJson({
+        ...jsonDecode(File('examples/plugins/tema-e-atalhos/themes/aurora.json').readAsStringSync())
+            as Map<String, dynamic>,
+        'id': 'catppuccin-mocha',
+      });
+      MxThemes.extra.add(mocha);
+      addTearDown(MxThemes.extra.clear);
+      expect(MxThemes.byId('catppuccin-mocha'), mocha);
+      expect(MxThemes.byId('catppuccin-frappe'), mocha);
+      expect(MxThemes.byId('rose-pine'), mocha);
     });
 
     test('no theme uses the same colour for a search hit and the current one', () {
@@ -102,7 +118,7 @@ void main() {
 
     test('the pty inherits the pane it sits in', () {
       expect(MxThemes.nord.terminal.background, MxThemes.nord.bg);
-      expect(MxThemes.catppuccinLatte.terminal.foreground, MxThemes.catppuccinLatte.fg);
+      expect(MxThemes.githubLight.terminal.foreground, MxThemes.githubLight.fg);
     });
   });
 
@@ -119,14 +135,14 @@ void main() {
 
     testWidgets('a light theme takes the Material base with it', (tester) async {
       await pumpSidebar(tester);
-      Mx.apply(MxThemes.catppuccinLatte);
+      Mx.apply(MxThemes.githubLight);
       // MaterialApp cross-fades its ThemeData, so the new brightness is only
       // in place once that animation is done.
       await tester.pumpAndSettle();
 
       final theme = Theme.of(tester.element(find.byType(Scaffold)));
       expect(theme.brightness, Brightness.light);
-      expect(theme.scaffoldBackgroundColor, MxThemes.catppuccinLatte.canvas);
+      expect(theme.scaffoldBackgroundColor, MxThemes.githubLight.canvas);
     });
   });
 }

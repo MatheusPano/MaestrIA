@@ -290,10 +290,12 @@ void main() {
 
       final field = tester.getRect(find.byType(TextField));
 
-      // A pasta e o relatório embaixo do campo, não ao lado dele. Pelo glifo e
-      // não pelo tooltip: os dois que ensinam atalho carregam a tecla junto.
+      // A pasta e o histórico embaixo do campo, não ao lado dele. Pelo glifo e
+      // não pelo tooltip, como sempre foi aqui. (O relatório também morava
+      // nesta faixa; hoje ele é um plugin, e sem plugin instalado não há
+      // botão dele.)
       expect(find.byTooltip('adicionar uma pasta ao cockpit'), findsOneWidget);
-      for (final icon in [Icons.create_new_folder_outlined, Icons.receipt_long_outlined]) {
+      for (final icon in [Icons.create_new_folder_outlined, Icons.history_outlined]) {
         final glyph = find.byIcon(icon);
         expect(glyph, findsOneWidget, reason: '$icon');
         expect(tester.getRect(glyph).top, greaterThan(field.bottom), reason: '$icon');

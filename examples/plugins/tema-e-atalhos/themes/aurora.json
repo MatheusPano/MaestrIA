@@ -1,0 +1,30 @@
+{
+  "id": "exemplo-aurora",
+  "label": "Aurora",
+  "dark": true,
+  "canvas": "#0B1016",
+  "bg": "#121A22",
+  "bgSidebar": "#16202A",
+  "bgHover": "#1F2B37",
+  "bgActive": "#283746",
+  "border": "#223040",
+  "fg": "#D8E3EC",
+  "fgDim": "#9DB0C0",
+  "fgFaint": "#5F7385",
+  "accent": "#5EE3C1",
+  "green": "#8BD88B",
+  "yellow": "#F2CD73",
+  "red": "#F07A83",
+  "purple": "#B69CF5",
+  "ansi": {
+    "black": "#283746",
+    "red": "#F07A83",
+    "green": "#8BD88B",
+    "yellow": "#F2CD73",
+    "blue": "#72B6F2",
+    "magenta": "#B69CF5",
+    "cyan": "#5EE3C1",
+    "white": "#D8E3EC",
+    "brightBlack": "#5F7385"
+  }
+}

@@ -23,8 +23,9 @@ import 'layout.dart';
 import 'links.dart';
 import 'notify.dart';
 import 'paths.dart';
+import 'plugin_api.dart';
+import 'plugins.dart';
 import 'pty.dart';
-import 'report.dart';
 import 'setup.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
@@ -38,7 +39,11 @@ import 'workspace.dart';
 ///
 /// [setup] é o segundo de fora: os arquivos que o Claude Code lê de uma
 /// pasta, editáveis. Ver [MxSetup] e `ui/setup_pane.dart`.
-enum TabKind { shell, claude, reader, setup }
+///
+/// [plugin] é o terceiro: uma janela que um plugin desenhou em blocos. Ver
+/// [PluginView] e `ui/plugin_pane.dart`. Só em memória -- o plugin é quem sabe
+/// o que ela mostra, e amanhã ele abre de novo se ainda quiser.
+enum TabKind { shell, claude, reader, setup, plugin }
 
 /// One panel. Owns its pty and its hook-derived state.
 class MxTab {
@@ -51,6 +56,7 @@ class MxTab {
     this.customLabel,
     this.doc,
     this.setup,
+    this.view,
     this.launcher,
   });
 
@@ -97,6 +103,25 @@ class MxTab {
   /// motivo.
   bool get isSetup => kind == TabKind.setup && setup != null;
 
+  /// O que este painel mostra, quando ele é um [TabKind.plugin]. Mesma regra
+  /// de [doc] e [setup]: não-null exatamente nos painéis de plugin.
+  final PluginView? view;
+
+  bool get isPluginView => kind == TabKind.plugin && view != null;
+
+  /// O plugin dono deste terminal, quando um plugin o abriu pra ele
+  /// (`session.openShell` com `owned`): a conexão do ssh. Um terminal com dono
+  /// mora na aba do plugin, e não nos avulsos -- é lá que o plugin o desenha,
+  /// verde enquanto conecta, e é por lá que se volta a ele.
+  ///
+  /// Não é lembrado: uma conexão não se retoma, e um terminal que voltasse
+  /// amanhã seria um prompt local com o nome do servidor.
+  String? owner;
+
+  /// O que o dono disse que este terminal é (o id do host), pra ele se achar
+  /// de novo depois de reiniciar sem ter que adivinhar pelo título.
+  String? ownerTag;
+
   /// Um painel que não é uma sessão de terminal: não tem pty, não tem saída
   /// pra ler e não tem o que matar no encerramento.
   ///
@@ -104,7 +129,7 @@ class MxTab {
   /// perguntavam `isReader` quase todos queriam perguntar isto -- um editor de
   /// configuração tem tão pouco a ver com git, fila e status quanto uma folha
   /// de markdown.
-  bool get isPassive => isReader || isSetup;
+  bool get isPassive => isReader || isSetup || isPluginView;
 
   /// O programa que este painel subiu, quando ele saiu de um. Ver [Launcher].
   ///
@@ -193,6 +218,18 @@ class MxTab {
   /// still resumable. What it stops being is *pending*.
   bool done = false;
 
+  /// Preso no lugar: escolher outra sessão na lateral não troca este painel.
+  ///
+  /// É o "tela dividida com um fixo e outro que vai mudando". Sem isso o
+  /// clique troca o painel em foco (ver [AppStore._place]), e o foco é
+  /// justamente o que você mexe o tempo todo -- bastava ler o painel de
+  /// referência uma vez pra que o próximo clique o levasse embora.
+  ///
+  /// Só vale enquanto o painel está na tela: é uma propriedade do lugar que
+  /// ele ocupa, e uma sessão que saiu dele deixa de estar presa. Quem
+  /// pergunta é [AppStore.isPinned], não este campo.
+  bool pinned = false;
+
   /// Sem processo de propósito: a conversa fica, a memória volta.
   ///
   /// Uma sessão do claude parada no prompt custa uns 200MB de RAM pra não
@@ -253,6 +290,7 @@ class MxTab {
     // E a configuração pela pasta que ela configura: é a única coisa que
     // distingue duas abertas lado a lado.
     if (setup case final open?) return 'claude · ${open.name}';
+    if (view case final v?) return v.title;
     // E um painel de programa se chama pelo programa: "btop", e não pelo repo
     // em que ele por acaso subiu. Mesmo raciocínio do documento acima -- a
     // pasta e a branch não dizem nada dele que o nome não diga melhor.
@@ -287,6 +325,7 @@ class MxTab {
     }
     // O arquivo aberto no editor, que é o que o título não diz.
     if (setup case final open?) return open.selected ?? 'configuração do claude';
+    if (view case final v?) return 'plugin · ${v.pluginName}';
     // Antes do "processo saiu": saiu porque o app mandou, e o que a linha tem
     // a dizer é o que fazer a respeito.
     if (hibernated) return 'hibernada · clique pra retomar';
@@ -319,7 +358,7 @@ class MxTab {
   /// [ClaudeStatus.unknown], que é o estado que não acende badge, não conta
   /// como pendência e não notifica.
   ClaudeStatus get status => switch (kind) {
-    TabKind.reader || TabKind.setup => ClaudeStatus.unknown,
+    TabKind.reader || TabKind.setup || TabKind.plugin => ClaudeStatus.unknown,
     TabKind.shell => exited ? ClaudeStatus.ended : ClaudeStatus.unknown,
     TabKind.claude => hooks.status,
   };
@@ -382,6 +421,9 @@ class MxTab {
     // hibernada reabre com ela hibernada -- religar treze processos no launch
     // pra deixá-los parados era justamente o que a hibernação veio evitar.
     if (hibernated) 'hibernated': true,
+    // No layout e não na receita, como o grupo: preso é um jeito de estar
+    // nesta tela, e a tela é o que o layout guarda.
+    if (pinned) 'pinned': true,
   };
 }
 
@@ -451,6 +493,19 @@ class AppStore extends ChangeNotifier {
   final AgentsWatcher agents = AgentsWatcher();
   final Notifier notifier = Notifier();
 
+  /// Os plugins instalados. Ver `services/plugins.dart`.
+  final Plugins plugins = Plugins();
+
+  /// Quem mostra o seletor rápido de um plugin (`window.pick`). A store não
+  /// tem tela; quem liga isto é o `main.dart`, que tem um contexto debaixo
+  /// do navegador. Null nos testes, e aí o pedido volta com erro.
+  Future<String?> Function({
+    required String title,
+    String? placeholder,
+    required List<({String value, String label, String? detail})> items,
+  })?
+  quickPick;
+
   final List<Folder> folders = [];
 
   /// Os workspaces do VS Code que viraram seção na lateral. Ver [Workspace] --
@@ -513,6 +568,41 @@ class AppStore extends ChangeNotifier {
 
   String? banner;
 
+  /// O sino: o que os painéis fizeram enquanto você olhava pra outro lugar,
+  /// mais novo primeiro. Ver [MxNotice].
+  ///
+  /// Só em memória, como [MxTab.restedAt]: um painel restaurado retoma a
+  /// conversa de ontem, mas a pergunta de ontem já não está esperando ninguém.
+  final List<MxNotice> notices = [];
+
+  /// Até onde o sino lembra. Cinquenta é mais do que um dia de trabalho
+  /// produz de coisa que ainda interessa, e o que passar disso é arqueologia.
+  static const noticeCap = 50;
+
+  /// A lista do sino está aberta.
+  bool noticesOpen = false;
+
+  int get unreadNotices => notices.where((n) => !n.read).length;
+
+  /// Os avisos que estão na tela agora, em cartões no canto -- o mais novo
+  /// embaixo, perto do sino de onde ele veio. Ver [toastLife].
+  ///
+  /// Um subconjunto de [notices], não uma lista à parte: dispensar o cartão
+  /// tira ele da tela, e a linha continua no sino.
+  final List<MxNotice> toasts = [];
+
+  /// Quantos cartões cabem de uma vez. Cinco painéis terminando juntos são
+  /// três cartões e o número do sino dizendo o resto.
+  static const toastCap = 3;
+
+  /// Não perturbe: os avisos entram no sino, mas não sobem na tela.
+  ///
+  /// Lembrado, como a lateral escondida: é um jeito de trabalhar, não um
+  /// humor de cinco minutos.
+  bool doNotDisturb = false;
+
+  final Map<MxNotice, Timer> _toastTimers = {};
+
   /// How wide the sidebar is, in logical pixels. Dragged by the gutter between
   /// it and the panes, and remembered — a width you set once is a width you
   /// set once.
@@ -529,6 +619,15 @@ class AppStore extends ChangeNotifier {
   /// [sidebarWidth], e é por isso que são dois campos: a largura que ela volta
   /// a ter é a que você tinha deixado.
   bool sidebarHidden = false;
+
+  /// O que a lateral está mostrando: null pras sessões, ou o id do plugin cuja
+  /// aba foi escolhida na faixa (ver [railPlugins]). É o que o VS Code chama de
+  /// "view container": cada ícone da faixa troca a lateral inteira, em vez de
+  /// cada plugin empilhar a própria seção embaixo das pastas.
+  ///
+  /// Lembrado como a largura, e pelo mesmo motivo. Um plugin que sumiu não
+  /// deixa a lateral vazia -- ver [shownPlugin].
+  String? sidebarView;
 
   /// The chosen palette. Lives here because it is remembered like everything
   /// else the window keeps; [Mx.current] is what the widgets actually read.
@@ -577,6 +676,17 @@ class AppStore extends ChangeNotifier {
 
   bool isOpen(MxTab tab) => Panes.has(panes, tab.id);
 
+  /// Preso e na tela -- ver [MxTab.pinned].
+  bool isPinned(MxTab tab) => tab.pinned && isOpen(tab);
+
+  /// Prende ou solta o painel de [tab]. Fora da tela não há lugar pra prender.
+  void togglePin(MxTab tab) {
+    if (!isOpen(tab)) return;
+    tab.pinned = !tab.pinned;
+    _save();
+    notifyListeners();
+  }
+
   /// Cai no primeiro painel quando o foco aponta pra uma sessão que já saiu da
   /// tela: sempre há um painel em foco enquanto houver painel.
   MxTab? get focusedTab => _byId(focusedPaneId) ?? _byId(Panes.order(panes).firstOrNull);
@@ -585,7 +695,20 @@ class AppStore extends ChangeNotifier {
     await hooks.start();
     hooks.events.listen(applyHook);
     agents.updates.listen(applyAgents);
+    plugins.onCall = PluginApi(this).handle;
+    // Ligar, desligar ou ver um plugin cair muda o que os menus oferecem e o
+    // que o teclado faz. O log não passa por aqui -- ver [Plugins.logs].
+    plugins.addListener(notifyListeners);
     await _loadConfig();
+    // Um config que não existe ainda não leu a pasta de plugins no caminho.
+    if (!plugins.scanned) plugins.scan();
+    plugins.onReady = (p) {
+      if (p.id == _sidebarLive) plugins.tell(p, 'sidebar.shown');
+    };
+    plugins.startup();
+    // A aba de plugin que ficou na tela da última vez precisa do processo de
+    // pé pra ter o que mostrar.
+    _syncSidebar(announce: true);
     agents.start();
     Timer.periodic(const Duration(seconds: 1), (_) {
       // O relógio da fila: um passo só sai quando a sessão está parada há um
@@ -656,8 +779,14 @@ class AppStore extends ChangeNotifier {
       final w = (j['sidebarWidth'] as num?)?.toDouble();
       if (w != null) sidebarWidth = w.clamp(minSidebar, maxSidebar);
       sidebarHidden = j['sidebarHidden'] as bool? ?? false;
+      sidebarView = j['sidebarView'] as String?;
+      doNotDisturb = j['doNotDisturb'] as bool? ?? false;
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
+      // Antes do tema: um tema de plugin só existe depois que o plugin é
+      // lido, e o id salvo cairia no padrão.
+      plugins.load(j['plugins']);
+      plugins.scan();
       Mx.applyId(j['theme'] as String?);
       Mx.applyType(MxType.fromJson(j['type']));
       keymap.load(j['shortcuts']);
@@ -691,6 +820,7 @@ class AppStore extends ChangeNotifier {
         (pane['plans'] as List? ?? const []).map(PlanNote.fromJson).whereType<PlanNote>(),
       );
       tab.done = pane['done'] == true;
+      tab.pinned = pane['pinned'] == true;
       // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
       // deixaria as linhas coloridas de um conjunto que não abre mais.
       final group = pane['group'] as String?;
@@ -805,6 +935,13 @@ class AppStore extends ChangeNotifier {
 
   void _save() {
     if (_restoring || _gone) return;
+    // Quem saiu da tela deixa de estar preso, por qualquer caminho que tenha
+    // saído -- o x, um grupo que tomou a tela, outra sessão solta em cima.
+    // Aqui porque todo gesto que mexe na árvore passa por aqui, e senão a
+    // sessão voltaria presa num lugar que você nunca prendeu.
+    for (final t in tabs) {
+      if (t.pinned && !isOpen(t)) t.pinned = false;
+    }
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 400), _writeConfig);
   }
@@ -816,7 +953,10 @@ class AppStore extends ChangeNotifier {
       // ver [MxTab.resumable]. Descartar todo painel sem processo era descartar
       // a sessão que foi pro background junto com o terminal morto: o claude
       // sai do pty e continua rodando, e era esse id que fazia falta na volta.
-      final open = tabs.where((t) => !t.exited || t.resumable).toList();
+      // Os de plugin ficam: ver [TabKind.plugin].
+      final open = tabs
+          .where((t) => !t.isPluginView && t.owner == null && (!t.exited || t.resumable))
+          .toList();
       final tree = Panes.toJson(panes, (id) => open.indexWhere((t) => t.id == id));
       // Escrito ao lado e movido pra cima, em vez de escrito em cima: um
       // `writeAsString` direto cria o arquivo, trunca e só depois escreve, e
@@ -845,11 +985,14 @@ class AppStore extends ChangeNotifier {
           // Só quando está escondida, como os outros interruptores daqui: um
           // config que não fala do assunto é um config com a lateral na tela.
           if (sidebarHidden) 'sidebarHidden': true,
+          if (sidebarView != null) 'sidebarView': sidebarView,
+          if (doNotDisturb) 'doNotDisturb': true,
           if (groupsCollapsed) 'groupsCollapsed': true,
           if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
           'theme': Mx.palette.id,
           if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
+          if (plugins.toJson() case final p when p.isNotEmpty) 'plugins': p,
           // --- ditado (vocalização) — fora desta versão ----------------------
           // Sai do arquivo no próximo save, junto com o resto: é config de uma
           // feature que ainda não estreou, então não há o que preservar.
@@ -1000,8 +1143,142 @@ class AppStore extends ChangeNotifier {
     if (hidden == sidebarHidden) return;
     sidebarHidden = hidden;
     _save();
+    _syncSidebar();
     notifyListeners();
   }
+
+  /// O clique num ícone da faixa: [pluginId] null é o das sessões.
+  ///
+  /// O do VS Code, inteiro: com a lateral escondida, qualquer ícone a traz de
+  /// volta já na aba dele; clicar no ícone da aba que já está na tela esconde
+  /// a lateral. É o que deixa a faixa ser também o interruptor, sem um quarto
+  /// botão pra isso.
+  void showSidebarView(String? pluginId) {
+    final current = shownPlugin?.id;
+    if (!sidebarHidden && current == pluginId) return setSidebarHidden(true);
+    sidebarHidden = false;
+    sidebarView = pluginId;
+    _save();
+    // Todo clique avisa, mesmo o que volta pra aba que já era a dela: é a
+    // deixa pro plugin olhar de novo -- o git relê o status, o flutter os
+    // aparelhos.
+    _syncSidebar(announce: true);
+    notifyListeners();
+  }
+
+  /// O plugin cuja aba própria está na tela agora. Ver [_syncSidebar].
+  String? _sidebarLive;
+
+  /// Conta ao plugin que a aba dele entrou ou saiu da tela
+  /// (`sidebar.shown` / `sidebar.hidden`).
+  ///
+  /// Entrar sobe o processo se ele não está de pé: a aba é dele, e sem ele
+  /// não há o que desenhar. O aviso sai quando ele terminar de subir -- ver
+  /// [Plugins.onReady]. Sair não derruba nada: é a deixa pra ele parar de
+  /// vigiar o que ninguém está vendo.
+  void _syncSidebar({bool announce = false}) {
+    final shown = sidebarHidden ? null : shownPlugin;
+    final now = shown != null && shown.manifest!.sidebar ? shown.id : null;
+    if (now == _sidebarLive && !announce) return;
+    if (_sidebarLive case final gone? when gone != now) {
+      if (plugins.byId(gone) case final p?) plugins.tell(p, 'sidebar.hidden');
+    }
+    _sidebarLive = now;
+    if (now == null) return;
+    final p = plugins.byId(now)!;
+    plugins.isUp(p) ? plugins.tell(p, 'sidebar.shown') : plugins.wake(p);
+  }
+
+  /// A aba própria de cada plugin que já mandou uma (`sidebar.update`). Um
+  /// [MxTab] fora de [tabs], como a janela de plugin sem painel: é o que deixa
+  /// a aba ser desenhada pelo mesmo [PluginPane] das janelas -- os mesmos
+  /// blocos, os mesmos campos, o mesmo `view.action` de volta, com
+  /// `viewId: "sidebar"`.
+  final Map<String, MxTab> _sidebarTabs = {};
+
+  /// O id de janela reservado pra aba da lateral.
+  static const sidebarViewId = 'sidebar';
+
+  /// A aba própria de [plugin], se ele já mandou alguma.
+  MxTab? sidebarTabOf(MxPlugin plugin) => _sidebarTabs[plugin.id];
+
+  /// O selo que cada plugin pediu pro ícone dele na faixa -- as mudanças do
+  /// git, um app rodando. Ausente, o ícone conta as janelas abertas.
+  final Map<String, String> sidebarBadges = {};
+
+  /// Troca os blocos da aba de [plugin] e/ou o selo do ícone dele (vazio
+  /// tira). Null é "não mexe". Diz se a aba está na tela.
+  bool updatePluginSidebar(MxPlugin plugin, {List<Map<String, dynamic>>? blocks, String? badge}) {
+    if (badge != null) {
+      badge.isEmpty ? sidebarBadges.remove(plugin.id) : sidebarBadges[plugin.id] = badge;
+    }
+    if (blocks == null) {
+      notifyListeners();
+      return _sidebarLive == plugin.id;
+    }
+    final tab = _sidebarTabs.putIfAbsent(
+      plugin.id,
+      () => MxTab(
+        id: 'sidebar:${plugin.id}',
+        folder: loose,
+        kind: TabKind.plugin,
+        cwd: loose.root,
+        branch: '',
+        view: PluginView(
+          pluginId: plugin.id,
+          pluginName: plugin.name,
+          id: sidebarViewId,
+          title: plugin.name,
+          blocks: const [],
+        ),
+      ),
+    );
+    tab.view!.setBlocks(blocks);
+    notifyListeners();
+    return _sidebarLive == plugin.id;
+  }
+
+  /// Os plugins que ganham um ícone na faixa, na ordem dos plugins.
+  ///
+  /// Os que têm um lugar a oferecer: um desenho próprio e algum comando (o
+  /// Flutter, o SSH, o git) -- e qualquer um com janela aberta, que de outro
+  /// jeito não teria onde aparecer. Um plugin só de temas, ou o relatório, que
+  /// é um botão e não um lugar, fica fora: uma aba pra um botão é uma lateral
+  /// vazia com um botão no meio.
+  List<MxPlugin> get railPlugins => [
+    for (final p in plugins.all)
+      if ((p.active &&
+              (p.manifest!.sidebar ||
+                  (p.manifest!.icon != null && p.manifest!.commands.isNotEmpty))) ||
+          tabs.any((t) => t.view?.pluginId == p.id || t.owner == p.id))
+        p,
+  ];
+
+  /// O plugin da aba na tela, ou null pras sessões. Um [sidebarView] que
+  /// aponta pra um plugin que saiu da faixa cai nas sessões em vez de mostrar
+  /// uma aba de ninguém.
+  MxPlugin? get shownPlugin {
+    final id = sidebarView;
+    if (id == null) return null;
+    return railPlugins.firstWhereOrNull((p) => p.id == id);
+  }
+
+  /// As janelas abertas de [plugin], na ordem em que abriram.
+  List<MxTab> viewsOf(MxPlugin plugin) => tabs.where((t) => t.view?.pluginId == plugin.id).toList();
+
+  /// Os botões de plugin do rodapé: os que pediram lugar ali e cujo plugin
+  /// não tem aba na faixa -- o que tem já é um ícone, e dois ícones pro mesmo
+  /// lugar fariam pensar que são dois lugares.
+  List<PluginCommand> get footerCommands => plugins.commands
+      .where((c) => c.sidebar && !railPlugins.any((p) => p.id == c.pluginId))
+      .take(Plugins.maxSidebarCommands)
+      .toList();
+
+  /// As sessões do claude esperando por você, em todas as pastas. É o selo do
+  /// ícone das sessões na faixa: numa aba de plugin, a lista que diria isso
+  /// não está na tela.
+  List<MxTab> get waitingSessions =>
+      tabs.where((t) => t.kind == TabKind.claude && !t.done && t.status.needsHuman).toList();
 
   // --- folders -----------------------------------------------------------
 
@@ -2007,7 +2284,12 @@ class AppStore extends ChangeNotifier {
       notifyListeners();
       return open;
     }
-    final tab = _newSetup(MxSetup(root: root), folder: folder, cwd: cwd, project: project);
+    final tab = _newSetup(
+      MxSetup(root: root),
+      folder: folder,
+      cwd: cwd,
+      project: project,
+    );
     // Ao lado do que está em foco: quem abre a configuração de uma pasta
     // quer olhar pra ela junto da sessão que está rodando ali.
     _placeBeside(tab, focusedTab);
@@ -2026,100 +2308,193 @@ class AppStore extends ChangeNotifier {
     focusedPaneId = tab.id;
   }
 
-  // --- relatório do dia ---------------------------------------------------
+  // --- plugins ------------------------------------------------------------
 
-  /// Se o relatório está sendo escrito agora. Uma volta ao `claude -p` leva
-  /// dezenas de segundos, e um botão que não diz isso parece um botão quebrado.
-  bool get writingReport => _writingReport;
-  bool _writingReport = false;
+  MxTab? _pluginTab(String pluginId, String viewId) =>
+      tabs.firstWhereOrNull((t) => t.view?.pluginId == pluginId && t.view?.id == viewId);
 
-  /// Um dia, reunido e contado de volta, num painel de leitura.
+  /// A janela [viewId] do plugin, aberta ao lado do painel em foco.
   ///
-  /// O material é levantado aqui -- commits, worktrees sujas, as sessões desta
-  /// janela -- e só a prosa é pedida ao Claude; ver [DailyReport]. Quando não
-  /// dá, o painel abre com o material bruto e o motivo em cima dele: um
-  /// resumo que não deu pra escrever ainda tem o dia inteiro dentro.
-  ///
-  /// Sem [day] é hoje. Com um dia que já passou o material muda de fonte: os
-  /// painéis desta janela não são de lá, então o que rodou vem dos transcripts
-  /// que o próprio Claude Code arquiva -- ver [ChatHistory.read] --, e o que
-  /// estava sem commitar naquele dia não vem, porque não existe onde procurar.
-  Future<void> openDailyReport({DateTime? day}) async {
-    if (_writingReport) return;
-    final at = DateTime.now();
-    final which = day ?? at;
-    final today = DailyReport.sameDay(which, at);
-    final named = DailyReport.label(which, now: at);
-    _writingReport = true;
-    showBanner('relatório $named: reunindo o material e pedindo a prosa ao claude…');
-    try {
-      final material = await DailyReport.material(
-        folders: folders,
-        worktrees: worktrees,
-        projects: projects,
-        day: which,
-        now: at,
-        // Um leitor não é uma sessão: não rodou nada, não mexeu em nada e não
-        // tem o que reportar sobre o dia.
-        //
-        // Num relatório de outro dia sobram os painéis abertos *naquele* dia
-        // -- raro, mas honesto: uma sessão de sexta que ainda está de pé é uma
-        // sessão de sexta. Os de hoje não entram num relatório de ontem.
-        sessions: [
-          for (final t in tabs)
-            if (!t.isPassive && (today || DailyReport.sameDay(t.startedAt, which))) _noteOf(t),
-        ],
-        chats: today ? const [] : await _chatsOn(which),
-      );
-      final outcome = await DailyReport.ask(material, day: which, now: at);
-      showBanner(
-        outcome.ok
-            ? 'relatório $named pronto'
-            : 'não deu pra escrever o relatório — abri o material bruto',
-        sticky: !outcome.ok,
-      );
-      showDoc(
-        MxDoc(
-          source: DocSource.report,
-          title: 'relatório $named',
-          text: outcome.ok
-              ? outcome.text
-              : '# o relatório não saiu\n\n${outcome.text}\n\n---\n\n${outcome.material}',
-          at: outcome.at,
-        ),
-      );
-    } finally {
-      _writingReport = false;
+  /// Uma por id, como a configuração é uma por pasta: pedir de novo a que já
+  /// existe troca o conteúdo dela e a traz pra tela, em vez de empilhar uma
+  /// segunda igual. É o que deixa um plugin chamar `view.open` toda vez que o
+  /// comando dele roda, sem ter que lembrar se ela ainda está aberta.
+  MxTab openPluginView(
+    MxPlugin plugin,
+    String viewId, {
+    required String title,
+    required List<Map<String, dynamic>> blocks,
+  }) {
+    final source = focusedTab;
+    if (_pluginTab(plugin.id, viewId) case final open?) {
+      open.view!
+        ..title = title
+        ..setBlocks(blocks);
+      if (!Panes.has(panes, open.id)) _placeBeside(open, source);
+      focusedPaneId = open.id;
       notifyListeners();
+      return open;
+    }
+    // Da bandeja solta, e não da pasta do painel em foco: a janela não é
+    // daquela pasta (ver [tabsOf]), e herdar a cor ou o projeto dela diria
+    // que é.
+    final tab = MxTab(
+      id: 'tab${_seq++}',
+      folder: loose,
+      kind: TabKind.plugin,
+      cwd: loose.root,
+      branch: '',
+      view: PluginView(
+        pluginId: plugin.id,
+        pluginName: plugin.name,
+        id: viewId,
+        title: title,
+        blocks: blocks,
+      ),
+    );
+    // Fora do [_register], como o leitor: não há processo pra subir.
+    tabs.add(tab);
+    _placeBeside(tab, source);
+    notifyListeners();
+    return tab;
+  }
+
+  /// Troca o título e/ou os blocos de uma janela aberta. Diz se ela ainda
+  /// está aberta -- o plugin cuja janela você fechou fica sabendo por aqui.
+  bool updatePluginView(
+    MxPlugin plugin,
+    String viewId, {
+    String? title,
+    List<Map<String, dynamic>>? blocks,
+  }) {
+    final tab = _pluginTab(plugin.id, viewId);
+    if (tab == null) return false;
+    final view = tab.view!;
+    if (title != null) view.title = title;
+    if (blocks != null) view.setBlocks(blocks);
+    notifyListeners();
+    return true;
+  }
+
+  /// O console [consoleId] da janela [viewId], quando ela está aberta. Mexer
+  /// nele não repinta a janela -- ver [PluginConsole].
+  PluginConsole? pluginConsole(MxPlugin plugin, String viewId, String consoleId) =>
+      (viewId == sidebarViewId ? _sidebarTabs[plugin.id] : _pluginTab(plugin.id, viewId))?.view!
+          .console(consoleId);
+
+  void closePluginView(MxPlugin plugin, String viewId) {
+    if (_pluginTab(plugin.id, viewId) case final tab?) closeTab(tab);
+  }
+
+  void _closePluginViewsOf(String pluginId) {
+    for (final t in tabs.where((t) => t.view?.pluginId == pluginId).toList()) {
+      closeTab(t);
     }
   }
 
-  /// As conversas daquele dia, achatadas no que o relatório sabe ler.
-  Future<List<ArchivedChat>> _chatsOn(DateTime day) async {
-    final chats = await ChatHistory.read(on: day);
-    return [
-      for (final c in chats) ArchivedChat(title: c.title, folder: c.where, at: c.at, size: c.size),
-    ];
+  /// Um clique ou envio dentro de uma janela de plugin, de volta pra ele.
+  void pluginViewAction(MxTab tab, String action, Map<String, dynamic> values) {
+    final view = tab.view;
+    if (view == null) return;
+    plugins.viewAction(view.pluginId, view.id, action, values);
   }
 
-  /// Um painel, achatado no que o relatório sabe ler.
-  SessionNote _noteOf(MxTab t) => SessionNote(
-    title: t.title,
-    folder: t.folder.isLoose ? 'avulsos' : t.folder.name,
-    // O programa, quando o painel é de um: "btop" diz mais ao relatório do
-    // que "shell" -- que é o que todo painel de programa era aqui.
-    kind: t.kind == TabKind.claude ? 'claude' : (t.launcher?.name ?? 'shell'),
-    status: t.status.label,
-    startedAt: t.startedAt,
-    project: projectOf(t)?.name,
-    branch: t.branch,
-    prompts: t.hooks.prompts,
-    tools: t.hooks.tools,
-    touched: t.hooks.touched,
-    lastPrompt: t.hooks.lastPrompt,
-    lastMessage: t.hooks.lastMessage,
-    exited: t.exited,
-  );
+  /// Roda o comando de um plugin a partir de [on] -- o painel do menu que o
+  /// ofereceu, ou o que está em foco.
+  Future<void> runPluginCommand(PluginCommand command, {MxTab? on}) async {
+    final tab = on ?? focusedTab;
+    final folder = tab?.folder ?? focusedFolder;
+    final cwd = tab?.cwd ?? folder.root;
+    final plugin = plugins.byId(command.pluginId);
+    final values = {
+      'cwd': cwd,
+      'folder': folder.root,
+      'sessionId': tab?.resumeId ?? '',
+      'title': tab?.title ?? '',
+      'pluginDir': plugin?.dir ?? '',
+    };
+    switch (command.target) {
+      case CommandTarget.terminal:
+        openShell(
+          folder,
+          cwd: cwd,
+          command: expandCommand(command.run!, values, quote: true),
+          project: tab == null ? null : projectOf(tab),
+        );
+      case CommandTarget.background:
+        final r = await Sh.run(expandCommand(command.run!, values, quote: true), cwd: cwd);
+        final said = (r.ok ? r.stdout : (r.stderr.isEmpty ? r.stdout : r.stderr))
+            .split('\n')
+            .where((l) => l.trim().isNotEmpty)
+            .lastOrNull;
+        showBanner(
+          r.ok
+              ? '${command.title}: ${said ?? 'feito'}'
+              : '${command.title} falhou (código ${r.code})${said == null ? '' : ': $said'}',
+          sticky: !r.ok,
+        );
+      case CommandTarget.session:
+        if (tab == null || tab.kind != TabKind.claude || tab.exited || tab.hibernated) {
+          showBanner('${command.title}: precisa de uma sessão do claude rodando em foco');
+          return;
+        }
+        await tab.term.submit(expandCommand(command.send!, values, quote: false));
+      case CommandTarget.plugin:
+        try {
+          await plugins.invoke(command, {...values, if (tab != null) 'tabId': tab.id});
+        } on PluginRpcError catch (e) {
+          showBanner('${command.title}: ${e.message}', sticky: true);
+        }
+    }
+  }
+
+  /// Troca `${cwd}`, `${folder}`, `${sessionId}`, `${title}` e `${pluginDir}`
+  /// pelos valores do painel. Num comando de shell cada valor vai entre aspas
+  /// -- um título com espaço ou uma pasta com `$` não podem virar outro
+  /// comando. Num texto pra sessão vai cru.
+  @visibleForTesting
+  static String expandCommand(String template, Map<String, String> values, {required bool quote}) =>
+      template.replaceAllMapped(RegExp(r'\$\{(\w+)\}'), (m) {
+        final v = values[m.group(1)];
+        if (v == null) return m.group(0)!;
+        return quote ? Sh.q(v) : v;
+      });
+
+  /// Liga ou desliga um plugin. Desligado, as janelas dele fecham: não há
+  /// mais ninguém do outro lado pra atender um clique.
+  Future<void> setPluginEnabled(MxPlugin plugin, bool on) async {
+    await plugins.setEnabled(plugin, on);
+    if (!on) _closePluginViewsOf(plugin.id);
+    // O tema em uso pode ter sido dele: [MxThemes.byId] cai no padrão.
+    if (!on) Mx.applyId(Mx.palette.id);
+    _save();
+    notifyListeners();
+  }
+
+  Future<void> uninstallPlugin(MxPlugin plugin) async {
+    _closePluginViewsOf(plugin.id);
+    await plugins.uninstall(plugin);
+    Mx.applyId(Mx.palette.id);
+    _save();
+    notifyListeners();
+  }
+
+  /// Uma configuração de plugin, trocada na tela e guardada no config.
+  void setPluginSetting(MxPlugin plugin, String id, Object? value) {
+    plugins.setSetting(plugin, id, value);
+    _save();
+    notifyListeners();
+  }
+
+  Future<MxPlugin> installPlugin(StagedPlugin staged) async {
+    final plugin = await plugins.commit(staged);
+    // Uma versão nova pode ter trocado as janelas; as antigas eram do
+    // processo que acabou de cair.
+    _closePluginViewsOf(plugin.id);
+    _save();
+    notifyListeners();
+    return plugin;
+  }
 
   /// The manual worktree dance, as one button.
   Future<MxTab?> newTask(
@@ -2234,6 +2609,11 @@ class AppStore extends ChangeNotifier {
 
   void _register(MxTab tab) {
     tabs.add(tab);
+    plugins.emit(
+      'session.opened',
+      {'tabId': tab.id, 'kind': tab.kind.name, 'cwd': tab.cwd, 'folder': tab.folder.root},
+      activations: ['onSession'],
+    );
     // A new panel lands in whichever pane you were looking at.
     _place(tab);
     tab.term.onExit = () {
@@ -2244,6 +2624,13 @@ class AppStore extends ChangeNotifier {
       if (tab.kind == TabKind.claude && alive.inSeconds < 5) {
         showBanner(earlyExitMessage(tab.title, tab.term.exitCode), sticky: true);
       }
+      // O processo saiu e o painel ficou: o ssh que caiu é a linha que o
+      // plugin pinta de vermelho.
+      plugins.emit(
+        'session.exited',
+        {'tabId': tab.id, 'code': tab.term.exitCode},
+        activations: ['onSession'],
+      );
       _save();
       notifyListeners();
     };
@@ -2267,7 +2654,9 @@ class AppStore extends ChangeNotifier {
     // O clique numa hibernada é o "retomar" -- ver [MxTab.hibernated].
     if (tab.hibernated) unawaited(wake(tab));
     final group = activeGroup;
-    if (group != null && tab.groupId != group.id) {
+    // Um painel preso segura a grade: trocar o grupo inteiro levaria junto
+    // o painel que você prendeu justamente pra ele ficar.
+    if (group != null && tab.groupId != group.id && !openPanes.any(isPinned)) {
       panes = PaneLeaf(tab.id);
       focusedPaneId = tab.id;
     } else {
@@ -2284,11 +2673,29 @@ class AppStore extends ChangeNotifier {
   /// troca o que está no lugar em foco em vez de abrir mais um. Abrir lugar é
   /// arrastar -- é o único gesto que divide a tela, e é assim de propósito:
   /// clicar numa lista de vinte sessões não pode ir picando a janela.
+  ///
+  /// O lugar em foco, a menos que ele esteja preso (ver [MxTab.pinned]): aí é
+  /// o primeiro solto da tela. Com todos presos não há lugar pra trocar, e a
+  /// sessão abre um ao lado do que está em foco -- prender tudo é dizer que
+  /// nada daquilo sai.
   void _place(MxTab tab) {
     if (panes == null) {
       panes = PaneLeaf(tab.id);
     } else if (!Panes.has(panes, tab.id)) {
-      Panes.swap(panes, focusedTab?.id ?? Panes.order(panes).first, tab.id);
+      final focused = focusedTab;
+      final loose = focused != null && !isPinned(focused)
+          ? focused.id
+          : openPanes.firstWhereOrNull((t) => !isPinned(t))?.id;
+      if (loose != null) {
+        Panes.swap(panes, loose, tab.id);
+      } else {
+        panes = Panes.insert(
+          panes!,
+          tabId: tab.id,
+          targetId: focused?.id ?? Panes.order(panes).first,
+          side: DropSide.right,
+        );
+      }
     }
     focusedPaneId = tab.id;
   }
@@ -2324,6 +2731,9 @@ class AppStore extends ChangeNotifier {
   /// tela, [dismiss].
   void closeTab(MxTab tab) {
     tab.armed = false;
+    if (!tab.isPassive) {
+      plugins.emit('session.closed', {'tabId': tab.id}, activations: ['onSession']);
+    }
     // Sem await de propósito: [TermSession.kill] espera o hangup ser atendido
     // antes de escalar, e a tela não tem nada a ganhar parada esperando por
     // isso. O painel sai da lateral agora; o processo termina de morrer
@@ -2645,7 +3055,9 @@ class AppStore extends ChangeNotifier {
     tab.hooks.status = ClaudeStatus.ended;
     tab.hooks.activeTool = null;
     tab.hooks.toolStartedAt = null;
-    tab.term.remark('hibernada — processo desligado pra liberar memória; a conversa volta com um clique');
+    tab.term.remark(
+      'hibernada — processo desligado pra liberar memória; a conversa volta com um clique',
+    );
     // Sem await, como em [closeTab]: o hangup é atendido no tempo dele e a
     // linha já pode dizer o que aconteceu. Sem pty não há o que desligar --
     // é o painel que ainda não subiu --, e aí basta declará-lo desligado.
@@ -2926,6 +3338,10 @@ class AppStore extends ChangeNotifier {
     }
     _drop(tab);
     if (side == DropSide.center) {
+      // Soltar em cima de um preso é trocar o que está no lugar preso, de
+      // propósito -- o arraste é o gesto que o clique não é. O lugar continua
+      // preso, agora com a sessão que chegou.
+      if (isPinned(target)) tab.pinned = true;
       Panes.swap(panes, target.id, tab.id);
     } else {
       panes = Panes.insert(panes!, tabId: tab.id, targetId: target.id, side: side);
@@ -2960,7 +3376,11 @@ class AppStore extends ChangeNotifier {
   @visibleForTesting
   bool seeFocused() {
     final tab = _byId(focusedPaneId);
-    if (tab == null || !tab.unseen || !watching(tab)) return false;
+    if (tab == null || !watching(tab)) return false;
+    // O sino pela mesma régua: um segundo olhando pro painel é ter visto o
+    // que ele avisou.
+    if (readNoticesOf(tab.id) && !tab.unseen) return true;
+    if (!tab.unseen) return false;
     tab.unseen = false;
     notifyListeners();
     return true;
@@ -2977,8 +3397,15 @@ class AppStore extends ChangeNotifier {
     windowActive = active;
     if (!active) {
       _awaySince = DateTime.now();
+      for (final t in _toastTimers.values) {
+        t.cancel();
+      }
+      _toastTimers.clear();
       notifyListeners();
       return;
+    }
+    for (final n in toasts) {
+      _armToast(n);
     }
     final since = _awaySince;
     _awaySince = null;
@@ -2988,9 +3415,13 @@ class AppStore extends ChangeNotifier {
             for (final t in tabs)
               if (t.unseen && t.restedAt != null && t.restedAt!.isAfter(since)) t,
           ];
-    if (landed.length == 1) {
+    // Os cartões do sino que esperaram a volta já contam essa história, e com
+    // nome; o recado é pra quando eles não contam -- e no não perturbe, nem
+    // ele.
+    final quiet = doNotDisturb || toasts.isNotEmpty;
+    if (!quiet && landed.length == 1) {
       showBanner('${landed.first.title} terminou enquanto você estava fora');
-    } else if (landed.length > 1) {
+    } else if (!quiet && landed.length > 1) {
       showBanner('${landed.length} painéis terminaram enquanto você estava fora');
     }
     notifyListeners();
@@ -3028,7 +3459,24 @@ class AppStore extends ChangeNotifier {
     select(tabs[next < 0 ? next + tabs.length : next]);
   }
 
-  List<MxTab> tabsOf(Folder p) => tabs.where((t) => t.folderRoot == p.root).toList();
+  /// Os painéis de uma pasta. As janelas de plugin ficam fora: elas moram na
+  /// aba do plugin que as abriu (ver [viewsOf]), e não na pasta do painel
+  /// que estava em foco quando alguém apertou o botão -- a central do Flutter
+  /// de um app não é da pasta de outro.
+  ///
+  /// Os terminais com dono também ficam fora (ver [MxTab.owner]) -- a não ser
+  /// que o dono tenha sido removido, e aí voltam pros avulsos em vez de sumir.
+  List<MxTab> tabsOf(Folder p) => tabs
+      .where(
+        (t) =>
+            t.folderRoot == p.root &&
+            !t.isPluginView &&
+            (t.owner == null || plugins.byId(t.owner!) == null),
+      )
+      .toList();
+
+  /// Os terminais que [plugin] abriu pra ele. Ver [MxTab.owner].
+  List<MxTab> ownedBy(MxPlugin plugin) => tabs.where((t) => t.owner == plugin.id).toList();
 
   int needingHuman(Folder p) => tabsOf(p).where((t) => !t.done && t.status.needsHuman).length;
 
@@ -3060,6 +3508,161 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- o sino -------------------------------------------------------------
+
+  /// Uma linha nova no sino, já lida se você estava olhando pro painel.
+  ///
+  /// Entra mesmo lida: o sino é também o histórico do dia, e "o que terminou
+  /// na última hora" inclui o que terminou na sua frente. O que ela não faz,
+  /// lida, é contar no número do sino.
+  void _notice(MxTab tab, MxNoticeKind kind) {
+    // Um aviso novo do mesmo painel aposenta os de antes: a pergunta que ele
+    // fez já foi respondida, ou ele não estaria parando de novo.
+    readNoticesOf(tab.id, notify: false);
+    final notice = MxNotice(tabId: tab.id, kind: kind, title: tab.title)..read = watching(tab);
+    notices.insert(0, notice);
+    if (notices.length > noticeCap) {
+      for (final old in notices.sublist(noticeCap)) {
+        _dropToast(old);
+      }
+      notices.removeRange(noticeCap, notices.length);
+    }
+    // Na tela só o que é novidade: o que terminou na sua frente você viu, e
+    // com a lista aberta a linha já está à vista.
+    if (!notice.read && !doNotDisturb && !noticesOpen) _toast(notice);
+  }
+
+  // --- os cartões na tela ---------------------------------------------------
+
+  /// Quanto um cartão fica na tela antes de sair sozinho. Mais que o
+  /// [bannerLife]: um recado confirma o que você fez, um aviso conta o que
+  /// você não viu -- e ele tem nome e verbo pra ler.
+  static const toastLife = Duration(seconds: 8);
+
+  void _toast(MxNotice notice) {
+    toasts.add(notice);
+    while (toasts.length > toastCap) {
+      _dropToast(toasts.first);
+    }
+    _armToast(notice);
+  }
+
+  /// O relógio do cartão só anda com você na janela: o que chegou enquanto
+  /// você estava em outro app espera a volta pra ser lido, em vez de sumir
+  /// sem plateia. Ver [setWindowActive].
+  void _armToast(MxNotice notice) {
+    _toastTimers.remove(notice)?.cancel();
+    if (!windowActive) return;
+    _toastTimers[notice] = Timer(toastLife, () => dismissToast(notice));
+  }
+
+  void _dropToast(MxNotice notice) {
+    _toastTimers.remove(notice)?.cancel();
+    toasts.remove(notice);
+  }
+
+  void _clearToasts() {
+    for (final t in _toastTimers.values) {
+      t.cancel();
+    }
+    _toastTimers.clear();
+    toasts.clear();
+  }
+
+  /// Tira o cartão da tela. A linha fica no sino, como estava.
+  void dismissToast(MxNotice notice) {
+    if (!toasts.contains(notice)) return;
+    _dropToast(notice);
+    notifyListeners();
+  }
+
+  /// O cartão sob o ponteiro não sai sozinho: some quem está sendo lido é
+  /// o cartão fugindo da mão. O relógio volta inteiro quando ela sai.
+  void holdToast(MxNotice notice, bool hold) {
+    if (!toasts.contains(notice)) return;
+    if (hold) {
+      _toastTimers.remove(notice)?.cancel();
+    } else {
+      _armToast(notice);
+    }
+  }
+
+  void setDoNotDisturb(bool on) {
+    if (on == doNotDisturb) return;
+    doNotDisturb = on;
+    // Ligar é pedir silêncio agora, não a partir do próximo.
+    if (on) _clearToasts();
+    _save();
+    notifyListeners();
+  }
+
+  void toggleDoNotDisturb() => setDoNotDisturb(!doNotDisturb);
+
+  /// Dá por lidos os avisos de um painel. Devolve se apagou algum.
+  bool readNoticesOf(String tabId, {bool notify = true}) {
+    var changed = false;
+    for (final n in notices) {
+      if (n.tabId == tabId && !n.read) {
+        n.read = true;
+        _dropToast(n);
+        changed = true;
+      }
+    }
+    if (changed && notify) notifyListeners();
+    return changed;
+  }
+
+  void toggleNotices() {
+    noticesOpen = !noticesOpen;
+    // A lista aberta mostra as mesmas linhas, e maiores: os cartões saem pra
+    // não ficar duas vezes a mesma coisa no mesmo canto.
+    if (noticesOpen) _clearToasts();
+    notifyListeners();
+  }
+
+  void closeNotices() {
+    if (!noticesOpen) return;
+    noticesOpen = false;
+    notifyListeners();
+  }
+
+  /// O clique numa linha do sino: leva você até o painel.
+  ///
+  /// Um painel que já foi fechado não tem pra onde levar; a linha fica, lida,
+  /// dizendo o que ele fez antes de ir embora.
+  void openNotice(MxNotice notice) {
+    final tab = _byId(notice.tabId);
+    _dropToast(notice);
+    if (tab == null) {
+      notice.read = true;
+      notifyListeners();
+      return;
+    }
+    readNoticesOf(tab.id, notify: false);
+    noticesOpen = false;
+    select(tab);
+  }
+
+  void dismissNotice(MxNotice notice) {
+    _dropToast(notice);
+    notices.remove(notice);
+    notifyListeners();
+  }
+
+  void readAllNotices() {
+    for (final n in notices) {
+      n.read = true;
+    }
+    _clearToasts();
+    notifyListeners();
+  }
+
+  void clearNotices() {
+    _clearToasts();
+    notices.clear();
+    notifyListeners();
+  }
+
   // --- incoming events ----------------------------------------------------
 
   /// One hook event, applied. Visible because the edge it watches for is the
@@ -3071,6 +3674,22 @@ class AppStore extends ChangeNotifier {
     final before = tab.hooks.status;
     final producedBefore = tab.hooks.touched.length;
     HookReducer.apply(tab.hooks, e.name, e.payload);
+    // Cru, como o Claude Code mandou: o plugin que pediu hooks quer o evento,
+    // não a leitura que a janela faz dele. Quem não declarou a permissão não
+    // recebe -- o payload tem o prompt e os argumentos das ferramentas.
+    plugins.emit(
+      'hook',
+      {'tabId': tab.id, 'name': e.name, 'payload': e.payload},
+      activations: ['onHook:${e.name}', 'onHook:*'],
+      needs: PluginPermission.hooks,
+    );
+    if (tab.hooks.status != before) {
+      plugins.emit(
+        'session.status',
+        {'tabId': tab.id, 'status': tab.hooks.status.name, 'previous': before.name},
+        activations: ['onSession'],
+      );
+    }
     // Asked for more, it is not finished any more. The mark is a judgement
     // about work that is over, and a prompt is the person who made it saying
     // it is not -- so the app takes their word for that too, rather than
@@ -3090,6 +3709,22 @@ class AppStore extends ChangeNotifier {
     // a second one arriving while the panel is already idle must not spend
     // another step. Armar não é disparar -- quem escolhe a hora é [pumpFlows],
     // e o fim do turno é só o primeiro dos requisitos dela.
+    final after = tab.hooks.status;
+    // O sino ouve as mesmas viradas que a lateral pinta. A espera por input
+    // não entra como aviso próprio: ela é o "terminou" visto um minuto depois
+    // (ver [ClaudeStatusUi.atRest]), e dois avisos pra uma parada só é ruído.
+    if (after != before) {
+      if (after == ClaudeStatus.waitingAnswer) {
+        _notice(tab, MxNoticeKind.question);
+      } else if (after == ClaudeStatus.waitingPermission) {
+        _notice(tab, MxNoticeKind.permission);
+      } else if (!before.atRest && after.atRest) {
+        _notice(tab, MxNoticeKind.finished);
+      } else if (!after.needsHuman && !after.atRest) {
+        // Voltou a trabalhar: o que ele pedia já foi dado.
+        readNoticesOf(tab.id, notify: false);
+      }
+    }
     if (!before.atRest && tab.hooks.status.atRest) {
       if (tab.followUps.isNotEmpty) tab.armed = true;
       // A mesma virada responde "terminou quando" e "você viu?". Ver
@@ -3426,7 +4061,7 @@ class AppStore extends ChangeNotifier {
     }
     agents.stop();
     await hooks.stop();
-    await Future.wait([for (final t in tabs) _end(t)]);
+    await Future.wait([plugins.stopAll(), for (final t in tabs) _end(t)]);
   }
 
   /// Cancela o que a sessão ainda ia fazer e desliga a linha.
@@ -3454,8 +4089,10 @@ class AppStore extends ChangeNotifier {
     // write about: the panels it would describe are being killed right here.
     _saveDebounce?.cancel();
     _bannerTimer?.cancel();
+    _clearToasts();
     agents.stop();
     hooks.stop();
+    plugins.killAll();
     for (final t in tabs) {
       t.armed = false;
       // Nada de await aqui: este é o caminho sem futuro nenhum pra rodar

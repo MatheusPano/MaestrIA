@@ -1,0 +1,30 @@
+{
+  "id": "exemplo.tema-e-atalhos",
+  "name": "Tema e atalhos",
+  "version": "1.0.0",
+  "description": "Um plugin só de declarações: um tema, dois comandos de shell e um texto pronto pra sessão. Nenhum programa roda.",
+  "author": "maestria",
+  "maestria": 1,
+  "contributes": {
+    "themes": [{ "path": "themes/aurora.json" }],
+    "commands": [
+      {
+        "id": "git-status",
+        "title": "git status",
+        "run": "git status -sb | head -1",
+        "in": "background",
+        "key": "meta+alt+g"
+      },
+      {
+        "id": "log",
+        "title": "git log num terminal",
+        "run": "git log --oneline --graph --decorate -30; exec $SHELL -l"
+      },
+      {
+        "id": "revisar",
+        "title": "pedir revisão do diff",
+        "send": "revise o diff atual desta pasta (${cwd}) e aponte bugs, sem editar nada"
+      }
+    ]
+  }
+}

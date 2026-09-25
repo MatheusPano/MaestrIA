@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../theme.dart';
@@ -11,6 +12,7 @@ import 'icons.dart';
 import 'menus.dart';
 import 'panel.dart';
 import 'panes.dart';
+import 'plugin_pane.dart';
 import 'settings.dart';
 import 'terminal_pane.dart';
 
@@ -23,6 +25,24 @@ class Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     // The width is the parent's to decide: the gutter beside it is a drag
     // handle, and AppStore.sidebarWidth is what it drags.
+    //
+    // Uma aba de plugin troca o miolo inteiro, cabeçalho incluído: a busca
+    // procura sessão, e ali não há sessão pra procurar. O rodapé fica -- ele é
+    // da janela, e não do que a lateral está mostrando. Ver [SidebarRail].
+    if (store.shownPlugin case final plugin?) {
+      return MxPanel(
+        color: Mx.bgSidebar,
+        child: Column(
+          children: [
+            _PluginHeader(store: store, plugin: plugin),
+            Expanded(
+              child: _PluginPage(key: ValueKey('page:${plugin.id}'), store: store, plugin: plugin),
+            ),
+            _Footer(store: store),
+          ],
+        ),
+      );
+    }
     return MxPanel(
       color: Mx.bgSidebar,
       child: Column(
@@ -62,6 +82,10 @@ class Sidebar extends StatelessWidget {
                 ],
                 if (!store.filtering || store.hasHits(store.loose))
                   _LooseTray(key: const ValueKey('loose'), store: store),
+                // As janelas de plugin não moram aqui: cada plugin tem a aba
+                // dele na faixa ao lado. Empilhadas embaixo dos avulsos, duas
+                // ferramentas já eram duas seções inteiras disputando altura
+                // com o trabalho. Ver [SidebarRail].
               ],
             ),
           ),
@@ -200,10 +224,14 @@ class _Footer extends StatelessWidget {
             tooltip: 'retomar uma conversa',
             onPressed: () => showChatHistory(context, store),
           ),
-          // O dia inteiro numa página, ao lado da lateral que o produziu.
-          // Fica aqui e não no menu de um painel porque o relatório não é
-          // de painel nenhum: é da janela.
-          _ReportIcon(store: store),
+          // Os comandos de plugin que pediram um lugar aqui -- o relatório do
+          // dia morava nesta posição antes de virar plugin, e é o caso que o
+          // lugar existe pra servir: coisa da janela, não de um painel. Ver
+          // [Plugins.sidebarCommands].
+          //
+          // Os de um plugin que tem aba na faixa ficam fora: o ícone dele já
+          // está lá. Ver [AppStore.footerCommands].
+          for (final command in store.footerCommands) _PluginIcon(store: store, command: command),
           const Spacer(),
           // O mesmo desenho da seção que ele abre (ver [MxSection.account]):
           // são o mesmo lugar visto de dois cantos da janela, e um segundo
@@ -215,8 +243,8 @@ class _Footer extends StatelessWidget {
           ),
           // O interruptor da própria lateral, no canto mais longe dos três que
           // produzem linha na lista: ele não produz nada aqui dentro -- tira
-          // isto aqui da tela. A volta é a aba que fica no lugar dela, com
-          // este mesmo desenho (ver `_SidebarTab`, em `main.dart`).
+          // isto aqui da tela. A volta é a faixa ao lado, que fica na tela
+          // (ver [SidebarRail]).
           //
           // Cabe aqui e não no cabeçalho pela conta que mandou os outros dois
           // pra cá: um segundo glifo lá em cima custa 40px do campo de busca, e
@@ -515,20 +543,20 @@ class _HeaderActionState extends State<_HeaderAction> {
   }
 }
 
-/// O botão do relatório do dia, que é o único do cabeçalho que demora.
+/// O botão de um comando de plugin no rodapé.
 ///
-/// Uma volta ao `claude -p` leva dezenas de segundos; um botão que não diz
-/// isso é um botão que parece não ter funcionado, e que se clica de novo.
-///
-/// O clique em si não começa nada: ele pergunta de que dia é o relatório (ver
-/// [showDailyReport]), e a espera só começa depois da resposta.
-class _ReportIcon extends StatelessWidget {
-  const _ReportIcon({required this.store});
+/// Vira um spinner enquanto o plugin diz que o comando está rodando
+/// (`command.busy`): o relatório do dia leva dezenas de segundos, e um botão
+/// que não diz isso é um botão que parece não ter funcionado -- e que se
+/// clica de novo.
+class _PluginIcon extends StatelessWidget {
+  const _PluginIcon({required this.store, required this.command});
   final AppStore store;
+  final PluginCommand command;
 
   @override
   Widget build(BuildContext context) {
-    if (store.writingReport) {
+    if (store.plugins.busy.contains(command.fullId)) {
       return const SizedBox(
         width: _StripIcon.box,
         height: _StripIcon.box,
@@ -542,16 +570,13 @@ class _ReportIcon extends StatelessWidget {
       );
     }
     return _StripIcon(
-      // `receipt_long` e não `summarize`: os dois são uma folha escrita, mas a
-      // folha comprida com o pé serrilhado lê como registro do que aconteceu,
-      // e a de uma linha grossa só lia como "um documento" -- que é o que a
-      // aba de leitor ao lado também é.
-      icon: Icons.receipt_long_outlined,
-      tooltip: [
-        'relatório do dia',
-        ...store.keymap[MxAction.dailyReport].map((c) => c.label),
-      ].join('  '),
-      onPressed: () => showDailyReport(context, store),
+      tooltip: [command.title, if (command.key case final k?) k.label].join('  '),
+      onPressed: () => store.runPluginCommand(command),
+      child: PluginGlyph(
+        icon: command.icon,
+        dir: store.plugins.byId(command.pluginId)?.dir,
+        size: _StripIcon.glyph,
+      ),
     );
   }
 }
@@ -570,7 +595,8 @@ class _ReportIcon extends StatelessWidget {
 /// numa barra de ferramentas o que dá unidade não é o desenho, é a espessura
 /// do traço ser a mesma em todos.
 class _StripIcon extends StatelessWidget {
-  const _StripIcon({required this.icon, required this.tooltip, required this.onPressed});
+  const _StripIcon({this.icon, this.child, required this.tooltip, required this.onPressed})
+    : assert(icon != null || child != null);
 
   /// O alvo do clique, e o que [_Footer] mede a fileira por. A faixa fica nos
   /// 42 do header — duas bordas do mesmo tamanho encapando a lista —, então o
@@ -594,7 +620,11 @@ class _StripIcon extends StatelessWidget {
   /// três coisas.
   static const gap = 4.0;
 
-  final IconData icon;
+  final IconData? icon;
+
+  /// Um desenho que não é um [IconData] -- o svg de um plugin. Ver
+  /// [PluginGlyph].
+  final Widget? child;
   final String tooltip;
   final VoidCallback onPressed;
 
@@ -609,7 +639,7 @@ class _StripIcon extends StatelessWidget {
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints.tightFor(width: box, height: box),
       padding: EdgeInsets.zero,
-      icon: Icon(icon, color: Mx.fgDim),
+      icon: child ?? Icon(icon, color: Mx.fgDim),
       onPressed: onPressed,
     );
   }
@@ -1062,6 +1092,312 @@ class _LooseTray extends StatelessWidget {
   }
 }
 
+/// O cabeçalho de uma aba de plugin: o desenho e o nome dele, no lugar da
+/// busca. Os mesmos 42 do [_Header], pra borda de cima não pular quando a aba
+/// troca.
+///
+/// A engrenagem leva às configurações dos plugins, e não às da janela: aqui
+/// dentro, "configurar" quer dizer configurar isto.
+class _PluginHeader extends StatelessWidget {
+  const _PluginHeader({required this.store, required this.plugin});
+  final AppStore store;
+  final MxPlugin plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 42,
+      padding: const EdgeInsets.only(left: 16, right: 8),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Mx.border)),
+      ),
+      child: Row(
+        children: [
+          PluginGlyph(icon: plugin.manifest?.icon, dir: plugin.dir, size: 15, color: Mx.fgDim),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              plugin.name,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+            ),
+          ),
+          _StripIcon(
+            icon: Icons.settings_outlined,
+            tooltip: 'configurar os plugins',
+            onPressed: () => showSettings(context, store, section: MxSection.plugins),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// O miolo de uma aba de plugin: as janelas que ele abriu e, embaixo, o que
+/// ele sabe fazer.
+///
+/// Os comandos são o que faz a aba valer um clique. Só com as janelas, a aba
+/// do SSH seria uma lateral inteira pra uma linha; com eles, ela é o lugar
+/// onde se conecta a um host mesmo sem nada aberto -- os mesmos comandos do
+/// menu do painel e da paleta, à vista em vez de lembrados.
+class _PluginPage extends StatelessWidget {
+  const _PluginPage({super.key, required this.store, required this.plugin});
+  final AppStore store;
+  final MxPlugin plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = store.viewsOf(plugin);
+    // Quem desenha a aba desenha também os terminais dele (o ssh, cada host
+    // com as conexões abertas); a aba genérica os lista junto das janelas.
+    if (plugin.manifest?.sidebar == true) return _ownPage(tabs);
+    tabs.addAll(store.ownedBy(plugin));
+    final commands = plugin.active ? plugin.manifest!.commands : const <PluginCommand>[];
+    return ListView(
+      padding: const EdgeInsets.only(top: 6, bottom: 20),
+      children: [
+        _PluginRuler(
+          label: 'janelas',
+          count: tabs.length,
+          onClear: tabs.isEmpty
+              ? null
+              : () {
+                  for (final t in [...tabs]) {
+                    store.closeTab(t);
+                  }
+                },
+          clearTooltip: tabs.length == 1 ? 'fechar a janela' : 'fechar as ${tabs.length} janelas',
+          first: true,
+        ),
+        if (tabs.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(17, 8, 12, 4),
+            child: Text(
+              'nenhuma janela aberta',
+              style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
+            ),
+          )
+        else
+          ..._panelRows(store, tabs),
+        if (commands.isNotEmpty) ...[
+          _PluginRuler(label: 'comandos', count: commands.length),
+          const SizedBox(height: 4),
+          for (final c in commands) _CommandRow(store: store, plugin: plugin, command: c),
+        ],
+      ],
+    );
+  }
+
+  /// A aba que o próprio plugin desenha (`contributes.sidebar`): os blocos que
+  /// ele mandou por `sidebar.update`, no mesmo [PluginPane] das janelas.
+  ///
+  /// As janelas abertas ficam em cima, desenhadas daqui, e só quando existem:
+  /// são painéis da janela -- achar e fechar um é coisa da Maestria, e o
+  /// plugin não teria como saber qual está em foco.
+  Widget _ownPage(List<MxTab> tabs) {
+    final own = store.sidebarTabOf(plugin);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (tabs.isNotEmpty) ...[
+          _PluginRuler(
+            label: 'janelas',
+            count: tabs.length,
+            first: true,
+            clearTooltip: tabs.length == 1 ? 'fechar a janela' : 'fechar as ${tabs.length} janelas',
+            onClear: () {
+              for (final t in [...tabs]) {
+                store.closeTab(t);
+              }
+            },
+          ),
+          ..._panelRows(store, tabs),
+          const SizedBox(height: 6),
+          Divider(height: 1, color: Mx.border),
+        ],
+        Expanded(
+          child: own != null
+              ? PluginPane(key: ValueKey(own.id), store: store, tab: own, bare: true)
+              : _Waiting(store: store, plugin: plugin),
+        ),
+      ],
+    );
+  }
+}
+
+/// A aba própria de um plugin antes do primeiro `sidebar.update`: subindo, ou
+/// caído sem ter desenhado nada.
+class _Waiting extends StatelessWidget {
+  const _Waiting({required this.store, required this.plugin});
+  final AppStore store;
+  final MxPlugin plugin;
+
+  @override
+  Widget build(BuildContext context) {
+    final crashed = plugin.state == PluginState.crashed;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(17, 16, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (!crashed) ...[
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.5, color: Mx.fgFaint),
+                ),
+                const SizedBox(width: 9),
+              ],
+              Expanded(
+                child: Text(
+                  crashed ? '${plugin.name} caiu: ${plugin.crash}' : 'abrindo ${plugin.name}…',
+                  style: TextStyle(fontSize: 11.5, color: crashed ? Mx.red : Mx.fgFaint),
+                ),
+              ),
+            ],
+          ),
+          if (crashed)
+            TextButton(
+              onPressed: () => store.plugins.restart(plugin),
+              child: const Text('reiniciar'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A régua de uma seção da aba de plugin -- o desenho da dos avulsos, que é o
+/// outro lugar da lateral que não é uma pasta.
+class _PluginRuler extends StatelessWidget {
+  const _PluginRuler({
+    required this.label,
+    required this.count,
+    this.onClear,
+    this.clearTooltip = '',
+    this.first = false,
+  });
+
+  final String label;
+  final int count;
+  final VoidCallback? onClear;
+  final String clearTooltip;
+
+  /// A primeira da lista não precisa do respiro que separa uma seção da de
+  /// cima.
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Hoverable(
+      builder: (hovered) => Padding(
+        padding: EdgeInsets.only(left: 17, right: 8, top: first ? 10 : 22),
+        child: SizedBox(
+          height: 24,
+          child: Row(
+            children: [
+              Text(label, style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5)),
+              const SizedBox(width: 9),
+              Expanded(child: Container(height: 1, color: Mx.border)),
+              const SizedBox(width: 8),
+              Text('$count', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+              if (onClear case final clear?) ...[
+                const SizedBox(width: 6),
+                _ClearButton(tooltip: clearTooltip, shown: hovered, onTap: clear),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Um comando do plugin como linha da aba: o desenho, o nome sem o prefixo
+/// do plugin e a tecla, se houver.
+///
+/// O prefixo sai porque aqui ele é o cabeçalho: "flutter: hot reload" faz
+/// sentido na paleta, no meio dos comandos de todo mundo; embaixo de
+/// "Flutter" é o título dizendo a mesma coisa em cada linha.
+class _CommandRow extends StatefulWidget {
+  const _CommandRow({required this.store, required this.plugin, required this.command});
+  final AppStore store;
+  final MxPlugin plugin;
+  final PluginCommand command;
+
+  /// [title] sem o "nome do plugin: " da frente, quando é esse o prefixo.
+  static String shortTitle(String title, String pluginName) {
+    final colon = title.indexOf(': ');
+    if (colon <= 0) return title;
+    return title.substring(0, colon).toLowerCase() == pluginName.toLowerCase()
+        ? title.substring(colon + 2)
+        : title;
+  }
+
+  @override
+  State<_CommandRow> createState() => _CommandRowState();
+}
+
+class _CommandRowState extends State<_CommandRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.command;
+    final busy = widget.store.plugins.busy.contains(c.fullId);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: busy ? null : () => widget.store.runPluginCommand(c),
+        child: Container(
+          height: 30,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.only(left: 9, right: 8),
+          decoration: BoxDecoration(
+            color: _hover ? Mx.bgHover : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                child: Center(
+                  child: busy
+                      ? SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 1.5, color: Mx.fgDim),
+                        )
+                      // O desenho do comando quando ele tem um; senão um traço
+                      // neutro, e não o logo do plugin repetido dez vezes.
+                      : c.icon != null
+                      ? PluginGlyph(icon: c.icon, dir: widget.plugin.dir, size: 14, color: Mx.fgDim)
+                      : Icon(Icons.chevron_right, size: 15, color: Mx.fgFaint),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _CommandRow.shortTitle(c.title, widget.plugin.name),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, color: _hover ? Mx.fg : Mx.fgDim),
+                ),
+              ),
+              if (c.key case final key?)
+                Text(key.label, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// O que se faz com a bandeja inteira. A [_FolderMenu] traria uma pasta de
 /// opções — renomear, remover, git — pra um lugar onde nenhuma delas quer
 /// dizer nada; sobram as duas que querem: nomear um trabalho aqui e limpar o
@@ -1358,11 +1694,7 @@ class _ProjectGroup extends StatelessWidget {
                     // roxa de sempre até alguém pintá-lo, e a partir daí é
                     // ela que diz de que projeto são os painéis pendurados
                     // aqui embaixo. Ver [MxTint].
-                    Icon(
-                      Icons.track_changes,
-                      size: 15,
-                      color: project.tint?.color ?? Mx.purple,
-                    ),
+                    Icon(Icons.track_changes, size: 15, color: project.tint?.color ?? Mx.purple),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1541,6 +1873,12 @@ class _TabRow extends StatelessWidget {
         TabKind.reader => Icon(Icons.article_outlined, size: 18, color: Mx.fgDim),
         // E a configuração pelos ajustes: é um painel de mexer em coisas.
         TabKind.setup => Icon(Icons.tune, size: 18, color: Mx.fgDim),
+        // E a janela de plugin pela peça de quebra-cabeça: é o que o VS Code
+        // e o resto do mundo usam pra "veio de uma extensão".
+        TabKind.plugin => PluginGlyph(
+          icon: store.plugins.byId(tab.view!.pluginId)?.manifest?.icon,
+          dir: store.plugins.byId(tab.view!.pluginId)?.dir,
+        ),
         // O terminal que subiu dentro de um programa se anuncia como o
         // programa: o `>_` é o prompt esperando comando, e ali não há prompt
         // nenhum -- há um btop rodando.
@@ -1599,7 +1937,7 @@ class _TabRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Text(
-                '⌘${index + 1}',
+                MxChord.slot(index).label,
                 style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: Mx.fgFaint),
               ),
             ),

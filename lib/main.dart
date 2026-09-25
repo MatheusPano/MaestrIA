@@ -5,13 +5,15 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 
-import 'services/shortcuts.dart';
 import 'services/store.dart';
 import 'theme.dart';
 import 'ui/icons.dart';
 import 'ui/keys.dart';
+import 'ui/notices.dart';
 import 'ui/panes.dart';
+import 'ui/plugin_dialogs.dart';
 import 'ui/sidebar.dart';
+import 'ui/sidebar_rail.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,73 +87,122 @@ class _MaestriaAppState extends State<MaestriaApp> {
           builder: (context, _) => Scaffold(
             body: Builder(
               // A context under the Navigator, so a shortcut can open a dialog.
-              builder: (ctx) => _Keys(
-                store: store,
-                context: ctx,
-                // The gutter around and between the panels. Everything the
-                // window shows is a card on the canvas; this is the canvas.
-                child: Padding(
-                  padding: const EdgeInsets.all(Mx.gap),
-                  child: LayoutBuilder(
-                    // The stored width is a wish, not a promise: a window
-                    // narrow enough would otherwise leave the panes with
-                    // negative space to lay out in.
-                    builder: (context, box) => Row(
-                      children: [
-                        // Escondida, a lateral sai da fileira inteira -- não
-                        // fica com largura zero. Um `Sidebar` de 0px continua
-                        // montado, e uma lista de trinta linhas que ninguém vê
-                        // é trinta linhas sendo medidas a cada quadro. Ver
-                        // [AppStore.sidebarHidden].
-                        if (store.sidebarHidden)
-                          _SidebarTab(store: store)
-                        else ...[
-                          SizedBox(
-                            width: store.sidebarWidth.clamp(
-                              AppStore.minSidebar,
-                              (box.maxWidth - 280).clamp(AppStore.minSidebar, double.infinity),
-                            ),
-                            child: Sidebar(store: store),
-                          ),
-                          _SidebarGrip(store: store),
-                        ],
-                        Expanded(
-                          // O recado flutua por cima dos painéis em vez de ser
-                          // uma faixa embaixo deles. Como filho da Column ele
-                          // roubava altura da fileira inteira ao aparecer, e
-                          // `terminal.onResize` manda isso pro pty: um
-                          // "caminho copiado" reformatava treze sessões, e
-                          // reformatava de novo ao sumir.
-                          child: Stack(
-                            children: [
-                              PaneArea(store: store),
-                              if (store.banner != null)
-                                Positioned(
-                                  // Os dois lados presos: um Positioned só com
-                                  // `right` deixa a largura sem teto, e um
-                                  // Text sem teto não sabe onde quebrar.
-                                  left: Mx.gap,
-                                  right: Mx.gap,
-                                  bottom: Mx.gap,
-                                  child: Align(
-                                    alignment: Alignment.bottomRight,
-                                    child: _Banner(
-                                      // A chave é o texto: recado novo é
-                                      // widget novo, e a entrada roda de novo
-                                      // em vez de trocar as letras em silêncio.
-                                      key: ValueKey(store.banner),
-                                      store: store,
+              builder: (ctx) {
+                // O seletor rápido dos plugins precisa de um contexto debaixo
+                // do navegador, e é aqui que há um. Ver [AppStore.quickPick].
+                store.quickPick = ({required title, placeholder, required items}) =>
+                    showQuickPick(ctx, title: title, placeholder: placeholder, items: items);
+                return _Keys(
+                  store: store,
+                  context: ctx,
+                  // The gutter around and between the panels. Everything the
+                  // window shows is a card on the canvas; this is the canvas.
+                  //
+                  // Embaixo de tudo, a barra de status: a janela inteira de
+                  // largura, no canvas e não num cartão -- é a moldura, não um
+                  // painel. Ver [StatusBar].
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          // Sem o vão de baixo: a barra de status é o que separa os
+                          // cartões da borda da janela.
+                          padding: const EdgeInsets.fromLTRB(Mx.gap, Mx.gap, Mx.gap, 0),
+                          child: LayoutBuilder(
+                            // The stored width is a wish, not a promise: a window
+                            // narrow enough would otherwise leave the panes with
+                            // negative space to lay out in.
+                            builder: (context, box) => Row(
+                              children: [
+                                // Escondida, a lateral sai da fileira inteira -- não
+                                // fica com largura zero. Um `Sidebar` de 0px continua
+                                // montado, e uma lista de trinta linhas que ninguém vê
+                                // é trinta linhas sendo medidas a cada quadro. Ver
+                                // [AppStore.sidebarHidden].
+                                //
+                                // A faixa vem antes, no canvas, e fica mesmo com a
+                                // lateral escondida -- aí é ela a volta. Ver
+                                // [SidebarRail].
+                                SidebarRail(store: store),
+                                if (!store.sidebarHidden) ...[
+                                  SizedBox(
+                                    width: store.sidebarWidth.clamp(
+                                      AppStore.minSidebar,
+                                      (box.maxWidth - 280).clamp(
+                                        AppStore.minSidebar,
+                                        double.infinity,
+                                      ),
                                     ),
+                                    child: Sidebar(store: store),
+                                  ),
+                                  _SidebarGrip(store: store),
+                                ],
+                                Expanded(
+                                  // O recado flutua por cima dos painéis em vez de ser
+                                  // uma faixa embaixo deles. Como filho da Column ele
+                                  // roubava altura da fileira inteira ao aparecer, e
+                                  // `terminal.onResize` manda isso pro pty: um
+                                  // "caminho copiado" reformatava treze sessões, e
+                                  // reformatava de novo ao sumir.
+                                  child: Stack(
+                                    children: [
+                                      PaneArea(store: store),
+                                      // A lista do sino, no canto de baixo à direita:
+                                      // logo acima do sino, que mora na ponta direita
+                                      // da barra de status.
+                                      if (store.noticesOpen)
+                                        Positioned(
+                                          right: Mx.gap,
+                                          bottom: Mx.gap,
+                                          child: NoticeCenter(store: store),
+                                        ),
+                                      // Os cartões do sino e o recado moram no mesmo
+                                      // canto, empilhados -- e com a lista aberta
+                                      // esperariam atrás dela.
+                                      //
+                                      // Montado mesmo sem cartão nenhum: o último
+                                      // a sair ainda tem o deslize dele pra fazer.
+                                      // Vazio, é uma coluna de altura zero.
+                                      if (!store.noticesOpen)
+                                        Positioned(
+                                          // Os dois lados presos: um Positioned só com
+                                          // `right` deixa a largura sem teto, e um
+                                          // Text sem teto não sabe onde quebrar.
+                                          left: Mx.gap,
+                                          right: Mx.gap,
+                                          bottom: Mx.gap,
+                                          child: Align(
+                                            alignment: Alignment.bottomRight,
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment: CrossAxisAlignment.end,
+                                              children: [
+                                                NoticeToasts(store: store),
+                                                if (store.banner != null)
+                                                  _Banner(
+                                                    // A chave é o texto: recado novo é
+                                                    // widget novo, e a entrada roda de novo
+                                                    // em vez de trocar as letras em silêncio.
+                                                    key: ValueKey(store.banner),
+                                                    store: store,
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      StatusBar(store: store),
+                    ],
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -160,61 +211,6 @@ class _MaestriaAppState extends State<MaestriaApp> {
   }
 }
 
-/// A aba que traz a lateral de volta, no lugar onde ela estava.
-///
-/// A única saída de [AppStore.sidebarHidden] que não é uma tecla: uma lateral
-/// que só volta por atalho é uma lateral que alguém vai dar por perdida. Ela
-/// custa os mesmos 8px de vão que o [_SidebarGrip] custava, mais os 18 do
-/// glifo -- é uma borda da janela, não uma coluna.
-///
-/// O desenho é o mesmo do botão que a escondeu (ver `_Footer`): são os dois
-/// lados de um interruptor só, e dois glifos fariam pensar que são dois.
-class _SidebarTab extends StatefulWidget {
-  const _SidebarTab({required this.store});
-  final AppStore store;
-
-  @override
-  State<_SidebarTab> createState() => _SidebarTabState();
-}
-
-class _SidebarTabState extends State<_SidebarTab> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: Mx.gap),
-      child: Tooltip(
-        message: [
-          'mostrar a lateral',
-          ...widget.store.keymap[MxAction.toggleSidebar].map((c) => c.label),
-        ].join('  '),
-        waitDuration: const Duration(milliseconds: 500),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.store.toggleSidebar,
-            child: SizedBox(
-              width: 18,
-              // A coluna inteira é o alvo: a mão que procura a lateral vai à
-              // borda esquerda, não a um botão de 18 por 18 no meio dela.
-              child: Center(
-                child: Icon(
-                  Icons.view_sidebar_outlined,
-                  size: 16,
-                  color: _hover ? Mx.fg : Mx.fgFaint,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// The gutter between the sidebar and the panes, made draggable.
 ///
@@ -290,7 +286,20 @@ class _Keys extends StatelessWidget {
       // open nothing below did, so the whole map was dead until the first
       // terminal existed. This node holds focus in that gap and steps aside
       // the moment a TerminalView wants it.
-      child: Focus(autofocus: true, child: child),
+      //
+      // É também quem atende as teclas dos plugins fora do terminal: o evento
+      // sobe do foco até aqui antes de chegar no mapa acima, então o que o
+      // app responde é deixado passar -- ver [Plugins.commandFor].
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          final command = store.plugins.commandFor(event, except: store.keymap);
+          if (command == null) return KeyEventResult.ignored;
+          store.runPluginCommand(command);
+          return KeyEventResult.handled;
+        },
+        child: child,
+      ),
     );
   }
 }
@@ -361,9 +370,7 @@ class _Banner extends StatelessWidget {
             color: Mx.bgSidebar,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Mx.accent.withValues(alpha: 0.7)),
-            boxShadow: [
-              BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6)),
-            ],
+            boxShadow: [BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6))],
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
