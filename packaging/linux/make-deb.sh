@@ -29,8 +29,11 @@ echo "==> maestria ${DEB_VERSION} (${ARCH})"
 echo "==> flutter pub get"
 flutter pub get
 
-echo "==> flutter build linux --release"
-flutter build linux --release
+# `--no-tree-shake-icons`: o rfw monta `IconData` em tempo de execução (o ícone
+# que um plugin pede pelo número), e com isso o build não consegue enxugar a
+# fonte de ícones -- recusa em vez de sair sem os glifos. Vai a fonte inteira.
+echo "==> flutter build linux --release --no-tree-shake-icons"
+flutter build linux --release --no-tree-shake-icons
 
 BUNDLE=$(echo build/linux/*/release/bundle)
 test -x "$BUNDLE/maestria" || { echo "bundle não saiu em $BUNDLE"; exit 1; }

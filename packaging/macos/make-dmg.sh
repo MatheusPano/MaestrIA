@@ -22,8 +22,11 @@ REVISION=$(sed -n 's/^version: *[0-9][^+]*+\([0-9]*\).*/\1/p' pubspec.yaml | hea
 FULL="${VERSION}-${REVISION:-1}"
 
 if [ "${1:-}" != "--no-build" ]; then
-  echo "==> flutter build macos --release"
-  flutter build macos --release
+  # `--no-tree-shake-icons`: o rfw monta `IconData` em tempo de execução (o ícone
+  # que um plugin pede pelo número), e com isso o build não consegue enxugar a
+  # fonte de ícones -- recusa em vez de sair sem os glifos. Vai a fonte inteira.
+  echo "==> flutter build macos --release --no-tree-shake-icons"
+  flutter build macos --release --no-tree-shake-icons
 fi
 
 test -d "$APP" || { echo "não achei $APP -- rode sem --no-build." >&2; exit 1; }
