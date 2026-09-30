@@ -1373,11 +1373,17 @@ class _CommandRowState extends State<_CommandRow> {
                           height: 12,
                           child: CircularProgressIndicator(strokeWidth: 1.5, color: Mx.fgDim),
                         )
-                      // O desenho do comando quando ele tem um; senão um traço
-                      // neutro, e não o logo do plugin repetido dez vezes.
+                      // O desenho do comando quando ele tem um; senão um ponto
+                      // neutro, e não o logo do plugin repetido dez vezes. Nem
+                      // a seta: na lateral ela é a das seções que abrem e
+                      // fecham, e um comando não abre nada.
                       : c.icon != null
                       ? PluginGlyph(icon: c.icon, dir: widget.plugin.dir, size: 14, color: Mx.fgDim)
-                      : Icon(Icons.chevron_right, size: 15, color: Mx.fgFaint),
+                      : Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(color: Mx.fgFaint, shape: BoxShape.circle),
+                        ),
                 ),
               ),
               const SizedBox(width: 10),

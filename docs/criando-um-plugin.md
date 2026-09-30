@@ -79,8 +79,8 @@ plugins), com uma tecla:
   pelos valores do painel.
 - `key`: modificadores `meta` (⌘ — Ctrl+Shift no Linux), `alt`, `shift`, `ctrl` e a
   tecla, com `+`.
-  Uma tecla que a Maestria já usa não é tomada — o comando fica sem tecla e a
-  tela de plugins avisa.
+  Uma tecla que a Maestria já usa não é tomada — o comando fica sem tecla e o
+  "configurar" do plugin (no ⋮ do cartão, que fica amarelo) diz qual é.
 
 Temas também são só declaração: veja "Temas" em [`plugins.md`](plugins.md).
 

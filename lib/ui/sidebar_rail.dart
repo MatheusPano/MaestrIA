@@ -63,7 +63,29 @@ class SidebarRail extends StatelessWidget {
               // a rajada dizia que era só das sessões dele.
               builder: (color) => Icon(Icons.space_dashboard_outlined, size: 18, color: color),
             ),
-            for (final p in store.railPlugins) _pluginIcon(p, shown, tip),
+            if (store.railPlugins case final plugins when plugins.isNotEmpty)
+              // Arrastar um ícone muda o lugar dele, e o lugar fica guardado
+              // (ver [AppStore.railOrder]). O arraste só começa quando o
+              // mouse anda: um clique parado continua sendo trocar de aba.
+              ReorderableListView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                buildDefaultDragHandles: false,
+                proxyDecorator: (child, _, _) =>
+                    Material(type: MaterialType.transparency, child: child),
+                onReorderItem: (from, to) => store.moveRailPlugin(plugins[from].id, to),
+                children: [
+                  for (final (i, p) in plugins.indexed)
+                    ReorderableDragStartListener(
+                      key: ValueKey(p.id),
+                      index: i,
+                      child: Padding(
+                        padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
+                        child: _pluginIcon(p, shown, tip),
+                      ),
+                    ),
+                ],
+              ),
             // Um convite, não uma aba: nunca fica aceso, e em repouso é mais
             // apagado que os ícones de verdade -- quem já tem os plugins que
             // quer não precisa de um "+" disputando o olho com eles.

@@ -51,6 +51,11 @@ dependencies:
   # desenho vem de fora, e `assets/icons/` é onde ele fica. Ver `ui/icons.dart`.
   flutter_svg: ^2.3.0
 
+  # A interface que um plugin monta ele mesmo: uma árvore de widgets em texto
+  # (o formato do Remote Flutter Widgets, do time do Flutter) que a janela
+  # desenha com o Flutter de verdade. Ver `ui/plugin_rfw.dart`.
+  rfw: ^1.1.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -16,6 +16,7 @@ import 'package:maestria/ui/plugin_dialogs.dart';
 import 'package:maestria/ui/plugin_pane.dart';
 import 'package:maestria/ui/sidebar.dart';
 import 'package:maestria/ui/sidebar_rail.dart';
+import 'package:maestria/ui/terminal_pane.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 /// Uma pasta de plugin escrita à mão, com o manifesto [manifest] e os
@@ -938,6 +939,50 @@ void main() {
       store.dispose();
     });
 
+    testWidgets('a faixa: arrastar um ícone muda a ordem, e ela fica guardada', (tester) async {
+      for (final id in ['a', 'b', 'c']) {
+        writePlugin(tmp.path, id, {
+          'id': id,
+          'version': '1',
+          'icon': 'terminal',
+          'contributes': {
+            'commands': [
+              {'id': 'x', 'title': '$id: x', 'run': 'true'},
+            ],
+          },
+        });
+      }
+      final store = AppStore();
+      store.plugins.all.addAll((Plugins(root: tmp.path)..scan()).all);
+      expect(store.railPlugins.map((p) => p.id), ['a', 'b', 'c']);
+
+      await tester.pumpWidget(host(store, () => SidebarRail(store: store)));
+      // O "a" arrastado pra baixo do "b": dois ícones e um pouco.
+      await tester.timedDrag(
+        find.byType(PluginGlyph).first,
+        const Offset(0, SidebarRail.width * 1.6),
+        const Duration(milliseconds: 400),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(store.railPlugins.map((p) => p.id), ['b', 'a', 'c']);
+      expect(store.railOrder, ['b', 'a', 'c']);
+
+      // Um clique parado continua trocando de aba, e não arrasta nada.
+      await tester.tap(find.byType(PluginGlyph).first);
+      await tester.pump();
+      expect(store.shownPlugin?.id, 'b');
+      expect(store.railPlugins.map((p) => p.id), ['b', 'a', 'c']);
+
+      // Desligado, o "a" sai da faixa sem perder o lugar guardado.
+      store.plugins.byId('a')!.enabled = false;
+      store.moveRailPlugin('c', 0);
+      expect(store.railPlugins.map((p) => p.id), ['c', 'b']);
+      store.plugins.byId('a')!.enabled = true;
+      expect(store.railPlugins.map((p) => p.id), ['c', 'b', 'a']);
+      store.dispose();
+    });
+
     testWidgets('sem plugin nenhum, a faixa fica, e o "+" do fim abre o instalar', (tester) async {
       final store = AppStore();
       expect(store.railPlugins, isEmpty);
@@ -1743,12 +1788,592 @@ void main() {
       expect(find.text('linha 299'), findsNothing);
     });
   });
+
+  group('a interface em widgets (rfw)', () {
+    const library = '''
+      import core.widgets;
+      import maestria;
+      widget root = Column(children: [
+        Text(text: data.head.title, style: { color: data.theme.accent }),
+        ...for row in data.rows:
+          Pressable(
+            onTap: event "act" { a: row.action },
+            menu: row.menu,
+            onMenu: event "act" {},
+            child: Text(text: row.title),
+          ),
+        IconButton(icon: "stop", tooltip: "parar", onPressed: event "act" { a: "stop:1" }),
+      ]);
+    ''';
+
+    MxTab rfwTab(Map<String, Object?> data, {String text = library}) {
+      final tab = MxTab(
+        id: 'tab1',
+        folder: Folder(root: '/repo', name: 'repo'),
+        kind: TabKind.plugin,
+        cwd: '/repo',
+        branch: '',
+        view: PluginView(pluginId: 'p', pluginName: 'P', id: 'sidebar', title: 'docker', blocks: const []),
+      );
+      tab.view!.setRfw(library: text, data: data);
+      return tab;
+    }
+
+    Future<void> pump(WidgetTester tester, AppStore store, MxTab tab) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 400, height: 600, child: PluginPane(store: store, tab: tab, bare: true)),
+        ),
+      ),
+    );
+
+    testWidgets('o plugin monta a tela; o clique e o menu voltam como view.action', (tester) async {
+      final store = _ActionsStore();
+      final tab = rfwTab({
+        'head': {'title': 'Containers'},
+        'rows': [
+          {
+            'title': 'api',
+            'action': 'abrir:1',
+            'menu': [
+              {'label': 'Parar', 'icon': 'stop', 'action': 'parar:1'},
+              {'divider': true},
+              {'label': 'Remover', 'action': 'remover:1', 'red': true},
+            ],
+          },
+        ],
+      });
+      await pump(tester, store, tab);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Containers'), findsOneWidget);
+      final title = tester.widget<Text>(find.text('Containers'));
+      expect(title.style!.color, Mx.accent, reason: 'data.theme vem do tema em vigor');
+
+      await tester.tap(find.text('api'));
+      await tester.tap(find.byTooltip('parar'));
+      await tester.pump();
+      expect(store.actions, ['act', 'act']);
+
+      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Parar'));
+      await tester.pumpAndSettle();
+      expect(store.actions.length, 3, reason: 'a escolha do menu vai no onMenu');
+
+      // Dados novos redesenham sem reler a biblioteca.
+      tab.view!.setRfw(data: {
+        'rows': [
+          {'title': 'worker', 'action': 'abrir:2', 'menu': []},
+        ],
+      });
+      await pump(tester, store, tab);
+      await tester.pump();
+      expect(find.text('api'), findsNothing);
+      expect(find.text('worker'), findsOneWidget);
+      expect(find.text('Containers'), findsOneWidget, reason: 'o que não veio fica');
+    });
+
+    testWidgets('arrastar e soltar: o alvo que aceita avisa com o payload e o id dele', (tester) async {
+      const board = '''
+        import core.widgets;
+        import maestria;
+        widget root = Row(children: [
+          ...for col in data.cols:
+            Expanded(
+              child: DropTarget(
+                id: col.id,
+                hint: col.hint,
+                radius: 8.0,
+                onDrop: event "drop" {},
+                child: Column(children: [
+                  Text(text: col.id),
+                  ...for card in col.cards:
+                    Draggable(payload: card.id, targets: card.targets, width: 120.0, child: SizedBox(height: 40.0, child: Text(text: card.title))),
+                ]),
+              ),
+            ),
+        ]);
+      ''';
+      final store = _ActionsStore();
+      final tab = rfwTab({
+        'cols': [
+          {
+            'id': 'todo',
+            'hint': 'solte pra voltar',
+            'cards': [
+              {'id': 't1', 'title': 'cartão', 'targets': ['doing']},
+            ],
+          },
+          {'id': 'doing', 'hint': 'solte pra iniciar', 'cards': []},
+          {'id': 'done', 'hint': 'solte pra finalizar', 'cards': []},
+        ],
+      }, text: board);
+      await pump(tester, store, tab);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+
+      // Num alvo que não está nos targets, nada acontece.
+      final from = tester.getCenter(find.text('cartão'));
+      var gesture = await tester.startGesture(from);
+      await gesture.moveBy(const Offset(20, 0));
+      await gesture.moveTo(tester.getCenter(find.text('done')));
+      await tester.pump();
+      expect(find.text('solte pra finalizar'), findsNothing, reason: 'o alvo que recusa não mostra a dica');
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.actions, isEmpty);
+
+      // No que aceita, a dica aparece e o soltar vira view.action.
+      gesture = await tester.startGesture(tester.getCenter(find.text('cartão')));
+      await gesture.moveBy(const Offset(20, 0));
+      await gesture.moveTo(tester.getCenter(find.text('doing')));
+      await tester.pump();
+      expect(find.text('solte pra iniciar'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(store.actions, ['drop']);
+      expect(store.values.single, {'payload': 't1', 'to': 'doing'});
+    });
+
+    testWidgets('um item com children abre um submenu, com a bolinha de cada cor', (tester) async {
+      final store = _ActionsStore();
+      final tab = rfwTab({
+        'head': {'title': 'Containers'},
+        'rows': [
+          {
+            'title': 'api',
+            'action': 'abrir:1',
+            'menu': [
+              {
+                'label': 'Cor',
+                'icon': 'dot',
+                'action': '',
+                'children': [
+                  {'label': 'Automática', 'action': 'cor:n:api:', 'color': 0},
+                  {'label': 'Laranja', 'action': 'cor:n:api:orange', 'color': 0xFFF2762E},
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      await pump(tester, store, tab);
+      await tester.pump();
+      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cor'));
+      await tester.pumpAndSettle();
+      expect(find.text('Laranja'), findsOneWidget, reason: 'o submenu abriu');
+      final dot = tester.widgetList<Container>(find.byType(Container)).where(
+        (c) => c.decoration is BoxDecoration && (c.decoration! as BoxDecoration).color == const Color(0xFFF2762E),
+      );
+      expect(dot, isNotEmpty, reason: 'a bolinha na cor dela');
+      await tester.tap(find.text('Laranja'));
+      await tester.pumpAndSettle();
+      expect(store.actions, ['act'], reason: 'a escolha vai no onMenu');
+    });
+
+    testWidgets('um erro no texto aparece na janela, pra quem escreveu o plugin', (tester) async {
+      final store = AppStore();
+      final tab = rfwTab({}, text: 'widget root = Column(children: [');
+      await pump(tester, store, tab);
+      expect(find.textContaining('a interface do plugin não leu'), findsOneWidget);
+      store.dispose();
+    });
+
+    test('view.open aceita rfw e data; view.update junta os dados', () async {
+      final store = AppStore();
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'docker', name: 'Docker', version: '1', main: ['node']),
+      );
+      final api = PluginApi(store);
+      await api.handle(plugin, 'view.open', {
+        'viewId': 'x',
+        'rfw': {'library': library, 'root': 'root'},
+        'data': {
+          'head': {'title': 'a'},
+        },
+      });
+      final view = store.tabs.singleWhere((t) => t.view?.id == 'x').view!;
+      expect(view.rfwLibrary, library);
+      await api.handle(plugin, 'view.update', {
+        'viewId': 'x',
+        'data': {'rows': []},
+      });
+      expect(view.rfwData.keys, containsAll(['head', 'rows']));
+      await expectLater(
+        api.handle(plugin, 'view.update', {'viewId': 'x', 'rfw': 'texto solto'}),
+        throwsA(isA<PluginRpcError>()),
+      );
+      store.dispose();
+    });
+  });
+
+  group('os blocos de lista do OrbStack', () {
+    MxTab tabWith(List<Map<String, dynamic>> blocks) => MxTab(
+      id: 'tab1',
+      folder: Folder(root: '/repo', name: 'repo'),
+      kind: TabKind.plugin,
+      cwd: '/repo',
+      branch: '',
+      view: PluginView(
+        pluginId: 'p',
+        pluginName: 'P',
+        id: 'v',
+        title: 'docker',
+        blocks: PluginView.blocksFrom(blocks),
+      ),
+    );
+
+    Future<void> pump(WidgetTester tester, AppStore store, MxTab tab) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 700,
+            height: 900,
+            child: PluginPane(store: store, tab: tab),
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('árvore: a seta manda o toggle, o meta dá lugar às ações no hover', (tester) async {
+      final store = _ActionsStore();
+      final tab = tabWith([
+        {
+          'type': 'list',
+          'flat': true,
+          'items': [
+            {
+              'title': 'learning',
+              'avatar': {'icon': 'stack', 'color': 'blue'},
+              'status': 'green',
+              'strong': true,
+              'expanded': true,
+              'toggle': 'recolher',
+              'action': 'projeto',
+            },
+            {
+              'title': 'db',
+              'avatar': {'icon': 'box', 'color': 'cyan'},
+              'indent': 1,
+              'meta': ':3311',
+              'action': 'abrir',
+              'actions': [
+                {'action': 'parar', 'icon': 'stop', 'tooltip': 'parar'},
+              ],
+            },
+            {'title': 'solto', 'avatar': 'box', 'dim': true, 'action': 'abrir-solto'},
+          ],
+        },
+      ]);
+      await pump(tester, store, tab);
+      expect(tester.takeException(), isNull);
+      expect(find.byIcon(Icons.layers_outlined), findsOneWidget, reason: 'o avatar do projeto');
+      expect(find.byIcon(Icons.inventory_2_outlined), findsNWidgets(2));
+
+      await tester.tap(find.byIcon(Icons.chevron_right_rounded));
+      await tester.tap(find.text('learning'));
+      expect(store.actions, ['recolher', 'projeto'], reason: 'a seta e a linha separadas');
+
+      // A linha sem seta guarda o lugar dela: os avatares de cima ficam numa coluna.
+      final project = tester.getTopLeft(find.byIcon(Icons.layers_outlined));
+      final loose = tester.getTopLeft(find.byIcon(Icons.inventory_2_outlined).last);
+      expect(loose.dx, project.dx);
+      final child = tester.getTopLeft(find.byIcon(Icons.inventory_2_outlined).first);
+      expect(child.dx, greaterThan(project.dx), reason: 'o filho recuado');
+
+      expect(find.text(':3311'), findsOneWidget);
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: tester.getCenter(find.text('db')));
+      await tester.pump();
+      expect(find.text(':3311'), findsNothing, reason: 'o botão toma o lugar do meta');
+      await tester.tap(find.byTooltip('parar'));
+      expect(store.actions.last, 'parar');
+      await gesture.removePointer();
+    });
+
+    testWidgets('cabeçalho com menu, abas, cartão e colunas', (tester) async {
+      final store = _ActionsStore();
+      final tab = tabWith([
+        {
+          'type': 'header',
+          'title': 'Containers',
+          'subtitle': '3 no ar',
+          'avatar': {'text': 'D', 'color': 'blue'},
+          'status': 'green',
+          'actions': [
+            {'action': 'atualizar', 'icon': 'refresh', 'tooltip': 'atualizar'},
+            {
+              'icon': 'more',
+              'tooltip': 'mais',
+              'menu': [
+                {'action': 'limpar', 'label': 'limpar os parados', 'icon': 'trash'},
+              ],
+            },
+          ],
+        },
+        {
+          'type': 'tabs',
+          'items': [
+            {'label': 'Containers', 'action': 'aba:c', 'active': true, 'count': 49},
+            {'label': 'Imagens', 'action': 'aba:i'},
+          ],
+        },
+        {
+          'type': 'columns',
+          'children': [
+            {
+              'type': 'card',
+              'children': [
+                {'type': 'progress', 'label': 'CPU', 'detail': '12%', 'value': 0.12, 'tone': 'green'},
+              ],
+            },
+            {
+              'type': 'card',
+              'children': [
+                {'type': 'input', 'id': 'busca', 'icon': 'search', 'placeholder': 'buscar'},
+              ],
+            },
+          ],
+        },
+      ]);
+      await pump(tester, store, tab);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Containers'), findsNWidgets(2));
+      expect(find.text('49'), findsOneWidget);
+      expect(find.text('12%'), findsOneWidget);
+      expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+
+      await tester.tap(find.byTooltip('atualizar'));
+      await tester.tap(find.text('Imagens'));
+      expect(store.actions, ['atualizar', 'aba:i']);
+
+      await tester.tap(find.byTooltip('mais'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('limpar os parados'));
+      await tester.pumpAndSettle();
+      expect(store.actions.last, 'limpar', reason: 'o botão com menu abre o menu, e a linha manda a ação');
+
+      // O campo dentro de um cartão é um campo como outro: o texto vai nos values.
+      await tester.enterText(find.byType(TextField), 'nats');
+      final state = tester.state(find.byType(PluginPane));
+      expect((state as dynamic).debugValues, {'busca': 'nats'});
+    });
+
+    test('um console dentro de um cartão também guarda as linhas', () {
+      final view = PluginView(
+        pluginId: 'p',
+        pluginName: 'P',
+        id: 'v',
+        title: 't',
+        blocks: PluginView.blocksFrom([
+          {
+            'type': 'card',
+            'children': [
+              {'type': 'console', 'id': 'log', 'lines': ['um']},
+            ],
+          },
+        ]),
+      );
+      expect(view.console('log').lines.map((l) => l.text), ['um']);
+    });
+
+    testWidgets('avatar em svg com as cores dele, ações sempre à vista, linha acesa e rótulo', (
+      tester,
+    ) async {
+      final store = _ActionsStore();
+      const cube =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+          '<circle cx="16" cy="16" r="15" fill="#4C7DFF"/></svg>';
+      final tab = tabWith([
+        {
+          'type': 'list',
+          'flat': true,
+          'alwaysActions': true,
+          'items': [
+            {
+              'title': 'api',
+              'avatar': {'svg': cube},
+              'status': 'green',
+              'selected': true,
+              'action': 'abrir',
+              'actions': [
+                {'action': 'parar', 'icon': 'stop', 'tooltip': 'parar'},
+                {'action': 'remover', 'icon': 'trash', 'tooltip': 'remover'},
+              ],
+            },
+          ],
+        },
+        {'type': 'section', 'style': 'label', 'text': 'Parados'},
+      ]);
+      await pump(tester, store, tab);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(SvgPicture), findsOneWidget, reason: 'o desenho inteiro, sem caixa');
+      expect(find.byTooltip('parar'), findsOneWidget, reason: 'sem o mouse em cima');
+      expect(find.byTooltip('remover'), findsOneWidget);
+      expect(find.text('Parados'), findsOneWidget);
+      final title = tester.widget<Text>(find.text('api'));
+      expect(title.style!.color, isNot(Mx.fg), reason: 'acesa, o texto troca de cor pra ler no destaque');
+      await tester.tap(find.byTooltip('remover'));
+      expect(store.actions, ['remover']);
+    });
+
+    test('o initialize diz até onde vão os blocos', () {
+      expect(mxPluginBlocks, greaterThanOrEqualTo(2));
+    });
+
+    test('uma linha em pedaços: o texto é a linha inteira, cada pedaço com a cor dele', () {
+      final console = PluginConsole()
+        ..append([
+          {
+            'spans': [
+              {'text': 'api ', 'tone': 'cyan', 'bold': true},
+              {'text': '│ '},
+              {'text': 'ERROR', 'tone': 'red'},
+            ],
+          },
+        ]);
+      final line = console.lines.single;
+      expect(line.text, 'api │ ERROR');
+      expect(line.spans!.map((s) => (s.text, s.tone, s.bold)), [
+        ('api ', 'cyan', true),
+        ('│ ', null, false),
+        ('ERROR', 'red', false),
+      ]);
+    });
+
+    test('session.openShell embutido: do plugin, fora da grade, e o foco não o põe na tela', () async {
+      final store = _ShellStore();
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(
+          id: 'docker',
+          name: 'Docker',
+          version: '1',
+          main: ['node'],
+          permissions: {PluginPermission.sessionsCreate},
+        ),
+      );
+      final api = PluginApi(store);
+      final r = await api.handle(plugin, 'session.openShell', {
+        'command': 'docker exec -it db sh',
+        'embedded': true,
+        'tag': 'e:db',
+      });
+      final tab = store.tabs.singleWhere((t) => t.id == (r as Map)['tabId']);
+      expect(store.placed, isFalse, reason: 'não entra na grade');
+      expect(tab.embedded, isTrue);
+      expect(tab.owner, 'docker', reason: 'embutido é do plugin mesmo sem "owned"');
+      expect(store.ownedBy(plugin), isEmpty, reason: 'fora da lista genérica dos terminais dele');
+      store.select(tab);
+      expect(Panes.has(store.panes, tab.id), isFalse);
+      final listed = await api.handle(plugin, 'sessions.list', {}) as List;
+      expect(listed.single['embedded'], isTrue);
+    });
+
+    testWidgets('o bloco terminal desenha o embutido do plugin, e fechar a janela o leva junto', (
+      tester,
+    ) async {
+      final store = AppStore();
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'docker', name: 'Docker', version: '1'),
+      );
+      MxTab shell(String id, {required String owner}) {
+        final t = MxTab(
+          id: id,
+          folder: Folder(root: '/repo', name: 'repo'),
+          kind: TabKind.shell,
+          cwd: '/repo',
+          branch: '',
+        )
+          ..owner = owner
+          ..embedded = true;
+        store.tabs.add(t);
+        return t;
+      }
+
+      final mine = shell('t1', owner: 'docker');
+      shell('t2', owner: 'outro');
+      mine.term.terminal.write('root@db:/# ');
+      tester.view
+        ..devicePixelRatio = 1
+        ..physicalSize = const Size(800, 1000);
+      addTearDown(tester.view.reset);
+      final view = store.openPluginView(
+        plugin,
+        'ct.db',
+        title: 'db',
+        blocks: PluginView.blocksFrom([
+          {'type': 'terminal', 'tabId': 't1', 'expand': true},
+          {'type': 'terminal', 'tabId': 't2', 'height': 100, 'empty': 'não é seu'},
+        ]),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 800,
+              height: 1000,
+              child: PluginPane(store: store, tab: view),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(EmbeddedTerminal), findsOneWidget, reason: 'só o do próprio plugin');
+      expect(find.text('não é seu'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(EmbeddedTerminal)).height,
+        greaterThan(600),
+        reason: 'expand: o terminal fica com a altura que sobra, e não com a fixa de 360',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      store.closeTab(view);
+      expect(store.tabs.map((t) => t.id), ['t2'], reason: 'o embutido da janela vai junto');
+      store.dispose();
+      await tester.pump(const Duration(seconds: 1));
+    });
+  });
+}
+
+/// Um [AppStore] que abre terminal sem pty e lembra se ele foi pra grade.
+class _ShellStore extends AppStore {
+  bool? placed;
+
+  @override
+  MxTab openShell(
+    Folder f, {
+    String? cwd,
+    String? command,
+    Project? project,
+    Launcher? launcher,
+    bool place = true,
+  }) {
+    placed = place;
+    final tab = MxTab(
+      id: 'tab${tabs.length + 1}',
+      folder: f,
+      kind: TabKind.shell,
+      cwd: cwd ?? f.root,
+      branch: '',
+    );
+    tabs.add(tab);
+    return tab;
+  }
 }
 
 class _ActionsStore extends AppStore {
   final actions = <String>[];
+  final values = <Map<String, dynamic>>[];
 
   @override
-  void pluginViewAction(MxTab tab, String action, Map<String, dynamic> values) =>
-      actions.add(action);
+  void pluginViewAction(MxTab tab, String action, Map<String, dynamic> values) {
+    actions.add(action);
+    this.values.add(values);
+  }
 }

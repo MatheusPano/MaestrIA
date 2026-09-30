@@ -12,6 +12,7 @@ import 'ui/keys.dart';
 import 'ui/notices.dart';
 import 'ui/panes.dart';
 import 'ui/plugin_dialogs.dart';
+import 'ui/plugin_float.dart';
 import 'ui/sidebar.dart';
 import 'ui/sidebar_rail.dart';
 
@@ -92,113 +93,144 @@ class _MaestriaAppState extends State<MaestriaApp> {
                 // do navegador, e é aqui que há um. Ver [AppStore.quickPick].
                 store.quickPick = ({required title, placeholder, required items}) =>
                     showQuickPick(ctx, title: title, placeholder: placeholder, items: items);
+                final top = store.statusBarTop;
+                final banner = _Banner(
+                  // A chave é o texto: recado novo é widget novo, e a entrada
+                  // roda de novo em vez de trocar as letras em silêncio.
+                  key: ValueKey(store.banner),
+                  store: store,
+                );
                 return _Keys(
                   store: store,
                   context: ctx,
                   // The gutter around and between the panels. Everything the
                   // window shows is a card on the canvas; this is the canvas.
                   //
-                  // Embaixo de tudo, a barra de status: a janela inteira de
-                  // largura, no canvas e não num cartão -- é a moldura, não um
-                  // painel. Ver [StatusBar].
+                  // Embaixo de tudo -- ou em cima, ver [AppStore.statusBarTop]
+                  // --, a barra de status: a janela inteira de largura, no
+                  // canvas e não num cartão -- é a moldura, não um painel. Ver
+                  // [StatusBar].
                   child: Column(
                     children: [
+                      if (top) StatusBar(store: store),
                       Expanded(
-                        child: Padding(
-                          // Sem o vão de baixo: a barra de status é o que separa os
-                          // cartões da borda da janela.
-                          padding: const EdgeInsets.fromLTRB(Mx.gap, Mx.gap, Mx.gap, 0),
-                          child: LayoutBuilder(
-                            // The stored width is a wish, not a promise: a window
-                            // narrow enough would otherwise leave the panes with
-                            // negative space to lay out in.
-                            builder: (context, box) => Row(
-                              children: [
-                                // Escondida, a lateral sai da fileira inteira -- não
-                                // fica com largura zero. Um `Sidebar` de 0px continua
-                                // montado, e uma lista de trinta linhas que ninguém vê
-                                // é trinta linhas sendo medidas a cada quadro. Ver
-                                // [AppStore.sidebarHidden].
-                                //
-                                // A faixa vem antes, no canvas, e fica mesmo com a
-                                // lateral escondida -- aí é ela a volta. Ver
-                                // [SidebarRail].
-                                SidebarRail(store: store),
-                                if (!store.sidebarHidden) ...[
-                                  SizedBox(
-                                    width: store.sidebarWidth.clamp(
-                                      AppStore.minSidebar,
-                                      (box.maxWidth - 280).clamp(
-                                        AppStore.minSidebar,
-                                        double.infinity,
-                                      ),
-                                    ),
-                                    child: Sidebar(store: store),
-                                  ),
-                                  _SidebarGrip(store: store),
-                                ],
-                                Expanded(
-                                  // O recado flutua por cima dos painéis em vez de ser
-                                  // uma faixa embaixo deles. Como filho da Column ele
-                                  // roubava altura da fileira inteira ao aparecer, e
-                                  // `terminal.onResize` manda isso pro pty: um
-                                  // "caminho copiado" reformatava treze sessões, e
-                                  // reformatava de novo ao sumir.
-                                  child: Stack(
-                                    children: [
-                                      PaneArea(store: store),
-                                      // A lista do sino, no canto de baixo à direita:
-                                      // logo acima do sino, que mora na ponta direita
-                                      // da barra de status.
-                                      if (store.noticesOpen)
-                                        Positioned(
-                                          right: Mx.gap,
-                                          bottom: Mx.gap,
-                                          child: NoticeCenter(store: store),
-                                        ),
-                                      // Os cartões do sino e o recado moram no mesmo
-                                      // canto, empilhados -- e com a lista aberta
-                                      // esperariam atrás dela.
-                                      //
-                                      // Montado mesmo sem cartão nenhum: o último
-                                      // a sair ainda tem o deslize dele pra fazer.
-                                      // Vazio, é uma coluna de altura zero.
-                                      if (!store.noticesOpen)
-                                        Positioned(
-                                          // Os dois lados presos: um Positioned só com
-                                          // `right` deixa a largura sem teto, e um
-                                          // Text sem teto não sabe onde quebrar.
-                                          left: Mx.gap,
-                                          right: Mx.gap,
-                                          bottom: Mx.gap,
-                                          child: Align(
-                                            alignment: Alignment.bottomRight,
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              crossAxisAlignment: CrossAxisAlignment.end,
-                                              children: [
-                                                NoticeToasts(store: store),
-                                                if (store.banner != null)
-                                                  _Banner(
-                                                    // A chave é o texto: recado novo é
-                                                    // widget novo, e a entrada roda de novo
-                                                    // em vez de trocar as letras em silêncio.
-                                                    key: ValueKey(store.banner),
-                                                    store: store,
-                                                  ),
-                                              ],
-                                            ),
+                        child: Stack(
+                          children: [
+                            Padding(
+                              // Sem o vão do lado da barra: a barra de status é o que
+                              // separa os cartões da borda da janela.
+                              padding: EdgeInsets.fromLTRB(
+                                Mx.gap,
+                                top ? 0 : Mx.gap,
+                                Mx.gap,
+                                top ? Mx.gap : 0,
+                              ),
+                              child: LayoutBuilder(
+                                // The stored width is a wish, not a promise: a window
+                                // narrow enough would otherwise leave the panes with
+                                // negative space to lay out in.
+                                builder: (context, box) => Row(
+                                  children: [
+                                    // Escondida, a lateral sai da fileira inteira -- não
+                                    // fica com largura zero. Um `Sidebar` de 0px continua
+                                    // montado, e uma lista de trinta linhas que ninguém vê
+                                    // é trinta linhas sendo medidas a cada quadro. Ver
+                                    // [AppStore.sidebarHidden].
+                                    //
+                                    // A faixa vem antes, no canvas, e fica mesmo com a
+                                    // lateral escondida -- aí é ela a volta. Ver
+                                    // [SidebarRail].
+                                    SidebarRail(store: store),
+                                    if (!store.sidebarHidden) ...[
+                                      SizedBox(
+                                        width: store.sidebarWidth.clamp(
+                                          AppStore.minSidebar,
+                                          (box.maxWidth - 280).clamp(
+                                            AppStore.minSidebar,
+                                            double.infinity,
                                           ),
                                         ),
+                                        child: Sidebar(store: store),
+                                      ),
+                                      _SidebarGrip(store: store),
                                     ],
-                                  ),
+                                    Expanded(
+                                      // O recado flutua por cima dos painéis em vez de ser
+                                      // uma faixa embaixo deles. Como filho da Column ele
+                                      // roubava altura da fileira inteira ao aparecer, e
+                                      // `terminal.onResize` manda isso pro pty: um
+                                      // "caminho copiado" reformatava treze sessões, e
+                                      // reformatava de novo ao sumir.
+                                      child: Stack(
+                                        children: [
+                                          PaneArea(store: store),
+                                          // A lista do sino, no canto de baixo à direita:
+                                          // logo acima do sino, que mora na ponta direita
+                                          // da barra de status.
+                                          if (store.noticesOpen)
+                                            Positioned(
+                                              right: Mx.gap,
+                                              top: top ? Mx.gap : null,
+                                              bottom: top ? null : Mx.gap,
+                                              child: NoticeCenter(store: store),
+                                            ),
+                                          // Os cartões do sino e o recado moram no mesmo
+                                          // canto, empilhados -- e com a lista aberta
+                                          // esperariam atrás dela.
+                                          //
+                                          // Montado mesmo sem cartão nenhum: o último
+                                          // a sair ainda tem o deslize dele pra fazer.
+                                          // Vazio, é uma coluna de altura zero.
+                                          if (!store.noticesOpen)
+                                            Positioned(
+                                              // Os dois lados presos: um Positioned só com
+                                              // `right` deixa a largura sem teto, e um
+                                              // Text sem teto não sabe onde quebrar.
+                                              left: Mx.gap,
+                                              right: Mx.gap,
+                                              top: top ? Mx.gap : null,
+                                              bottom: top ? null : Mx.gap,
+                                              child: Align(
+                                                alignment: top
+                                                    ? Alignment.topRight
+                                                    : Alignment.bottomRight,
+                                                // O recado fica colado na barra, e os
+                                                // cartões do lado de dentro dele.
+                                                child: Column(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                                  children: [
+                                                    if (top && store.banner != null) banner,
+                                                    NoticeToasts(store: store),
+                                                    if (!top && store.banner != null) banner,
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
+                            // A lista das sessões, aberta pelo resumo da barra:
+                            // na coluna dele, que é a borda do cartão da lateral.
+                            if (store.sessionsOpen)
+                              Positioned(
+                                left: StatusBar.inset,
+                                top: top ? Mx.gap : null,
+                                bottom: top ? null : Mx.gap,
+                                child: SessionList(store: store),
+                              ),
+                            // Os painéis pequenos dos plugins (`float.show`), por
+                            // cima de tudo o que fica acima da barra: a lateral e os
+                            // painéis. Ver [PluginFloatLayer].
+                            Positioned.fill(child: PluginFloatLayer(store: store)),
+                          ],
                         ),
                       ),
-                      StatusBar(store: store),
+                      if (!top) StatusBar(store: store),
                     ],
                   ),
                 );
@@ -210,7 +242,6 @@ class _MaestriaAppState extends State<MaestriaApp> {
     );
   }
 }
-
 
 /// The gutter between the sidebar and the panes, made draggable.
 ///

@@ -151,6 +151,64 @@ void main() {
     store.dispose();
   });
 
+  test('a lista das sessões e a do sino não ficam abertas juntas', () {
+    final (store, _, _) = storeWithTwo();
+    store.toggleNotices();
+    store.toggleSessions();
+    expect(store.sessionsOpen, isTrue);
+    expect(store.noticesOpen, isFalse);
+    store.toggleNotices();
+    expect(store.noticesOpen, isTrue);
+    expect(store.sessionsOpen, isFalse);
+    store.dispose();
+  });
+
+  testWidgets('o resumo da barra abre a lista das sessões, e a linha leva à sessão', (
+    tester,
+  ) async {
+    final (store, a, b) = storeWithTwo();
+    hook(store, a, 'UserPromptSubmit');
+    hook(store, a, 'PreToolUse', {'tool_name': 'AskUserQuestion', 'tool_input': {}});
+    expect(a.status.needsHuman, isTrue);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: store,
+            builder: (_, _) => Column(
+              children: [
+                if (store.sessionsOpen) SessionList(store: store),
+                const Spacer(),
+                StatusBar(store: store),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // O alvo é o texto, não a barra inteira até o sino.
+    final summary = find.textContaining('2 sessões', findRichText: true);
+    final target = find.ancestor(of: summary, matching: find.byType(GestureDetector)).first;
+    expect(tester.getSize(target).width, lessThan(tester.getSize(summary).width + 20));
+
+    await tester.tap(summary);
+    // Sem `pumpAndSettle`: o avatar de quem pergunta pulsa enquanto espera.
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(store.sessionsOpen, isTrue);
+    // A que espera você vem no bloco dela, e a outra no das abertas.
+    expect(find.text('esperando você  1'), findsOneWidget);
+    expect(find.text('abertas  1'), findsOneWidget);
+    expect(find.text(b.title), findsOneWidget);
+
+    await tester.tap(find.text(a.title));
+    await tester.pump();
+    expect(store.sessionsOpen, isFalse);
+    expect(store.focusedPaneId, a.id);
+    store.dispose();
+  });
+
   group('na tela', () {
     test('o que chega fora da vista sobe num cartão; o da sua frente, não', () {
       final (store, a, b) = storeWithTwo();
@@ -309,15 +367,39 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final height = tester.getSize(find.byType(NoticeCenter)).height;
 
     await tester.tap(find.byIcon(Icons.clear_all_rounded));
     await tester.pump(const Duration(milliseconds: 100));
-    // Saindo, mas ainda no sino.
+    // Saindo, mas ainda no sino -- e sem fechar o vão: o cartão só encolhe
+    // quando a cascata acaba.
     expect(store.notices, hasLength(2));
+    expect(tester.getSize(find.byType(NoticeCenter)).height, height);
 
     await tester.pumpAndSettle();
     expect(store.notices, isEmpty);
     expect(find.textContaining('nenhuma notificação'), findsOneWidget);
+    expect(tester.getSize(find.byType(NoticeCenter)).height, lessThan(height));
+    store.dispose();
+  });
+
+  testWidgets('fechar o sino no meio do limpar tudo ainda limpa', (tester) async {
+    final (store, a, b) = storeWithTwo();
+    hook(store, a, 'UserPromptSubmit');
+    hook(store, a, 'Stop');
+    hook(store, b, 'UserPromptSubmit');
+    hook(store, b, 'Stop');
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: NoticeCenter(store: store))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.clear_all_rounded));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(store.notices, isEmpty);
     store.dispose();
   });
 }

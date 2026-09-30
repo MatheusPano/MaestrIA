@@ -11,6 +11,8 @@ import 'doc_pane.dart';
 import 'menus.dart';
 import 'panel.dart';
 import 'plugin_dialogs.dart';
+import 'plugin_rfw.dart';
+import 'terminal_pane.dart';
 
 /// Os desenhos que um plugin pode pedir, pelo nome: nos blocos (`icon` de
 /// botão e de item de lista) e nos botões de comando da lateral.
@@ -62,8 +64,198 @@ IconData? pluginIcon(Object? name) => switch (name) {
   'server' => Icons.dns_outlined,
   'edit' => Icons.edit_outlined,
   'dot' => Icons.circle,
+  // Os de containers, que a aba do docker pede: a caixa, a pilha do compose,
+  // a imagem, o disco de um volume.
+  'box' => Icons.inventory_2_outlined,
+  'stack' => Icons.layers_outlined,
+  'image' => Icons.album_outlined,
+  'drive' => Icons.storage_rounded,
+  'network' => Icons.lan_outlined,
+  'cpu' => Icons.memory_rounded,
+  'trash' => Icons.delete_outline_rounded,
+  'globe' => Icons.public_rounded,
+  'more' => Icons.more_horiz_rounded,
+  'chevron' => Icons.chevron_right_rounded,
+  'filter' => Icons.filter_list_rounded,
+  'layers' => Icons.layers_outlined,
   _ => null,
 };
+
+/// O menu de botão direito de um plugin (`menu` de um item de lista ou de um
+/// botão): as linhas, os traços e a cor de cada uma.
+Future<void> _pluginMenu(
+  BuildContext context,
+  List<Map<String, dynamic>> menu,
+  Offset at,
+  void Function(String action) onAction,
+) async {
+  final choice = await mxMenu<String>(
+    context,
+    at: at,
+    items: [
+      for (final m in menu)
+        if (m['type'] == 'divider')
+          mxDivider()
+        else if (m['children'] case final List children)
+          // Um submenu: `children: [{ action, label, tone? }]` -- a paleta de cores.
+          MxSubmenuItem(
+            label: (m['label'] as String?) ?? '',
+            glyph: switch (pluginIcon(m['icon'])) {
+              final IconData icon => Icon(icon, size: 14, color: Mx.fgDim),
+              _ => null,
+            },
+            items: () => [
+              for (final c in PluginView.blocksFrom(children))
+                if (c['action'] case final String action)
+                  MxSubItem(
+                    value: action,
+                    label: (c['label'] as String?) ?? action,
+                    glyph: colorDot(
+                      c['tone'] == null || c['tone'] == '' ? null : _PluginPaneState._tone(c['tone']),
+                    ),
+                  ),
+            ],
+          )
+        else if (m['action'] case final String action)
+          mxItem(
+            action,
+            label: (m['label'] as String?) ?? action,
+            enabled: m['disabled'] != true,
+            color: m['tone'] == null ? null : _PluginPaneState._tone(m['tone']),
+            glyph: switch (pluginIcon(m['icon'])) {
+              final IconData icon => Icon(
+                icon,
+                size: 14,
+                color: m['tone'] == null ? Mx.fgDim : _PluginPaneState._tone(m['tone']),
+              ),
+              _ => null,
+            },
+          ),
+    ],
+  );
+  if (choice != null) onAction(choice);
+}
+
+/// A bolinha de uma cor num menu (a paleta do "Cor ▸"); sem cor, só o
+/// contorno -- a "automática".
+Widget colorDot(Color? color) => Container(
+  width: 11,
+  height: 11,
+  decoration: BoxDecoration(
+    color: color,
+    shape: BoxShape.circle,
+    border: color == null ? Border.all(color: Mx.fgFaint, width: 1.4) : null,
+  ),
+);
+
+/// O quadrado arredondado e colorido na frente de uma linha (`avatar`), o
+/// ícone de app do OrbStack: o desenho na cor, sobre a mesma cor bem clara.
+/// Apagado (`dim`) ele fica cinza -- o container parado ao lado dos que rodam.
+///
+/// `status` é a bolinha no canto de baixo, com um anel da cor do fundo pra
+/// descolar do quadrado: no ar, subindo, caído.
+class _Avatar extends StatelessWidget {
+  const _Avatar({
+    required this.spec,
+    required this.dir,
+    required this.size,
+    required this.ring,
+    this.dim = false,
+    this.status,
+  });
+
+  /// Um nome de ícone (ou `.svg` da pasta do plugin), ou `{ icon?, text?, color?,
+  /// svg?, shape?, plain? }`. `svg` é um desenho inteiro, com as cores dele --
+  /// o cubo colorido de um container --, e aí não há caixa em volta.
+  final Object? spec;
+  final String? dir;
+  final double size;
+  final Color ring;
+  final bool dim;
+  final Object? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final map = spec is Map
+        ? (spec as Map).cast<String, dynamic>()
+        : <String, dynamic>{'icon': spec};
+    final base = map['color'] == null ? Mx.accent : _PluginPaneState._tone(map['color']);
+    final color = dim ? Mx.fgFaint : base;
+    final text = map['text'] as String?;
+    final circle = map['shape'] == 'circle';
+    final Widget box;
+    if (map['svg'] case final String svg) {
+      // O desenho é o avatar inteiro: sem caixa, sem tinta. Apagado fica meio
+      // transparente em vez de cinza -- cinza é jogar fora as cores dele.
+      final picture = SvgPicture.string(svg, width: size, height: size, excludeFromSemantics: true);
+      box = SizedBox(
+        width: size,
+        height: size,
+        child: dim ? Opacity(opacity: 0.7, child: picture) : picture,
+      );
+    } else if (map['plain'] == true) {
+      box = SizedBox(
+        width: size,
+        height: size,
+        child: Center(
+          child: PluginGlyph(
+            icon: map['icon'] as String?,
+            dir: dir,
+            size: size * 0.8,
+            color: color,
+          ),
+        ),
+      );
+    } else {
+      box = _box(color, text, map, circle);
+    }
+    if (status == null) return box;
+    final dot = size < 32 ? 9.0 : 11.0;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          box,
+          Positioned(
+            right: circle || map['svg'] != null ? -1 : -2.5,
+            bottom: circle || map['svg'] != null ? -1 : -2.5,
+            child: Container(
+              width: dot,
+              height: dot,
+              decoration: BoxDecoration(
+                color: _PluginPaneState._tone(status),
+                shape: BoxShape.circle,
+                border: Border.all(color: ring, width: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _box(Color color, String? text, Map<String, dynamic> map, bool circle) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: dim ? 0.10 : 0.17),
+        shape: circle ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: circle ? null : BorderRadius.circular(size * 0.28),
+        border: Border.all(color: color.withValues(alpha: dim ? 0.14 : 0.26)),
+      ),
+      alignment: Alignment.center,
+      child: text != null
+          ? Text(
+              text,
+              style: TextStyle(fontSize: size * 0.4, fontWeight: FontWeight.w700, color: color),
+            )
+          : PluginGlyph(icon: map['icon'] as String?, dir: dir, size: size * 0.56, color: color),
+    );
+  }
+}
 
 /// O desenho que um plugin pediu: um nome de [pluginIcon], ou um `.svg` da
 /// pasta dele -- que é como o Flutter tem o próprio logo, e não um parecido.
@@ -200,7 +392,7 @@ class _PluginPaneState extends State<PluginPane> {
             // mudado -- apagando a escolha a cada redesenho do plugin.
             if (!_picks.containsKey(id) || !_same.equals(_sent[id], value)) _picks[id] = value;
             _sent[id] = value;
-          case 'row':
+          case 'row' || 'card' || 'columns':
             visit(PluginView.blocksFrom(b['children']));
         }
       }
@@ -229,6 +421,7 @@ class _PluginPaneState extends State<PluginPane> {
             ),
           Expanded(
             child:
+                _rfw() ??
                 _expanding() ??
                 Scrollbar(
                   controller: _scroll,
@@ -265,6 +458,7 @@ class _PluginPaneState extends State<PluginPane> {
               ),
             Expanded(
               child:
+                  _rfw() ??
                   _expanding() ??
                   (_view.blocks.isEmpty
                       ? Center(
@@ -298,6 +492,19 @@ class _PluginPaneState extends State<PluginPane> {
 
   double get _size => MxMarkdown.baseSize + widget.tab.zoom - (widget.bare ? 1 : 0);
 
+  /// A interface que o plugin montou ele mesmo, no lugar dos blocos. Ver
+  /// [PluginRfw].
+  Widget? _rfw() => _view.rfwLibrary == null ? null : PluginRfw(store: widget.store, tab: widget.tab);
+
+  /// A cor de baixo do bloco que está sendo desenhado: a da lateral, a do
+  /// painel, ou a de um `card`. É dela o anel da bolinha de um avatar, e o
+  /// `card` a troca enquanto desenha os filhos.
+  Color? _surfaceNow;
+  Color get _surface => _surfaceNow ?? (widget.bare ? Mx.bgSidebar : Mx.bg);
+
+  /// A pasta do plugin, de onde um `.svg` de avatar é lido.
+  String? get _pluginDir => widget.store.plugins.byId(_view.pluginId)?.dir;
+
   /// A janela com um console que ocupa a altura que sobra -- o `expand` de
   /// um bloco `console`. É o desenho do debug console do VS Code: a barra e
   /// os seletores em cima, fixos, e o log embaixo até o fim do painel. Sem
@@ -305,7 +512,9 @@ class _PluginPaneState extends State<PluginPane> {
   ///
   /// Null quando nenhum bloco pede isso, e aí vale a coluna que rola.
   Widget? _expanding() {
-    final at = _view.blocks.indexWhere((b) => b['type'] == 'console' && b['expand'] == true);
+    final at = _view.blocks.indexWhere(
+      (b) => (b['type'] == 'console' || b['type'] == 'terminal') && b['expand'] == true,
+    );
     if (at < 0) return null;
     Widget column(Iterable<Map<String, dynamic>> blocks) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -317,7 +526,11 @@ class _PluginPaneState extends State<PluginPane> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           column(_view.blocks.take(at)),
-          Expanded(child: _console(_view.blocks[at], fill: true)),
+          Expanded(
+            child: _view.blocks[at]['type'] == 'terminal'
+                ? _terminal(_view.blocks[at], fill: true)
+                : _console(_view.blocks[at], fill: true),
+          ),
           if (at + 1 < _view.blocks.length) ...[
             const SizedBox(height: 12),
             column(_view.blocks.skip(at + 1)),
@@ -330,7 +543,7 @@ class _PluginPaneState extends State<PluginPane> {
   /// Um bloco. O tipo que esta versão não conhece vira uma linha apagada
   /// dizendo isso, em vez de sumir: quem escreveu o plugin precisa ver que
   /// mandou algo que não foi desenhado.
-  Widget _block(Map<String, dynamic> b) {
+  Widget _block(Map<String, dynamic> b, {bool last = false}) {
     final text = b['text'] is String ? b['text'] as String : '';
     final child = switch (b['type']) {
       'heading' => Text(
@@ -365,7 +578,12 @@ class _PluginPaneState extends State<PluginPane> {
       'section' => _section(b),
       'button' => Align(alignment: Alignment.centerLeft, child: _button(b)),
       'row' => Wrap(
-        alignment: b['align'] == 'center' ? WrapAlignment.center : WrapAlignment.start,
+        alignment: switch (b['align']) {
+          'center' => WrapAlignment.center,
+          'end' => WrapAlignment.end,
+          'between' => WrapAlignment.spaceBetween,
+          _ => WrapAlignment.start,
+        },
         spacing: 8,
         runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
@@ -387,12 +605,150 @@ class _PluginPaneState extends State<PluginPane> {
       'progress' => _progress(b),
       'console' => _console(b),
       'calendar' => _calendar(b),
+      'header' => _header(b),
+      'card' => _card(b),
+      'tabs' => _tabs(b),
+      'columns' => _columns(b),
+      'terminal' => _terminal(b),
       final other => Text(
         'bloco desconhecido: ${other ?? '(sem "type")'}',
         style: TextStyle(fontSize: 11.5, fontFamily: Mx.mono, color: Mx.fgFaint),
       ),
     };
-    return Padding(padding: const EdgeInsets.only(bottom: 12), child: child);
+    if (last) return child;
+    return Padding(
+      padding: EdgeInsets.only(bottom: widget.bare ? 10 : 12),
+      child: child,
+    );
+  }
+
+  /// O cabeçalho de uma lista ou de uma janela: o avatar, o título grande, uma
+  /// linha embaixo e os botões de ícone à direita -- "Containers" com o
+  /// buscar e o + do OrbStack, ou o nome do container com parar e reiniciar.
+  Widget _header(Map<String, dynamic> b) {
+    final subtitle = b['subtitle'] as String?;
+    final avatarSize = widget.bare ? 30.0 : 40.0;
+    return Row(
+      children: [
+        if (b['avatar'] != null) ...[
+          _Avatar(
+            spec: b['avatar'],
+            dir: _pluginDir,
+            size: avatarSize,
+            ring: _surface,
+            dim: b['dim'] == true,
+            status: b['status'],
+          ),
+          SizedBox(width: widget.bare ? 10 : 14),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                (b['title'] as String?) ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _size + (widget.bare ? 2.5 : 5),
+                  fontWeight: FontWeight.w700,
+                  color: Mx.fg,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              if (subtitle != null && subtitle.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: _size - 1.5,
+                    color: b['tone'] == null ? Mx.fgDim : _tone(b['tone']),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        for (final a in PluginView.blocksFrom(b['actions'])) _button({...a, 'style': 'icon'}),
+      ],
+    );
+  }
+
+  /// Uma caixa arredondada, um passo acima do fundo, com blocos dentro: a
+  /// lista de containers como um cartão, as informações de um deles.
+  Widget _card(Map<String, dynamic> b) {
+    final saved = _surfaceNow;
+    final color = Color.alphaBlend(
+      Mx.fg.withValues(alpha: Mx.palette.dark ? 0.035 : 0.025),
+      _surface,
+    );
+    _surfaceNow = color;
+    final children = PluginView.blocksFrom(b['children']);
+    final body = [
+      for (var i = 0; i < children.length; i++) _block(children[i], last: i == children.length - 1),
+    ];
+    _surfaceNow = saved;
+    final pad = (b['padding'] as num?)?.toDouble() ?? (widget.bare ? 6 : 12);
+    return Container(
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(Mx.radius),
+        border: Border.all(color: Mx.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body),
+    );
+  }
+
+  /// As abas de uma janela, num controle segmentado: `items: [{ label,
+  /// action, active?, count? }]`. Quem sabe qual está ativa é o plugin.
+  Widget _tabs(Map<String, dynamic> b) {
+    final items = PluginView.blocksFrom(b['items']);
+    return Align(
+      alignment: b['align'] == 'center' ? Alignment.center : Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: Mx.bgActive.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final it in items)
+              _TabChip(
+                label: (it['label'] as String?) ?? '',
+                count: it['count'] == null ? null : '${it['count']}',
+                icon: pluginIcon(it['icon']),
+                active: it['active'] == true,
+                size: _size,
+                onTap: switch (_actionOf(it)) {
+                  final String a => () => _act(a),
+                  _ => null,
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Blocos lado a lado, cada um com a mesma largura: os medidores de CPU e
+  /// memória de um container.
+  Widget _columns(Map<String, dynamic> b) {
+    final children = PluginView.blocksFrom(b['children']);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) const SizedBox(width: 14),
+          Expanded(child: _block(children[i], last: true)),
+        ],
+      ],
+    );
   }
 
   TextStyle _textStyle(Object? style) {
@@ -414,8 +770,25 @@ class _PluginPaneState extends State<PluginPane> {
       (b['action'] ?? b['id']) is String ? (b['action'] ?? b['id']) as String : null;
 
   Widget _button(Map<String, dynamic> b) {
+    final menu = PluginView.blocksFrom(b['menu']);
+    // Com `menu` o botão abre o menu embaixo dele (o "…" de um cabeçalho),
+    // em vez de mandar uma ação.
+    if (menu.isNotEmpty) {
+      return Builder(
+        builder: (context) => _buttonWith(b, () {
+          final box = context.findRenderObject() as RenderBox?;
+          final at = box == null ? Offset.zero : box.localToGlobal(Offset(0, box.size.height + 4));
+          _pluginMenu(context, menu, at, _act);
+        }),
+      );
+    }
     final action = _actionOf(b);
-    final onPressed = action == null || b['disabled'] == true ? null : () => _act(action);
+    return _buttonWith(b, action == null ? null : () => _act(action));
+  }
+
+  Widget _buttonWith(Map<String, dynamic> b, VoidCallback? tap) {
+    final action = _actionOf(b);
+    final onPressed = b['disabled'] == true ? null : tap;
     final icon = pluginIcon(b['icon']);
     // Só o desenho, sem texto: a barra de depuração do VS Code. O nome vai
     // pro tooltip, que é onde uma barra de ícones diz o que cada um faz.
@@ -472,6 +845,11 @@ class _PluginPaneState extends State<PluginPane> {
         labelStyle: TextStyle(color: Mx.fgDim, fontSize: 12),
         hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
         border: _fieldBorder,
+        prefixIcon: switch (pluginIcon(b['icon'])) {
+          final IconData icon => Icon(icon, size: 16, color: Mx.fgFaint),
+          _ => null,
+        },
+        prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 20),
       ),
     );
   }
@@ -611,6 +989,13 @@ class _PluginPaneState extends State<PluginPane> {
     'accent' => Mx.accent,
     'purple' => Mx.purple,
     'faint' => Mx.fgFaint,
+    // As do terminal, pra quem precisa de mais cores que as do estado: os
+    // avatares de uma lista de containers, um por imagem.
+    'blue' => Mx.palette.ansi.blue,
+    'cyan' => Mx.palette.ansi.cyan,
+    'magenta' => Mx.palette.ansi.magenta,
+    'white' => Mx.fg,
+    'black' => Mx.fgFaint,
     _ => Mx.fgDim,
   };
 
@@ -621,6 +1006,17 @@ class _PluginPaneState extends State<PluginPane> {
   /// clique manda a `action`: quem esconde o que está embaixo é o plugin, que
   /// deixa de mandar os blocos da seção fechada.
   Widget _section(Map<String, dynamic> b) {
+    // `style: "label"`: só a palavra, sem traço -- o "Stopped" da lista do
+    // OrbStack, que separa os parados sem riscar a lista no meio.
+    if (b['style'] == 'label') {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
+        child: Text(
+          (b['text'] as String?) ?? '',
+          style: TextStyle(fontSize: _size - 1.5, fontWeight: FontWeight.w600, color: Mx.fgFaint),
+        ),
+      );
+    }
     final count = b['count'];
     final collapsed = b['collapsed'];
     final action = _actionOf(b);
@@ -669,6 +1065,9 @@ class _PluginPaneState extends State<PluginPane> {
         style: TextStyle(fontSize: _size - 1, color: Mx.fgFaint),
       );
     }
+    // Uma árvore: com alguma linha de seta (`expanded`), as sem seta guardam
+    // o lugar dela, e os avatares do mesmo nível ficam numa coluna só.
+    final tree = items.any((i) => i['expanded'] is bool);
     // Sem moldura nem traço entre as linhas: a lista de uma aba da lateral,
     // que se lê como as linhas das sessões e não como um cartão.
     if (b['flat'] == true) {
@@ -681,6 +1080,10 @@ class _PluginPaneState extends State<PluginPane> {
               icon: pluginIcon(item['icon']),
               tone: _tone(item['tone']),
               size: _size,
+              dir: _pluginDir,
+              surface: _surface,
+              tree: tree,
+              alwaysActions: b['alwaysActions'] == true,
               flat: true,
               onTap: switch (_actionOf(item)) {
                 final String a => () => _act(a),
@@ -706,6 +1109,10 @@ class _PluginPaneState extends State<PluginPane> {
               icon: pluginIcon(items[i]['icon']),
               tone: _tone(items[i]['tone']),
               size: _size,
+              dir: _pluginDir,
+              surface: _surface,
+              tree: tree,
+              alwaysActions: b['alwaysActions'] == true,
               onTap: switch (_actionOf(items[i])) {
                 final String a => () => _act(a),
                 _ => null,
@@ -750,15 +1157,36 @@ class _PluginPaneState extends State<PluginPane> {
     );
   }
 
+  /// A barra: sem `value` ela corre (indeterminada). `detail` é o número à
+  /// direita do rótulo -- "12% de 8 núcleos" --, e `tone` a cor da barra.
   Widget _progress(Map<String, dynamic> b) {
     final value = (b['value'] as num?)?.toDouble().clamp(0.0, 1.0);
+    final label = b['label'] as String?;
+    final detail = b['detail'] as String?;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (b['label'] case final String label) ...[
-          Text(
-            label,
-            style: TextStyle(fontSize: _size - 1, color: Mx.fgDim),
+        if (label != null || detail != null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: _size - 1, color: Mx.fgDim),
+                ),
+              ),
+              if (detail != null)
+                Text(
+                  detail,
+                  style: TextStyle(
+                    fontSize: _size - 1,
+                    color: Mx.fg,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
         ],
@@ -767,7 +1195,7 @@ class _PluginPaneState extends State<PluginPane> {
           child: LinearProgressIndicator(
             value: value,
             minHeight: 5,
-            color: Mx.accent,
+            color: b['tone'] == null ? Mx.accent : _tone(b['tone']),
             backgroundColor: Mx.bgActive,
           ),
         ),
@@ -833,6 +1261,39 @@ class _PluginPaneState extends State<PluginPane> {
     );
     if (fill) return box;
     return SizedBox(height: (b['height'] as num?)?.toDouble() ?? 320, child: box);
+  }
+
+  /// Um terminal de verdade dentro da janela: a sessão que o plugin abriu com
+  /// `session.openShell({ embedded: true })`, pelo `tabId` que voltou. Só as
+  /// dele -- um plugin não desenha o terminal de outra pessoa na janela dele.
+  Widget _terminal(Map<String, dynamic> b, {bool fill = false}) {
+    final id = b['tabId'];
+    final tab = widget.store.tabs.firstWhereOrNull(
+      (t) => t.id == id && t.owner == _view.pluginId && t.embedded,
+    );
+    final box = Container(
+      decoration: BoxDecoration(
+        color: Mx.canvas,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Mx.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: tab == null
+          ? Center(
+              child: Text(
+                (b['empty'] as String?) ?? 'o terminal fechou',
+                style: TextStyle(fontSize: 12, color: Mx.fgFaint),
+              ),
+            )
+          : EmbeddedTerminal(
+              key: ValueKey(tab.id),
+              store: widget.store,
+              tab: tab,
+              autofocus: b['autofocus'] == true,
+            ),
+    );
+    if (fill) return box;
+    return SizedBox(height: (b['height'] as num?)?.toDouble() ?? 360, child: box);
   }
 
   Widget _broken(String why) => Text(
@@ -1367,9 +1828,25 @@ class _ConsoleState extends State<_Console> {
                   itemCount: lines.length,
                   itemBuilder: (context, i) {
                     final l = lines[i];
-                    return Text(
-                      l.text,
-                      style: style.copyWith(color: l.tone == null ? Mx.fg : widget.tone(l.tone)),
+                    final base = style.copyWith(
+                      color: l.tone == null ? Mx.fg : widget.tone(l.tone),
+                    );
+                    final spans = l.spans;
+                    if (spans == null) return Text(l.text, style: base);
+                    return Text.rich(
+                      TextSpan(
+                        style: base,
+                        children: [
+                          for (final s in spans)
+                            TextSpan(
+                              text: s.text,
+                              style: TextStyle(
+                                color: s.tone == null ? null : widget.tone(s.tone),
+                                fontWeight: s.bold ? FontWeight.w700 : null,
+                              ),
+                            ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -1386,11 +1863,22 @@ class _ListRow extends StatefulWidget {
     required this.tone,
     required this.size,
     required this.onAction,
+    required this.surface,
+    this.dir,
     this.onTap,
     this.flat = false,
+    this.tree = false,
+    this.alwaysActions = false,
   });
 
   final Map<String, dynamic> item;
+
+  /// A lista tem setas: a linha sem uma guarda o lugar dela.
+  final bool tree;
+
+  /// Os botões da linha sempre à vista, e não só com o mouse em cima: a lista
+  /// do OrbStack, onde o ▶ e a lixeira de cada container estão sempre ali.
+  final bool alwaysActions;
 
   /// A linha de uma lista `flat`: mais baixa, e o hover é um cartão
   /// arredondado em vez de uma faixa de borda a borda.
@@ -1399,6 +1887,12 @@ class _ListRow extends StatefulWidget {
   final Color tone;
   final double size;
   final VoidCallback? onTap;
+
+  /// A cor embaixo da linha, pro anel da bolinha do avatar.
+  final Color surface;
+
+  /// A pasta do plugin, de onde um `.svg` de avatar é lido.
+  final String? dir;
 
   /// Os botões de `actions` do item: o preparar/descartar do lado do arquivo
   /// no controle de código do VS Code.
@@ -1411,42 +1905,16 @@ class _ListRow extends StatefulWidget {
 class _ListRowState extends State<_ListRow> {
   bool _hover = false;
 
-  /// O `menu` do item, no botão direito: o que não coube como botão de hover.
-  /// Os botões de hover são pra uma ou duas coisas -- mais que isso deixa a
-  /// linha sem lugar onde clicar.
-  Future<void> _showMenu(List<Map<String, dynamic>> menu, Offset at) async {
-    final choice = await mxMenu<String>(
-      context,
-      at: at,
-      items: [
-        for (final m in menu)
-          if (m['type'] == 'divider')
-            mxDivider()
-          else if (m['action'] case final String action)
-            mxItem(
-              action,
-              label: (m['label'] as String?) ?? action,
-              enabled: m['disabled'] != true,
-              color: m['tone'] == null ? null : _PluginPaneState._tone(m['tone']),
-              glyph: switch (pluginIcon(m['icon'])) {
-                final IconData icon => Icon(
-                  icon,
-                  size: 14,
-                  color: m['tone'] == null ? Mx.fgDim : _PluginPaneState._tone(m['tone']),
-                ),
-                _ => null,
-              },
-            ),
-      ],
-    );
-    if (choice != null) widget.onAction(choice);
-  }
-
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
     final subtitle = item['subtitle'] as String?;
     final badge = item['badge'] as String?;
+    final meta = item['meta'] as String?;
+    final strong = item['strong'] == true;
+    final dim = item['dim'] == true;
+    final indent = (item['indent'] as num?)?.toDouble() ?? 0;
+    final expanded = item['expanded'];
     final clickable = widget.onTap != null;
     final actions = [
       for (final a in PluginView.blocksFrom(item['actions']))
@@ -1454,6 +1922,28 @@ class _ListRowState extends State<_ListRow> {
           (action: action, icon: icon, tooltip: a['tooltip'] as String?, tone: a['tone']),
     ];
     final menu = PluginView.blocksFrom(item['menu']);
+    final hovered = clickable && _hover;
+    // A linha do que está aberto (`selected`): o fundo na cor de destaque, e
+    // o texto na cor que se lê em cima dela.
+    final selected = item['selected'] == true;
+    final onAccent = ThemeData.estimateBrightnessForColor(Mx.accent) == Brightness.dark
+        ? Colors.white
+        : Mx.canvas;
+    final background = selected
+        ? Mx.accent.withValues(alpha: hovered ? 0.95 : 0.85)
+        : hovered
+        ? Mx.bgHover
+        : Colors.transparent;
+    final surface = selected
+        ? Color.alphaBlend(Mx.accent.withValues(alpha: 0.85), widget.surface)
+        : hovered
+        ? Color.alphaBlend(Mx.bgHover, widget.surface)
+        : widget.surface;
+    final showActions = actions.isNotEmpty && (_hover || widget.alwaysActions);
+    final avatarSize = widget.flat ? 26.0 : 30.0;
+    // A seta de abrir e fechar (`expanded`): o clique nela manda `toggle`, ou
+    // a ação da linha quando o plugin não separou as duas.
+    final toggle = (item['toggle'] ?? item['action']) as String?;
     return MouseRegion(
       cursor: clickable ? SystemMouseCursors.click : MouseCursor.defer,
       onEnter: (_) => setState(() => _hover = true),
@@ -1461,18 +1951,47 @@ class _ListRowState extends State<_ListRow> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
-        onSecondaryTapDown: menu.isEmpty ? null : (d) => _showMenu(menu, d.globalPosition),
+        onSecondaryTapDown: menu.isEmpty
+            ? null
+            : (d) => _pluginMenu(context, menu, d.globalPosition, widget.onAction),
         child: Container(
           decoration: BoxDecoration(
-            color: clickable && _hover ? Mx.bgHover : Colors.transparent,
-            borderRadius: widget.flat ? BorderRadius.circular(6) : null,
+            color: background,
+            borderRadius: widget.flat ? BorderRadius.circular(7) : null,
           ),
           padding: widget.flat
-              ? const EdgeInsets.symmetric(horizontal: 6, vertical: 6)
-              : const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              ? EdgeInsets.fromLTRB(6 + indent * 16, 5, 6, 5)
+              : EdgeInsets.fromLTRB(12 + indent * 18, 8, 12, 8),
           child: Row(
             children: [
-              if (widget.icon case final icon?) ...[
+              if (expanded is bool) ...[
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: toggle == null ? null : () => widget.onAction(toggle),
+                  child: AnimatedRotation(
+                    turns: expanded ? 0.25 : 0,
+                    duration: const Duration(milliseconds: 140),
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: selected ? onAccent : Mx.fgFaint,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 3),
+              ] else if (widget.tree)
+                const SizedBox(width: 21),
+              if (item['avatar'] != null) ...[
+                _Avatar(
+                  spec: item['avatar'],
+                  dir: widget.dir,
+                  size: avatarSize,
+                  ring: surface,
+                  dim: dim,
+                  status: item['status'],
+                ),
+                const SizedBox(width: 10),
+              ] else if (widget.icon case final icon?) ...[
                 Icon(icon, size: 16, color: widget.tone),
                 const SizedBox(width: 10),
               ],
@@ -1484,23 +2003,41 @@ class _ListRowState extends State<_ListRow> {
                       '${item['title'] ?? ''}',
                       maxLines: widget.flat ? 1 : null,
                       overflow: widget.flat ? TextOverflow.ellipsis : null,
-                      style: TextStyle(fontSize: widget.size - 0.5, color: Mx.fg),
+                      style: TextStyle(
+                        fontSize: widget.size - 0.5,
+                        fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
+                        color: selected
+                            ? onAccent
+                            : dim
+                            ? Mx.fgDim
+                            : Mx.fg,
+                      ),
                     ),
                     if (subtitle != null && subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1.5),
                       Text(
                         subtitle,
                         maxLines: widget.flat ? 1 : null,
                         overflow: widget.flat ? TextOverflow.ellipsis : null,
-                        style: TextStyle(fontSize: widget.size - 2, color: Mx.fgDim),
+                        style: TextStyle(
+                          fontSize: widget.size - 2,
+                          color: selected
+                              ? onAccent.withValues(alpha: 0.75)
+                              : item['subtitleTone'] != null
+                              ? _PluginPaneState._tone(item['subtitleTone'])
+                              : dim
+                              ? Mx.fgFaint
+                              : Mx.fgDim,
+                        ),
                       ),
                     ],
                   ],
                 ),
               ),
               // Só com o mouse em cima, como no VS Code: numa lista de
-              // quarenta arquivos, três ícones em cada linha viram ruído.
-              if (_hover)
+              // quarenta arquivos, três ícones em cada linha viram ruído. O
+              // `meta` (a porta de um container) sai pra dar lugar a eles.
+              if (showActions)
                 for (final a in actions)
                   IconButton(
                     tooltip: a.tooltip,
@@ -1511,9 +2048,27 @@ class _ListRowState extends State<_ListRow> {
                     onPressed: () => widget.onAction(a.action),
                     icon: Icon(
                       a.icon,
-                      color: a.tone == null ? Mx.fgDim : _PluginPaneState._tone(a.tone),
+                      color: selected
+                          ? onAccent
+                          : a.tone == null
+                          ? (dim && !_hover ? Mx.fgFaint : Mx.fgDim)
+                          : _PluginPaneState._tone(a.tone),
+                    ),
+                  )
+              else if (meta != null && meta.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text(
+                    meta,
+                    style: TextStyle(
+                      fontSize: widget.size - 2,
+                      color: item['metaTone'] == null
+                          ? Mx.fgFaint
+                          : _PluginPaneState._tone(item['metaTone']),
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
+                ),
               if (badge != null)
                 Container(
                   margin: const EdgeInsets.only(left: 8),
@@ -1524,6 +2079,92 @@ class _ListRowState extends State<_ListRow> {
                   ),
                   child: Text(badge, style: TextStyle(fontSize: 11, color: Mx.fgDim)),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Uma aba de um bloco `tabs`: a ativa sobe pro fundo do painel, como o
+/// controle segmentado do macOS.
+class _TabChip extends StatefulWidget {
+  const _TabChip({
+    required this.label,
+    required this.active,
+    required this.size,
+    this.count,
+    this.icon,
+    this.onTap,
+  });
+
+  final String label;
+  final String? count;
+  final IconData? icon;
+  final bool active;
+  final double size;
+  final VoidCallback? onTap;
+
+  @override
+  State<_TabChip> createState() => _TabChipState();
+}
+
+class _TabChipState extends State<_TabChip> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.active ? Mx.fg : (_hover ? Mx.fg : Mx.fgDim);
+    return MouseRegion(
+      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: widget.active ? Mx.bg : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+            boxShadow: widget.active
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.icon case final icon?) ...[
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: widget.size - 1,
+                  fontWeight: widget.active ? FontWeight.w600 : FontWeight.w500,
+                  color: color,
+                ),
+              ),
+              if (widget.count case final count?) ...[
+                const SizedBox(width: 6),
+                Text(
+                  count,
+                  style: TextStyle(
+                    fontSize: widget.size - 2,
+                    color: Mx.fgFaint,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -5,14 +5,20 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'claude_mark.dart';
+import 'sidebar_rail.dart';
 
 /// O grupo de toque do sino: o botão e a lista contam como um lugar só, então
 /// clicar no botão com a lista aberta fecha pelo botão -- e não fecha pelo
 /// "clicou fora" pra reabrir logo em seguida pelo botão.
 const noticeTapGroup = #mxNotices;
 
-/// A faixa no pé da janela, no molde da barra de status do VS Code: o resumo
-/// das sessões à esquerda e o sino na ponta direita.
+/// O mesmo, pro resumo das sessões e a lista que ele abre.
+const sessionsTapGroup = #mxSessions;
+
+/// A faixa na borda da janela, no molde da barra de status do VS Code: o
+/// resumo das sessões à esquerda e o sino na ponta direita. No pé, ou no topo
+/// se [AppStore.statusBarTop] -- o sino e os cartões vão junto.
 ///
 /// No canvas e sem borda: é a moldura da janela, não mais um cartão. A altura
 /// que ela ocupa é fixa -- nada nela aparece ou some a ponto de mudar o
@@ -24,23 +30,88 @@ class StatusBar extends StatelessWidget {
 
   static const height = 26.0;
 
+  /// Onde o resumo começa: na borda do cartão da lateral, e não na da janela.
+  /// A faixa de ícones fica à esquerda dela a janela inteira de altura, e o
+  /// texto embaixo da faixa lia como mais um ícone dela.
+  static const inset = Mx.gap + SidebarRail.width + Mx.gap;
+
   @override
   Widget build(BuildContext context) {
-    final claude = store.tabs.where((t) => t.kind == TabKind.claude && !t.exited).toList();
-    final working = claude
-        .where((t) => t.status == ClaudeStatus.working || t.status == ClaudeStatus.tool)
-        .length;
-    final waiting = claude.where((t) => !t.done && t.status.needsHuman).length;
+    // Centrar na conta não centra no olho: de um lado da barra está a borda
+    // dos cartões, do outro a borda da janela, e o vão do lado dos cartões
+    // lia maior. Os 3px a mais do lado da janela levam o conteúdo pro meio
+    // que se vê.
+    final top = store.statusBarTop;
     return SizedBox(
       height: height,
       child: Padding(
-        // Centrar na conta não centra no olho: em cima da barra está a borda
-        // dos cartões, embaixo está a borda da janela, e o vão de cima lia
-        // maior. Os 3px a mais embaixo sobem o conteúdo pro meio que se vê.
-        padding: const EdgeInsets.fromLTRB(Mx.gap + 4, 0, Mx.gap + 4, 3),
+        padding: EdgeInsets.fromLTRB(inset, top ? 3 : 0, Mx.gap + 4, top ? 0 : 3),
         child: Row(
           children: [
             Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _SessionSummary(store: store),
+              ),
+            ),
+            NoticeBell(store: store),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// As sessões do claude que a barra conta: as que ainda têm processo.
+List<MxTab> _liveSessions(AppStore store) =>
+    store.tabs.where((t) => t.kind == TabKind.claude && !t.exited).toList();
+
+bool _working(MxTab t) => t.status == ClaudeStatus.working || t.status == ClaudeStatus.tool;
+
+bool _waiting(MxTab t) => !t.done && t.status.needsHuman;
+
+/// "6 sessões · 1 trabalhando", e o clique que abre a lista delas. A conta
+/// dizia quantas estavam esperando sem dizer quais -- ver [SessionList].
+class _SessionSummary extends StatefulWidget {
+  const _SessionSummary({required this.store});
+  final AppStore store;
+
+  @override
+  State<_SessionSummary> createState() => _SessionSummaryState();
+}
+
+class _SessionSummaryState extends State<_SessionSummary> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = widget.store;
+    final claude = _liveSessions(store);
+    final working = claude.where(_working).length;
+    final waiting = claude.where(_waiting).length;
+    final open = store.sessionsOpen;
+    return TapRegion(
+      groupId: sessionsTapGroup,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: store.toggleSessions,
+          child: Container(
+            height: 20,
+            // O mesmo alvo do sino, do outro lado: o vão de 6 é o que põe o
+            // texto na coluna do primeiro ícone do rodapé da lateral.
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: _hover || open ? Mx.bgHover : Colors.transparent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            // O alvo é o texto, não a barra: um `alignment` no Container o
+            // estica até o sino. O `widthFactor` centra na altura e fica na
+            // largura do que está escrito.
+            child: Center(
+              widthFactor: 1,
               child: Text.rich(
                 TextSpan(
                   children: [
@@ -62,11 +133,161 @@ class StatusBar extends StatelessWidget {
                 textHeightBehavior: const TextHeightBehavior(
                   leadingDistribution: TextLeadingDistribution.even,
                 ),
-                style: TextStyle(fontSize: 11.5, height: 1, color: Mx.fgFaint),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1,
+                  color: _hover || open ? Mx.fgDim : Mx.fgFaint,
+                ),
               ),
             ),
-            NoticeBell(store: store),
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A lista que o resumo da barra abre: as sessões do claude, em três blocos
+/// -- as que esperam você, as que estão trabalhando, e o resto aberto. O
+/// clique numa linha põe a sessão na tela.
+///
+/// Mais curta que a lateral de propósito: a lateral é por pasta, e a pergunta
+/// aqui é outra -- "quem quer o quê de mim agora", em todas as pastas, mesmo
+/// com a lateral escondida ou numa aba de plugin.
+class SessionList extends StatelessWidget {
+  const SessionList({super.key, required this.store});
+  final AppStore store;
+
+  static const width = 360.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final claude = _liveSessions(store);
+    final waiting = claude.where(_waiting).toList();
+    final working = claude.where((t) => !_waiting(t) && _working(t)).toList();
+    final rest = claude.where((t) => !_waiting(t) && !_working(t)).toList();
+    final top = store.statusBarTop;
+    return TapRegion(
+      groupId: sessionsTapGroup,
+      onTapOutside: (_) => store.closeSessions(),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        builder: (context, t, child) => Opacity(
+          opacity: t,
+          child: Transform.translate(offset: Offset(0, (top ? -8 : 8) * (1 - t)), child: child),
+        ),
+        child: Container(
+          width: width,
+          constraints: const BoxConstraints(maxHeight: 420),
+          decoration: BoxDecoration(
+            color: Mx.bgSidebar,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Mx.border),
+            boxShadow: [BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6))],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: claude.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Text(
+                    'nenhuma sessão do claude aberta',
+                    style: TextStyle(fontSize: 12, color: Mx.fgFaint),
+                  ),
+                )
+              : ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 6),
+                  children: [
+                    if (waiting.isNotEmpty) ..._block('esperando você', waiting),
+                    if (working.isNotEmpty) ..._block('trabalhando', working),
+                    if (rest.isNotEmpty) ..._block('abertas', rest),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _block(String label, List<MxTab> tabs) => [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      child: Text(
+        '$label  ${tabs.length}',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+          color: Mx.fgFaint,
+        ),
+      ),
+    ),
+    for (final t in tabs) _SessionRow(key: ObjectKey(t), store: store, tab: t),
+  ];
+}
+
+class _SessionRow extends StatefulWidget {
+  const _SessionRow({super.key, required this.store, required this.tab});
+  final AppStore store;
+  final MxTab tab;
+
+  @override
+  State<_SessionRow> createState() => _SessionRowState();
+}
+
+class _SessionRowState extends State<_SessionRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.tab;
+    final store = widget.store;
+    // A que está com o teclado: é a que você já está olhando.
+    final here = store.focusedPaneId == t.id;
+    final where = [if (!t.folder.isLoose) t.folder.name, t.subtitle].join(' · ');
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => store.openSession(t),
+        child: Container(
+          color: _hover ? Mx.bgHover : (here ? Mx.bgActive : Colors.transparent),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: Row(
+            children: [
+              ClaudeAvatar(status: t.status, size: 18, dim: t.done),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      t.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        color: Mx.fg,
+                      ),
+                    ),
+                    Text(
+                      where,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, height: 1.3, color: Mx.fgFaint),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(t.status.label, style: TextStyle(fontSize: 11, color: t.status.color)),
+            ],
+          ),
         ),
       ),
     );
@@ -155,12 +376,29 @@ const _slide = Duration(milliseconds: 280);
 
 /// O intervalo entre uma linha e a seguinte no "limpar tudo": a lista sai em
 /// cascata, de cima pra baixo, em vez de sumir de uma vez.
-const _cascade = Duration(milliseconds: 45);
+const _cascade = Duration(milliseconds: 35);
+
+/// Quantas linhas esperam a vez na cascata. A lista não mostra mais que isso,
+/// e as de baixo saem junto com a última -- ninguém as vê.
+const _cascadeCap = 8;
+
+/// O fecho do "limpar tudo": com as linhas já fora, o cartão encolhe de uma
+/// vez até o recado de vazio.
+const _settle = Duration(milliseconds: 220);
 
 /// Zero quando o sistema pede menos movimento: o aviso aparece e some igual,
 /// só que sem viagem.
 Duration _motion(BuildContext context, Duration d) =>
     MediaQuery.maybeDisableAnimationsOf(context) ?? false ? Duration.zero : d;
+
+/// O contorno dos cartões do sino, pintado por cima do conteúdo e não por
+/// baixo: na `decoration` ele fica atrás dos filhos, e o fundo do hover de
+/// uma linha encostada na borda cobria o traço -- o cartão perdia o contorno
+/// justo onde o ponteiro estava.
+BoxDecoration _outline() => BoxDecoration(
+  borderRadius: BorderRadius.circular(8),
+  border: Border.all(color: Mx.accent.withValues(alpha: 0.7)),
+);
 
 /// A lista do sino, no molde da central de notificações do VS Code: um
 /// cartão com contorno na cor de destaque, cabeçalho com as ações de tudo, e
@@ -175,36 +413,70 @@ class NoticeCenter extends StatefulWidget {
   State<NoticeCenter> createState() => _NoticeCenterState();
 }
 
-class _NoticeCenterState extends State<NoticeCenter> {
-  /// As linhas saindo, e quanto cada uma espera pra começar. A linha só sai
-  /// do sino quando a animação dela termina -- ver [_Leaving].
+class _NoticeCenterState extends State<NoticeCenter> with SingleTickerProviderStateMixin {
+  /// As linhas saindo pelo x. A linha só sai do sino quando a animação dela
+  /// termina -- ver [_Leaving].
   final Map<MxNotice, Duration> _leaving = {};
 
-  /// A rede do "limpar tudo": a lista só monta as linhas que cabem na vista,
-  /// e as de baixo, que nunca foram desenhadas, nunca terminariam de sair.
-  Timer? _sweep;
+  /// O "limpar tudo", num relógio só: a cascata das linhas e depois o fecho.
+  ///
+  /// As linhas saem sem fechar o vão que deixam. O cartão é preso pela borda
+  /// de baixo, e cada linha encolhendo na sua vez fazia o cabeçalho descer
+  /// aos trancos enquanto as outras ainda deslizavam. Vazias todas, a altura
+  /// cai num movimento só.
+  late final _sweep = AnimationController(vsync: this)..addStatusListener(_swept);
+
+  /// As linhas do "limpar tudo" e a vez de cada uma na cascata.
+  final Map<MxNotice, int> _order = {};
+
+  /// A vez da última linha, que é onde a cascata acaba e o fecho começa.
+  int _last = 0;
+
+  Duration get _span => _cascade * _last + _slide + _settle;
+
+  /// Um instante da varrida, como fração do relógio dela.
+  double _at(Duration d) => d.inMicroseconds / _span.inMicroseconds;
 
   @override
   void dispose() {
-    _sweep?.cancel();
+    // Fechado no meio da varrida, por um clique fora: o gesto já foi feito,
+    // só não chega a ser visto. Fora do dispose, que é no meio de um frame.
+    if (_order.isNotEmpty) {
+      final store = widget.store;
+      final all = List.of(_order.keys);
+      scheduleMicrotask(() => _dismissAll(store, all));
+    }
+    _sweep.dispose();
     super.dispose();
   }
 
   void _dismiss(MxNotice n) => setState(() => _leaving[n] = Duration.zero);
 
   void _clearAll() {
-    final all = List.of(widget.store.notices);
+    // As que já saem pelo x terminam a saída delas.
+    final all = widget.store.notices.where((n) => !_leaving.containsKey(n)).toList();
+    if (all.isEmpty) return;
     setState(() {
       for (final (i, n) in all.indexed) {
-        _leaving.putIfAbsent(n, () => _cascade * i.clamp(0, 10));
+        _order[n] = i.clamp(0, _cascadeCap);
       }
+      _last = (all.length - 1).clamp(0, _cascadeCap);
     });
-    _sweep?.cancel();
-    _sweep = Timer(_motion(context, _slide) + _cascade * 10, () {
-      for (final n in all) {
-        _gone(n);
-      }
-    });
+    _sweep.duration = _motion(context, _span);
+    _sweep.forward(from: 0);
+  }
+
+  void _swept(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    final all = List.of(_order.keys);
+    setState(_order.clear);
+    _dismissAll(widget.store, all);
+  }
+
+  static void _dismissAll(AppStore store, List<MxNotice> all) {
+    for (final n in all) {
+      if (store.notices.contains(n)) store.dismissNotice(n);
+    }
   }
 
   void _gone(MxNotice n) {
@@ -212,10 +484,36 @@ class _NoticeCenterState extends State<NoticeCenter> {
     if (widget.store.notices.contains(n)) widget.store.dismissNotice(n);
   }
 
+  /// A linha na vez dela da cascata: desliza pra direita e apaga, e o lugar
+  /// dela fica -- quem fecha o vão é o fecho, de uma vez.
+  Widget _out(int at, Widget child) {
+    final start = _cascade * at;
+    final move = _sweep.drive(
+      CurveTween(curve: Interval(_at(start), _at(start + _slide), curve: Curves.easeInCubic)),
+    );
+    return IgnorePointer(
+      child: FadeTransition(
+        opacity: ReverseAnimation(move),
+        child: SlideTransition(
+          position: move.drive(Tween(begin: Offset.zero, end: const Offset(1, 0))),
+          child: child,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
     final notices = store.notices;
+    // Só encolhe até o vazio se não sobra nada: um aviso que chegou no meio
+    // da varrida fica, e a lista com ele.
+    final settles = _order.isNotEmpty && notices.every(_order.containsKey);
+    final settle = _sweep.drive(
+      CurveTween(
+        curve: Interval(_at(_cascade * _last + _slide), 1, curve: Curves.easeInOutCubic),
+      ),
+    );
     return TapRegion(
       groupId: noticeTapGroup,
       onTapOutside: (_) => store.closeNotices(),
@@ -225,7 +523,12 @@ class _NoticeCenterState extends State<NoticeCenter> {
         curve: Curves.easeOut,
         builder: (context, t, child) => Opacity(
           opacity: t,
-          child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: child),
+          // Sobe de perto do sino: de baixo com a barra no pé, de cima com
+          // ela no topo.
+          child: Transform.translate(
+            offset: Offset(0, (store.statusBarTop ? -8 : 8) * (1 - t)),
+            child: child,
+          ),
         ),
         child: Container(
           width: NoticeCenter.width,
@@ -233,51 +536,81 @@ class _NoticeCenterState extends State<NoticeCenter> {
           decoration: BoxDecoration(
             color: Mx.bgSidebar,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Mx.accent.withValues(alpha: 0.7)),
             boxShadow: [BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6))],
           ),
+          foregroundDecoration: _outline(),
           clipBehavior: Clip.antiAlias,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Header(store: store, onClear: _clearAll),
+              _Header(store: store, onClear: _order.isEmpty ? _clearAll : null),
               if (notices.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 6, 14, 18),
-                  child: Text(
-                    'nenhuma notificação — quando um painel perguntar algo ou terminar, aparece aqui',
-                    style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.4),
-                  ),
-                )
-              else
+                const _Empty()
+              else ...[
                 Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.only(bottom: 4),
-                    itemCount: notices.length,
-                    itemBuilder: (_, i) {
-                      final n = notices[i];
-                      // O divisor vai dentro da linha, e não entre elas: uma
-                      // linha que encolhe até sumir leva o traço dela junto.
-                      return _Leaving(
-                        key: ObjectKey(n),
-                        leaving: _leaving[n],
-                        onGone: () => _gone(n),
-                        child: Column(
+                  child: SizeTransition(
+                    sizeFactor: settles ? ReverseAnimation(settle) : kAlwaysCompleteAnimation,
+                    alignment: AlignmentDirectional.topStart,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 4),
+                      itemCount: notices.length,
+                      itemBuilder: (_, i) {
+                        final n = notices[i];
+                        final at = _order[n];
+                        // O divisor vai dentro da linha, e não entre elas: uma
+                        // linha que encolhe até sumir leva o traço dela junto.
+                        final row = Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             if (i > 0) Divider(height: 1, thickness: 1, color: Mx.border),
                             _NoticeRow(store: store, notice: n, onDismiss: () => _dismiss(n)),
                           ],
-                        ),
-                      );
-                    },
+                        );
+                        return _Leaving(
+                          key: ObjectKey(n),
+                          leaving: _leaving[n],
+                          onGone: () => _gone(n),
+                          child: at == null ? row : _out(at, row),
+                        );
+                      },
+                    ),
                   ),
                 ),
+                // O recado de vazio abrindo no lugar da lista que fecha: as
+                // duas alturas trocam na mesma curva, e o cartão só encolhe.
+                if (settles)
+                  SizeTransition(
+                    sizeFactor: settle,
+                    alignment: AlignmentDirectional.topStart,
+                    child: FadeTransition(
+                      opacity: settle.drive(CurveTween(curve: const Interval(0.4, 1))),
+                      child: const _Empty(),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// O sino sem aviso nenhum. Um widget só pras duas portas -- a lista vazia e
+/// o fim do "limpar tudo" --, que precisam ter a mesma altura: a troca de uma
+/// pela outra acontece num frame e não pode pular.
+class _Empty extends StatelessWidget {
+  const _Empty();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 18),
+      child: Text(
+        'nenhuma notificação — quando um painel perguntar algo ou terminar, aparece aqui',
+        style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.4),
       ),
     );
   }
@@ -415,11 +748,14 @@ class _NoticeToastsState extends State<NoticeToasts> {
 
   @override
   Widget build(BuildContext context) {
+    // O mais novo perto do sino: embaixo com a barra no pé, em cima com ela
+    // no topo.
+    final top = widget.store.statusBarTop;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        for (final n in _shown)
+        for (final n in top ? _shown.reversed : _shown)
           NoticeToast(
             // Pelo aviso, não pela posição: o cartão de cima sair não pode
             // reanimar os de baixo.
@@ -507,7 +843,9 @@ class _NoticeToastState extends State<NoticeToast> with SingleTickerProviderStat
         // encosta o cartão na esquerda: a largura tem que ser a do cartão.
         fixedCrossAxisSizeFactor: 1,
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: widget.store.statusBarTop
+              ? const EdgeInsets.only(top: 8)
+              : const EdgeInsets.only(bottom: 8),
           child: SlideTransition(
             // Um pouco mais que a largura: a sombra também sai da vista.
             position: Tween(begin: const Offset(1.15, 0), end: Offset.zero).animate(move),
@@ -518,11 +856,11 @@ class _NoticeToastState extends State<NoticeToast> with SingleTickerProviderStat
                 decoration: BoxDecoration(
                   color: Mx.bgSidebar,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Mx.accent.withValues(alpha: 0.7)),
                   boxShadow: [
                     BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 6)),
                   ],
                 ),
+                foregroundDecoration: _outline(),
                 clipBehavior: Clip.antiAlias,
                 child: _NoticeRow(
                   store: widget.store,
@@ -539,13 +877,13 @@ class _NoticeToastState extends State<NoticeToast> with SingleTickerProviderStat
   }
 }
 
-
 class _Header extends StatelessWidget {
   const _Header({required this.store, required this.onClear});
   final AppStore store;
 
   /// O "limpar tudo" passa pela lista, que é quem sabe fazer as linhas saírem.
-  final VoidCallback onClear;
+  /// Null no meio de uma varrida: não há o que limpar duas vezes.
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {

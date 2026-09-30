@@ -24,6 +24,7 @@ import 'links.dart';
 import 'notify.dart';
 import 'paths.dart';
 import 'plugin_api.dart';
+import 'plugin_floats.dart';
 import 'plugins.dart';
 import 'pty.dart';
 import 'setup.dart';
@@ -121,6 +122,12 @@ class MxTab {
   /// O que o dono disse que este terminal é (o id do host), pra ele se achar
   /// de novo depois de reiniciar sem ter que adivinhar pelo título.
   String? ownerTag;
+
+  /// Um terminal que mora dentro de uma janela do dono (`session.openShell`
+  /// com `embedded`, desenhado por um bloco `terminal`), e não num painel: a
+  /// aba Terminal de um container, como no OrbStack. Nunca vai pra grade --
+  /// pôr na tela é pôr a janela do plugin na tela.
+  bool embedded = false;
 
   /// Um painel que não é uma sessão de terminal: não tem pty, não tem saída
   /// pra ler e não tem o que matar no encerramento.
@@ -582,6 +589,10 @@ class AppStore extends ChangeNotifier {
   /// A lista do sino está aberta.
   bool noticesOpen = false;
 
+  /// A lista das sessões, aberta pelo resumo da barra de status. Irmã da
+  /// lista do sino: as duas moram na barra, e abrir uma fecha a outra.
+  bool sessionsOpen = false;
+
   int get unreadNotices => notices.where((n) => !n.read).length;
 
   /// Os avisos que estão na tela agora, em cartões no canto -- o mais novo
@@ -619,6 +630,17 @@ class AppStore extends ChangeNotifier {
   /// [sidebarWidth], e é por isso que são dois campos: a largura que ela volta
   /// a ter é a que você tinha deixado.
   bool sidebarHidden = false;
+
+  /// A barra de status no topo da janela, e não no pé. O sino, a lista dele
+  /// e os cartões vão junto: eles moram perto do sino de onde vieram.
+  ///
+  /// Lembrada como a lateral escondida -- é um jeito de montar a janela.
+  bool statusBarTop = false;
+
+  /// A ordem dos ícones de plugin na faixa, pelos ids, como você arrastou.
+  /// Quem não está aqui (um plugin novo) vem depois, na ordem dos plugins.
+  /// Ver [railPlugins] e [moveRailPlugin].
+  List<String> railOrder = [];
 
   /// O que a lateral está mostrando: null pras sessões, ou o id do plugin cuja
   /// aba foi escolhida na faixa (ver [railPlugins]). É o que o VS Code chama de
@@ -779,8 +801,14 @@ class AppStore extends ChangeNotifier {
       final w = (j['sidebarWidth'] as num?)?.toDouble();
       if (w != null) sidebarWidth = w.clamp(minSidebar, maxSidebar);
       sidebarHidden = j['sidebarHidden'] as bool? ?? false;
+      statusBarTop = j['statusBarTop'] as bool? ?? false;
+      railOrder = [
+        for (final id in j['railOrder'] as List? ?? const [])
+          if (id is String) id,
+      ];
       sidebarView = j['sidebarView'] as String?;
       doNotDisturb = j['doNotDisturb'] as bool? ?? false;
+      floats.readJson(j['floats']);
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
       // Antes do tema: um tema de plugin só existe depois que o plugin é
@@ -985,8 +1013,11 @@ class AppStore extends ChangeNotifier {
           // Só quando está escondida, como os outros interruptores daqui: um
           // config que não fala do assunto é um config com a lateral na tela.
           if (sidebarHidden) 'sidebarHidden': true,
+          if (statusBarTop) 'statusBarTop': true,
+          if (railOrder.isNotEmpty) 'railOrder': railOrder,
           if (sidebarView != null) 'sidebarView': sidebarView,
           if (doNotDisturb) 'doNotDisturb': true,
+          if (floats.toJson() case final f when f.isNotEmpty) 'floats': f,
           if (groupsCollapsed) 'groupsCollapsed': true,
           if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
           'theme': Mx.palette.id,
@@ -1147,6 +1178,15 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Leva a barra de status pro topo da janela, ou de volta pro pé. Ver
+  /// [statusBarTop].
+  void setStatusBarTop(bool top) {
+    if (top == statusBarTop) return;
+    statusBarTop = top;
+    _save();
+    notifyListeners();
+  }
+
   /// O clique num ícone da faixa: [pluginId] null é o das sessões.
   ///
   /// O do VS Code, inteiro: com a lateral escondida, qualquer ícone a traz de
@@ -1206,13 +1246,22 @@ class AppStore extends ChangeNotifier {
   /// git, um app rodando. Ausente, o ícone conta as janelas abertas.
   final Map<String, String> sidebarBadges = {};
 
+  /// Os painéis pequenos que os plugins põem por cima da janela
+  /// (`float.show`), e onde cada um foi largado. Ver [PluginFloats].
+  late final PluginFloats floats = PluginFloats(onMoved: _save);
+
   /// Troca os blocos da aba de [plugin] e/ou o selo do ícone dele (vazio
   /// tira). Null é "não mexe". Diz se a aba está na tela.
-  bool updatePluginSidebar(MxPlugin plugin, {List<Map<String, dynamic>>? blocks, String? badge}) {
+  bool updatePluginSidebar(
+    MxPlugin plugin, {
+    List<Map<String, dynamic>>? blocks,
+    String? badge,
+    PluginRfwUpdate? rfw,
+  }) {
     if (badge != null) {
       badge.isEmpty ? sidebarBadges.remove(plugin.id) : sidebarBadges[plugin.id] = badge;
     }
-    if (blocks == null) {
+    if (blocks == null && rfw == null) {
       notifyListeners();
       return _sidebarLive == plugin.id;
     }
@@ -1233,26 +1282,54 @@ class AppStore extends ChangeNotifier {
         ),
       ),
     );
-    tab.view!.setBlocks(blocks);
+    if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+    if (blocks != null) {
+      tab.view!
+        ..rfwLibrary = null
+        ..setBlocks(blocks);
+    }
     notifyListeners();
     return _sidebarLive == plugin.id;
   }
 
-  /// Os plugins que ganham um ícone na faixa, na ordem dos plugins.
+  /// Os plugins que ganham um ícone na faixa, na ordem de [railOrder] e, pra
+  /// quem não está lá, na dos plugins.
   ///
   /// Os que têm um lugar a oferecer: um desenho próprio e algum comando (o
   /// Flutter, o SSH, o git) -- e qualquer um com janela aberta, que de outro
   /// jeito não teria onde aparecer. Um plugin só de temas, ou o relatório, que
   /// é um botão e não um lugar, fica fora: uma aba pra um botão é uma lateral
   /// vazia com um botão no meio.
-  List<MxPlugin> get railPlugins => [
-    for (final p in plugins.all)
-      if ((p.active &&
-              (p.manifest!.sidebar ||
-                  (p.manifest!.icon != null && p.manifest!.commands.isNotEmpty))) ||
-          tabs.any((t) => t.view?.pluginId == p.id || t.owner == p.id))
-        p,
-  ];
+  List<MxPlugin> get railPlugins {
+    final shown = [
+      for (final p in plugins.all)
+        if ((p.active &&
+                (p.manifest!.sidebar ||
+                    (p.manifest!.icon != null && p.manifest!.commands.isNotEmpty))) ||
+            tabs.any((t) => t.view?.pluginId == p.id || t.owner == p.id))
+          p,
+    ];
+    return [
+      for (final id in railOrder) ?shown.firstWhereOrNull((p) => p.id == id),
+      for (final p in shown)
+        if (!railOrder.contains(p.id)) p,
+    ];
+  }
+
+  /// Leva o ícone de [pluginId] pra posição [to] da faixa. Os que não estão
+  /// na faixa agora (um plugin desligado) continuam guardados, no fim, pra
+  /// voltarem num lugar conhecido quando ligarem de novo.
+  void moveRailPlugin(String pluginId, int to) {
+    final ids = [for (final p in railPlugins) p.id]..remove(pluginId);
+    ids.insert(to.clamp(0, ids.length), pluginId);
+    railOrder = [
+      ...ids,
+      for (final id in railOrder)
+        if (!ids.contains(id)) id,
+    ];
+    _save();
+    notifyListeners();
+  }
 
   /// O plugin da aba na tela, ou null pras sessões. Um [sidebarView] que
   /// aponta pra um plugin que saiu da faixa cai nas sessões em vez de mostrar
@@ -1816,7 +1893,14 @@ class AppStore extends ChangeNotifier {
 
   // --- tabs ---------------------------------------------------------------
 
-  MxTab openShell(Folder f, {String? cwd, String? command, Project? project, Launcher? launcher}) {
+  MxTab openShell(
+    Folder f, {
+    String? cwd,
+    String? command,
+    Project? project,
+    Launcher? launcher,
+    bool place = true,
+  }) {
     final tab = MxTab(
       id: 'tab${_seq++}',
       folder: f,
@@ -1826,7 +1910,7 @@ class AppStore extends ChangeNotifier {
       launcher: launcher,
     );
     if (project != null && project.folderRoot == f.root) tab.projectId = project.id;
-    _register(tab);
+    _register(tab, place: place);
     // O comando do programa, quando quem chamou não trouxe um: é o que faz
     // "abrir o btop" abrir o btop, e não um prompt onde você digitaria btop.
     final run = command ?? launcher?.command;
@@ -2299,7 +2383,14 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Encaixa [tab] à direita do painel de [beside], quando há um na tela.
+  ///
+  /// Ao lado de um preso é ao lado de um solto: encaixar corta o painel ao
+  /// meio, e o preso é justamente o que não pode perder o lugar nem o tamanho.
+  /// Sem solto nenhum na tela, é o [_place] que decide.
   void _placeBeside(MxTab tab, MxTab? beside) {
+    if (beside != null && isPinned(beside)) {
+      beside = openPanes.firstWhereOrNull((t) => !isPinned(t));
+    }
     if (panes == null || beside == null || !Panes.has(panes, beside.id)) {
       _place(tab);
       return;
@@ -2324,12 +2415,14 @@ class AppStore extends ChangeNotifier {
     String viewId, {
     required String title,
     required List<Map<String, dynamic>> blocks,
+    PluginRfwUpdate? rfw,
   }) {
     final source = focusedTab;
     if (_pluginTab(plugin.id, viewId) case final open?) {
       open.view!
         ..title = title
         ..setBlocks(blocks);
+      if (rfw != null) open.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
       if (!Panes.has(panes, open.id)) _placeBeside(open, source);
       focusedPaneId = open.id;
       notifyListeners();
@@ -2352,6 +2445,7 @@ class AppStore extends ChangeNotifier {
         blocks: blocks,
       ),
     );
+    if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
     // Fora do [_register], como o leitor: não há processo pra subir.
     tabs.add(tab);
     _placeBeside(tab, source);
@@ -2366,12 +2460,18 @@ class AppStore extends ChangeNotifier {
     String viewId, {
     String? title,
     List<Map<String, dynamic>>? blocks,
+    PluginRfwUpdate? rfw,
   }) {
     final tab = _pluginTab(plugin.id, viewId);
     if (tab == null) return false;
     final view = tab.view!;
     if (title != null) view.title = title;
-    if (blocks != null) view.setBlocks(blocks);
+    if (rfw != null) view.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+    if (blocks != null) {
+      view
+        ..rfwLibrary = null
+        ..setBlocks(blocks);
+    }
     notifyListeners();
     return true;
   }
@@ -2390,6 +2490,7 @@ class AppStore extends ChangeNotifier {
     for (final t in tabs.where((t) => t.view?.pluginId == pluginId).toList()) {
       closeTab(t);
     }
+    floats.dropPlugin(pluginId);
   }
 
   /// Um clique ou envio dentro de uma janela de plugin, de volta pra ele.
@@ -2607,15 +2708,16 @@ class AppStore extends ChangeNotifier {
       : '$title: o claude saiu na largada (código ${code ?? '?'}) '
             '— abra o painel pra ver o motivo';
 
-  void _register(MxTab tab) {
+  void _register(MxTab tab, {bool place = true}) {
     tabs.add(tab);
     plugins.emit(
       'session.opened',
       {'tabId': tab.id, 'kind': tab.kind.name, 'cwd': tab.cwd, 'folder': tab.folder.root},
       activations: ['onSession'],
     );
-    // A new panel lands in whichever pane you were looking at.
-    _place(tab);
+    // A new panel lands in whichever pane you were looking at -- unless it
+    // lives inside a plugin window (see [MxTab.embedded]).
+    if (place) _place(tab);
     tab.term.onExit = () {
       // Dying in the first seconds is not the same as being closed: it means
       // the launch itself failed, and the reason is sitting in that panel's
@@ -2651,6 +2753,8 @@ class AppStore extends ChangeNotifier {
   /// desmanchá-la sem você ter pedido; uma grade que é um grupo tem pra onde
   /// voltar, porque está guardada.
   void select(MxTab tab) {
+    // O embutido não tem painel: quem vai pra tela é a janela que o desenha.
+    if (tab.embedded) return;
     // O clique numa hibernada é o "retomar" -- ver [MxTab.hibernated].
     if (tab.hibernated) unawaited(wake(tab));
     final group = activeGroup;
@@ -2676,8 +2780,9 @@ class AppStore extends ChangeNotifier {
   ///
   /// O lugar em foco, a menos que ele esteja preso (ver [MxTab.pinned]): aí é
   /// o primeiro solto da tela. Com todos presos não há lugar pra trocar, e a
-  /// sessão abre um ao lado do que está em foco -- prender tudo é dizer que
-  /// nada daquilo sai.
+  /// sessão abre um novo -- prender tudo é dizer que nada daquilo sai. Esse
+  /// lugar novo é o que o último solto deixou (ver [_hole]), ou a borda
+  /// direita da tela: nunca a metade de um preso.
   void _place(MxTab tab) {
     if (panes == null) {
       panes = PaneLeaf(tab.id);
@@ -2688,23 +2793,45 @@ class AppStore extends ChangeNotifier {
           : openPanes.firstWhereOrNull((t) => !isPinned(t))?.id;
       if (loose != null) {
         Panes.swap(panes, loose, tab.id);
-      } else {
-        panes = Panes.insert(
-          panes!,
-          tabId: tab.id,
-          targetId: focused?.id ?? Panes.order(panes).first,
-          side: DropSide.right,
-        );
+      } else if (!_fillHole(tab.id)) {
+        panes = Panes.edge(panes!, tabId: tab.id, side: DropSide.right);
       }
     }
     focusedPaneId = tab.id;
   }
 
+  /// A tela de antes de o último painel solto sair, e quem saiu.
+  ///
+  /// É o que segura os presos no lugar. Com a direita inteira presa, tirar o
+  /// da esquerda faz a árvore desabar e os presos tomarem a tela -- e o
+  /// clique seguinte, sem solto pra trocar, abriria a sessão numa borda
+  /// qualquer, empurrando os presos pra onde eles nunca estiveram. Com isto o
+  /// clique reabre o buraco onde ele estava, do tamanho que tinha.
+  ({PaneNode tree, String id})? _hole;
+
+  /// Reabre o [_hole] com [tabId] dentro, se a tela ainda é a que ficou
+  /// quando ele se fechou. Qualquer outra mudança no meio -- um arraste, um
+  /// painel a mais, um grupo -- já é outra tela, e o buraco antigo não é mais
+  /// um lugar dela.
+  bool _fillHole(String tabId) {
+    final hole = _hole;
+    _hole = null;
+    if (hole == null) return false;
+    if (!Panes.sameShape(Panes.remove(Panes.copy(hole.tree), hole.id), panes)) return false;
+    Panes.swap(hole.tree, hole.id, tabId);
+    panes = hole.tree;
+    return true;
+  }
+
   /// Tira a folha da árvore e reencosta o foco em quem ficou no lugar dela.
   void _drop(MxTab tab) {
+    // Um solto que sai de perto de presos deixa o lugar marcado: ver [_hole].
+    final loose = Panes.has(panes, tab.id) && !isPinned(tab);
+    final tree = loose ? Panes.copy(panes) : null;
     final before = Panes.order(panes);
     final at = before.indexOf(tab.id);
     panes = Panes.remove(panes, tab.id);
+    if (tree != null && openPanes.any(isPinned)) _hole = (tree: tree, id: tab.id);
     if (focusedPaneId != tab.id) return;
     final left = Panes.order(panes);
     focusedPaneId = left.isEmpty ? null : left[at.clamp(0, left.length - 1)];
@@ -2730,6 +2857,16 @@ class AppStore extends ChangeNotifier {
   /// Encerra: mata o processo e apaga o painel da lateral. Para só limpar a
   /// tela, [dismiss].
   void closeTab(MxTab tab) {
+    // A janela de um plugin leva junto os terminais embutidos que ela desenhava:
+    // sem a janela eles não têm onde aparecer. Ver [MxTab.embedded].
+    if (tab.view case final view?) {
+      for (final id in _embeddedIn(view.blocks)) {
+        final inner = tabs.firstWhereOrNull(
+          (t) => t.id == id && t.embedded && t.owner == view.pluginId,
+        );
+        if (inner != null) closeTab(inner);
+      }
+    }
     tab.armed = false;
     if (!tab.isPassive) {
       plugins.emit('session.closed', {'tabId': tab.id}, activations: ['onSession']);
@@ -2744,9 +2881,20 @@ class AppStore extends ChangeNotifier {
     // Encerrar o último painel com sessões vivas na lateral deixaria a tela
     // limpa no meio do trabalho: quando não sobra painel nenhum, a última
     // sessão aberta ocupa o lugar.
-    if (panes == null && tabs.isNotEmpty) _place(tabs.last);
+    if (panes == null) {
+      if (tabs.lastWhereOrNull((t) => !t.embedded) case final next?) _place(next);
+    }
     _save();
     notifyListeners();
+  }
+
+  /// Os `tabId` dos blocos `terminal` de uma janela de plugin, inclusive os de
+  /// dentro de um `card`, de um `columns` ou de uma fileira.
+  static Iterable<String> _embeddedIn(List<Map<String, dynamic>> blocks) sync* {
+    for (final b in blocks) {
+      if (b['type'] == 'terminal' && b['tabId'] is String) yield b['tabId'] as String;
+      if (b['children'] != null) yield* _embeddedIn(PluginView.blocksFrom(b['children']));
+    }
   }
 
   void closeFocused() {
@@ -3476,7 +3624,8 @@ class AppStore extends ChangeNotifier {
       .toList();
 
   /// Os terminais que [plugin] abriu pra ele. Ver [MxTab.owner].
-  List<MxTab> ownedBy(MxPlugin plugin) => tabs.where((t) => t.owner == plugin.id).toList();
+  List<MxTab> ownedBy(MxPlugin plugin) =>
+      tabs.where((t) => t.owner == plugin.id && !t.embedded).toList();
 
   int needingHuman(Folder p) => tabsOf(p).where((t) => !t.done && t.status.needsHuman).length;
 
@@ -3614,6 +3763,7 @@ class AppStore extends ChangeNotifier {
 
   void toggleNotices() {
     noticesOpen = !noticesOpen;
+    sessionsOpen = false;
     // A lista aberta mostra as mesmas linhas, e maiores: os cartões saem pra
     // não ficar duas vezes a mesma coisa no mesmo canto.
     if (noticesOpen) _clearToasts();
@@ -3624,6 +3774,25 @@ class AppStore extends ChangeNotifier {
     if (!noticesOpen) return;
     noticesOpen = false;
     notifyListeners();
+  }
+
+  void toggleSessions() {
+    sessionsOpen = !sessionsOpen;
+    if (sessionsOpen) noticesOpen = false;
+    notifyListeners();
+  }
+
+  void closeSessions() {
+    if (!sessionsOpen) return;
+    sessionsOpen = false;
+    notifyListeners();
+  }
+
+  /// O clique numa linha da lista das sessões: fecha a lista e põe a sessão
+  /// na tela.
+  void openSession(MxTab tab) {
+    sessionsOpen = false;
+    select(tab);
   }
 
   /// O clique numa linha do sino: leva você até o painel.
@@ -4090,6 +4259,7 @@ class AppStore extends ChangeNotifier {
     _saveDebounce?.cancel();
     _bannerTimer?.cancel();
     _clearToasts();
+    floats.dispose();
     agents.stop();
     hooks.stop();
     plugins.killAll();

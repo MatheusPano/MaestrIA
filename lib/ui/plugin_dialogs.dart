@@ -569,6 +569,57 @@ class _PluginSettings extends StatelessWidget {
         ),
       );
     }
+    // As teclas que o manifesto pede, e as que o app já usa -- essas ficam sem
+    // efeito, e é aqui que isso é dito (o cartão só pinta o ⋮ de amarelo).
+    final keyed = [
+      for (final c in plugin.manifest?.commands ?? const <PluginCommand>[])
+        if (c.key != null) c,
+    ];
+    if (keyed.isNotEmpty) {
+      rows.add(
+        Padding(
+          padding: EdgeInsets.only(top: rows.isEmpty ? 0 : 18, bottom: 8),
+          child: Text(
+            'atalhos',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
+          ),
+        ),
+      );
+      for (final c in keyed) {
+        final taken = store.keymap.owner(c.key!);
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(c.title, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
+                    ),
+                    Text(
+                      c.key!.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontFamily: Mx.mono,
+                        color: taken == null ? Mx.fgDim : Mx.fgFaint,
+                        decoration: taken == null ? null : TextDecoration.lineThrough,
+                      ),
+                    ),
+                  ],
+                ),
+                if (taken != null)
+                  Text(
+                    'já é "${taken.label}" no app — este comando fica sem tecla',
+                    style: TextStyle(fontSize: 11.5, color: Mx.yellow, height: 1.4),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
     return AlertDialog(
       backgroundColor: Mx.bgSidebar,
       title: Text('configurar ${plugin.name}', style: const TextStyle(fontSize: 15)),

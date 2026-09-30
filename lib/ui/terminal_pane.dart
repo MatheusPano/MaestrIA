@@ -112,17 +112,49 @@ class _TerminalPaneState extends State<TerminalPane> {
   }
 }
 
+/// O pty de um terminal embutido numa janela de plugin (bloco `terminal`,
+/// ver [MxTab.embedded]): a aba Terminal de um container no docker.
+///
+/// Sem painel em volta, então sem o anel de foco da grade: quem diz que o
+/// teclado é dele é o clique no próprio terminal, e [autofocus] pra quando o
+/// plugin acabou de abri-lo e ele é o que você quer usar.
+class EmbeddedTerminal extends StatelessWidget {
+  const EmbeddedTerminal({
+    super.key,
+    required this.store,
+    required this.tab,
+    this.autofocus = false,
+  });
+
+  final AppStore store;
+  final MxTab tab;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) =>
+      _TerminalSurface(store: store, tab: tab, focused: autofocus, embedded: true);
+}
+
 /// The pty itself.
 ///
 /// Stateful for the wheel's sake: reporting a notch takes the render object
 /// (for the cell under the pointer) and somewhere to keep the pixels that have
 /// not added up to a whole line yet — neither of which a stateless pane holds.
 class _TerminalSurface extends StatefulWidget {
-  const _TerminalSurface({required this.store, required this.tab, required this.focused});
+  const _TerminalSurface({
+    required this.store,
+    required this.tab,
+    required this.focused,
+    this.embedded = false,
+  });
 
   final AppStore store;
   final MxTab tab;
   final bool focused;
+
+  /// Dentro de uma janela de plugin: o clique é quem dá o teclado, porque não
+  /// há painel de terminal em foco pra pedir por ele. Ver [EmbeddedTerminal].
+  final bool embedded;
 
   @override
   State<_TerminalSurface> createState() => _TerminalSurfaceState();
@@ -214,7 +246,10 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       onPointerPanZoomStart: (_) => _pending = 0,
       onPointerPanZoomUpdate: (e) => _scrolled(-e.panDelta.dy, e.position),
       // O clique, pelo mesmo motivo do wheel: ver [_clicked].
-      onPointerDown: (e) => _pressedAt = e.buttons == kPrimaryButton ? e.position : null,
+      onPointerDown: (e) {
+        _pressedAt = e.buttons == kPrimaryButton ? e.position : null;
+        if (widget.embedded) _focus.requestFocus();
+      },
       onPointerUp: _clicked,
       child: TerminalView(
         _terminal,

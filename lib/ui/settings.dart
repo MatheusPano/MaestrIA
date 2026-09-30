@@ -14,7 +14,9 @@ import '../services/store.dart';
 import '../services/usage.dart';
 import '../theme.dart';
 import 'dialogs.dart';
+import 'menus.dart';
 import 'plugin_dialogs.dart';
+import 'plugin_pane.dart' show PluginGlyph;
 import 'theme_gallery.dart';
 
 /// As quatro metades da tela: como a janela se parece, o que o teclado faz, o
@@ -264,20 +266,45 @@ class _RailItemState extends State<_RailItem> {
 
 /// Cabeçalho de bloco: o nome do que vem abaixo e a frase que explica.
 class _Heading extends StatelessWidget {
-  const _Heading(this.title, {this.hint});
+  const _Heading(this.title, {this.hint, this.hintAsInfo = false});
 
   final String title;
   final String? hint;
 
+  /// O [hint] num ⓘ ao lado do título, com o mouse em cima, em vez de embaixo
+  /// dele: pra um texto que se lê uma vez e depois só ocupa a altura da lista.
+  final bool hintAsInfo;
+
   @override
   Widget build(BuildContext context) {
+    final titleText = Text(
+      title,
+      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Mx.fg),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Mx.fg)),
-          if (hint != null) ...[
+          if (hint != null && hintAsInfo)
+            Row(
+              children: [
+                titleText,
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: hint,
+                  waitDuration: const Duration(milliseconds: 200),
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.help,
+                    child: Icon(Icons.info_outline, size: 14, color: Mx.fgFaint),
+                  ),
+                ),
+              ],
+            )
+          else
+            titleText,
+          if (hint != null && !hintAsInfo) ...[
             const SizedBox(height: 3),
             Text(hint!, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.35)),
           ],
@@ -305,6 +332,26 @@ class _Appearance extends StatelessWidget {
         ThemeGallery(store: store),
         const SizedBox(height: 26),
         _Typography(store: store),
+        const SizedBox(height: 26),
+        _Heading(
+          'barra de status',
+          hint: 'a faixa com o resumo das sessões e o sino. O sino, a lista '
+              'dele e os cartões de aviso ficam do mesmo lado que ela.',
+        ),
+        SwitchListTile(
+          value: store.statusBarTop,
+          onChanged: store.setStatusBarTop,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            'barra de status em cima',
+            style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          ),
+          subtitle: Text(
+            'no topo da janela, em vez de no pé',
+            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
+          ),
+        ),
       ],
     );
   }
@@ -1241,6 +1288,7 @@ class _Plugins extends StatelessWidget {
               '~/.maestria/plugins. Um plugin com programa roda com as suas '
               'permissões — instale só o que você confia. Como escrever um: '
               'docs/plugins.md, no repositório da maestria.',
+          hintAsInfo: true,
         ),
         Wrap(
           spacing: 4,
@@ -1316,30 +1364,33 @@ class _PluginRow extends StatefulWidget {
 }
 
 class _PluginRowState extends State<_PluginRow> {
-  /// Fechado, a descrição fica em duas linhas e comandos e temas em uma cada,
-  /// pra que os cartões tenham mais ou menos a mesma altura. Erros e teclas em
-  /// conflito nunca são cortados: são o que a pessoa precisa ler.
+  /// Fechado, o cartão é o nome e uma linha da descrição: com meia dúzia de
+  /// plugins, dois ou três cartões de cinco linhas já enchiam a tela. O resto
+  /// da descrição, os comandos e os temas ficam no "ver mais". Erros e teclas
+  /// em conflito nunca são cortados: são o que a pessoa precisa ler.
   bool _open = false;
 
   AppStore get store => widget.store;
   MxPlugin get plugin => widget.plugin;
 
-  /// Descrição, comandos e temas, com o "ver mais" só quando algo não coube.
+  /// Descrição, comandos e temas, com o "ver mais" só quando algo ficou de
+  /// fora. O número de cada parte é quantas linhas ela tem fechada; 0 some.
   Widget _details(PluginManifest m, TextStyle line) {
     final parts = [
-      if (m.description.isNotEmpty) (m.description, 2),
+      if (m.description.isNotEmpty) (m.description, 1),
       if (m.commands.isNotEmpty)
         (
           'comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} ${c.key!.label}').join(' · ')}',
-          1,
+          0,
         ),
       if (plugin.palettes.isNotEmpty)
-        ('temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 1),
+        ('temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 0),
     ];
     if (parts.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (context, box) {
         final cut = parts.any((p) {
+          if (p.$2 == 0) return true;
           final painter = TextPainter(
             text: TextSpan(text: p.$1, style: line),
             maxLines: p.$2,
@@ -1355,12 +1406,13 @@ class _PluginRowState extends State<_PluginRow> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final (text, lines) in parts)
-              Text(
-                text,
-                style: line,
-                maxLines: shut ? lines : null,
-                overflow: shut ? TextOverflow.ellipsis : null,
-              ),
+              if (!shut || lines > 0)
+                Text(
+                  text,
+                  style: line,
+                  maxLines: shut ? lines : null,
+                  overflow: shut ? TextOverflow.ellipsis : null,
+                ),
             if (cut)
               MouseRegion(
                 cursor: SystemMouseCursors.click,
@@ -1389,117 +1441,167 @@ class _PluginRowState extends State<_PluginRow> {
     PluginState.idle => Mx.fgDim,
   };
 
+  /// Quantas teclas pedidas o app já usa: ficam sem efeito. O que cada uma é
+  /// está nos atalhos do "configurar" do plugin; aqui é só o ⋮ em amarelo e a
+  /// contagem no menu, pra o aviso não ocupar o cartão. Ver [MxKeys.bindings].
+  int get _clashes => [
+    for (final c in plugin.manifest?.commands ?? const <PluginCommand>[])
+      if (c.key case final k? when store.keymap.owner(k) != null) k,
+  ].length;
+
+  /// As ações do cartão, no "…" ao lado do interruptor.
+  Future<void> _menu(BuildContext context, PluginManifest? m) async {
+    final box = context.findRenderObject() as RenderBox?;
+    Icon glyph(IconData icon, [Color? color]) => Icon(icon, size: 14, color: color ?? Mx.fgDim);
+    final choice = await mxMenu<String>(
+      context,
+      at: box == null ? Offset.zero : box.localToGlobal(box.size.bottomLeft(Offset.zero)),
+      items: [
+        if (m != null && m.hasProcess && plugin.enabled)
+          mxItem(
+            'restart',
+            glyph: glyph(Icons.restart_alt),
+            label: 'reiniciar',
+            subtitle: 'relê a pasta e sobe o processo de novo',
+          ),
+        if (m != null && (m.settings.isNotEmpty || m.commands.any((c) => c.key != null)))
+          mxItem(
+            'settings',
+            glyph: glyph(Icons.tune),
+            label: 'configurar…',
+            subtitle: switch (_clashes) {
+              0 => null,
+              1 => '1 atalho em conflito',
+              final n => '$n atalhos em conflito',
+            },
+            subtitleColor: Mx.yellow,
+          ),
+        mxItem('log', glyph: glyph(Icons.receipt_long_outlined), label: 'log'),
+        mxItem('reveal', glyph: glyph(Icons.folder_open_outlined), label: 'mostrar no Finder'),
+        mxDivider(),
+        mxItem(
+          'remove',
+          glyph: glyph(Icons.delete_outline, Mx.red),
+          label: 'remover…',
+          color: Mx.red,
+        ),
+      ],
+    );
+    if (!context.mounted) return;
+    switch (choice) {
+      case 'restart':
+        store.plugins.restart(plugin);
+      case 'settings':
+        showPluginSettings(context, store, plugin);
+      case 'log':
+        showPluginLog(context, store, plugin);
+      case 'reveal':
+        Notifier.reveal(plugin.dir);
+      case 'remove':
+        confirmUninstallPlugin(context, store, plugin);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = plugin.manifest;
     final state = plugin.state;
-    // As teclas pedidas que o app já usa: ficam sem efeito, e aqui é o único
-    // lugar em que isso é dito. Ver [MxKeys.bindings].
-    final clashes = [
-      for (final c in m?.commands ?? const <PluginCommand>[])
-        if (c.key case final k? when store.keymap.owner(k) != null)
-          '${k.label} já é "${store.keymap.owner(k)!.label}" — "${c.title}" fica sem tecla',
-    ];
     final line = TextStyle(fontSize: 11.5, color: Mx.fgDim, height: 1.4);
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: Mx.bg,
         borderRadius: BorderRadius.circular(9),
         border: Border.all(color: Mx.border),
       ),
+      // O ⋮ e o interruptor no meio da altura do cartão; o ícone no meio da
+      // linha do nome, e o texto embaixo alinhado com o nome, não com o ícone.
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(Icons.extension_outlined, size: 17, color: _tone),
-          ),
-          const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+                Row(
                   children: [
-                    Text(
-                      plugin.name,
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
-                    ),
-                    if (m != null)
-                      Text(
-                        m.version,
-                        style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                    PluginGlyph(icon: m?.icon, dir: plugin.dir, size: 17, color: _tone),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            plugin.name,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Mx.fg,
+                            ),
+                          ),
+                          if (m != null)
+                            Text(
+                              m.version,
+                              style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                            ),
+                          Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
+                          if (plugin.linked)
+                            Text('desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
+                        ],
                       ),
-                    Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
-                    if (plugin.linked)
-                      Text('desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 3),
-                if (plugin.problem case final why?)
-                  Text(why, style: line.copyWith(color: Mx.red))
-                else
-                  _details(m!, line),
-                if (plugin.crash case final why? when state == PluginState.crashed)
-                  Text(why, style: line.copyWith(color: Mx.red)),
-                for (final c in clashes) Text(c, style: line.copyWith(color: Mx.yellow)),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (plugin.problem case final why?)
+                        Text(why, style: line.copyWith(color: Mx.red))
+                      else
+                        _details(m!, line),
+                      if (plugin.crash case final why? when state == PluginState.crashed)
+                        Text(why, style: line.copyWith(color: Mx.red)),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-          if (m != null && m.hasProcess && plugin.enabled)
-            IconButton(
-              tooltip: 'reiniciar — relê a pasta e sobe o processo de novo',
-              iconSize: 15,
+          // O respiro entre o fim do texto e os controles: sem ele a
+          // reticência encostava no ⋮.
+          const SizedBox(width: 20),
+          // Um "…" só no lugar de uma fileira de cinco botões: repetida em
+          // cada cartão, ela era a parte mais barulhenta da lista, e são ações
+          // de vez em quando -- o que se mexe todo dia é o interruptor.
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: _clashes == 0 ? 'mais' : 'mais — atalho em conflito em configurar',
+              iconSize: 16,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-              onPressed: () => store.plugins.restart(plugin),
-              icon: Icon(Icons.restart_alt, color: Mx.fgDim),
+              onPressed: () => _menu(context, m),
+              icon: Icon(Icons.more_vert, color: _clashes == 0 ? Mx.fgDim : Mx.yellow),
             ),
-          if (m != null && m.settings.isNotEmpty)
-            IconButton(
-              tooltip: 'configurar',
-              iconSize: 15,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-              onPressed: () => showPluginSettings(context, store, plugin),
-              icon: Icon(Icons.tune, color: Mx.fgDim),
-            ),
-          IconButton(
-            tooltip: 'log',
-            iconSize: 15,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: () => showPluginLog(context, store, plugin),
-            icon: Icon(Icons.receipt_long_outlined, color: Mx.fgDim),
           ),
-          IconButton(
-            tooltip: 'mostrar no Finder',
-            iconSize: 15,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: () => Notifier.reveal(plugin.dir),
-            icon: Icon(Icons.folder_open_outlined, color: Mx.fgDim),
-          ),
-          IconButton(
-            tooltip: 'remover',
-            iconSize: 15,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: () => confirmUninstallPlugin(context, store, plugin),
-            icon: Icon(Icons.delete_outline, color: Mx.fgDim),
-          ),
-          if (m != null)
-            Transform.scale(
-              scale: 0.75,
-              child: Switch(
-                value: plugin.enabled,
-                onChanged: (on) => store.setPluginEnabled(plugin, on),
+          if (m != null) ...[
+            const SizedBox(width: 6),
+            // Reduzido pelo FittedBox, e não por um Transform.scale: o scale
+            // encolhe o desenho mas deixa a caixa do tamanho original, e a
+            // sobra de cada lado desalinhava o interruptor do ⋮.
+            SizedBox(
+              height: 24,
+              child: FittedBox(
+                child: Switch(
+                  value: plugin.enabled,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (on) => store.setPluginEnabled(plugin, on),
+                ),
               ),
             ),
+          ],
         ],
       ),
     );

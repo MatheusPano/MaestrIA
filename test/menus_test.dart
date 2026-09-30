@@ -67,6 +67,7 @@ class NoPty extends AppStore {
     String? command,
     Project? project,
     Launcher? launcher,
+    bool place = true,
   }) {
     pedidos.add(
       Pedido('shell', cwd ?? f.root, project: project?.name, launcher: launcher?.name),

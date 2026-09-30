@@ -193,6 +193,52 @@ abstract final class Panes {
     }
   }
 
+  /// Encosta [tabId] na borda [side] da tela inteira.
+  ///
+  /// O [insert] corta um painel ao meio; este não corta ninguém -- todo mundo
+  /// abre espaço na mesma proporção, e a disposição de dentro fica como estava.
+  /// É o que serve quando todos os painéis estão presos: nenhum deles pode ser
+  /// o que perde a metade.
+  static PaneNode edge(PaneNode root, {required String tabId, required DropSide side}) {
+    final leaf = PaneLeaf(tabId);
+    if (root is PaneSplit && root.axis == side.axis) {
+      final n = root.children.length;
+      for (var i = 0; i < n; i++) {
+        root.weights[i] *= n / (n + 1);
+      }
+      final at = side.leading ? 0 : n;
+      root.children.insert(at, leaf);
+      root.weights.insert(at, 1 / (n + 1));
+      return root;
+    }
+    return PaneSplit(side.axis, side.leading ? [leaf, root] : [root, leaf], [0.5, 0.5]);
+  }
+
+  /// Uma cópia que dá pra mexer sem mexer na original: [insert], [remove] e
+  /// [swap] mudam a árvore no lugar.
+  static PaneNode? copy(PaneNode? node) => switch (node) {
+    null => null,
+    PaneLeaf(:final tabId) => PaneLeaf(tabId),
+    PaneSplit(:final axis, :final children, :final weights) => PaneSplit(axis, [
+      for (final c in children) copy(c)!,
+    ], weights),
+  };
+
+  /// Se as duas árvores cortam a tela do mesmo jeito, com os mesmos painéis
+  /// nos mesmos lugares. As proporções não entram: arrastar uma alça não muda
+  /// quem está onde.
+  static bool sameShape(PaneNode? a, PaneNode? b) => switch ((a, b)) {
+    (null, null) => true,
+    (PaneLeaf a, PaneLeaf b) => a.tabId == b.tabId,
+    (PaneSplit a, PaneSplit b) =>
+      a.axis == b.axis &&
+          a.children.length == b.children.length &&
+          [
+            for (var i = 0; i < a.children.length; i++) sameShape(a.children[i], b.children[i]),
+          ].every((same) => same),
+    _ => false,
+  };
+
   static void _spread(List<double> weights, double freed) {
     final sum = weights.fold<double>(0, (a, b) => a + b);
     if (weights.isEmpty) return;

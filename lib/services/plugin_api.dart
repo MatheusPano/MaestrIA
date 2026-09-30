@@ -5,6 +5,7 @@ import 'docs.dart';
 import 'editor.dart';
 import 'history.dart';
 import 'notify.dart';
+import 'plugin_floats.dart';
 import 'plugins.dart';
 import 'store.dart';
 
@@ -160,13 +161,22 @@ class PluginApi {
       case 'session.openShell':
         _need(plugin, PluginPermission.sessionsCreate);
         final (folder, cwd) = _place(p);
-        final tab = store.openShell(folder, cwd: cwd, command: p['command'] as String?);
+        // Embutido é do plugin por definição: mora numa janela dele, desenhado
+        // por um bloco `terminal`, e não entra na grade. Ver [MxTab.embedded].
+        final embedded = p['embedded'] == true;
+        final tab = store.openShell(
+          folder,
+          cwd: cwd,
+          command: p['command'] as String?,
+          place: !embedded,
+        );
         if (p['label'] case final String label when label.isNotEmpty) tab.customLabel = label;
         // Do plugin: sai dos avulsos e vai pra aba dele. Ver [MxTab.owner].
-        if (p['owned'] == true) {
+        if (p['owned'] == true || embedded) {
           tab
             ..owner = plugin.id
-            ..ownerTag = p['tag'] as String?;
+            ..ownerTag = p['tag'] as String?
+            ..embedded = embedded;
         }
         store.touch();
         return {'tabId': tab.id};
@@ -202,6 +212,7 @@ class PluginApi {
         final shown = store.updatePluginSidebar(
           plugin,
           blocks: p.containsKey('blocks') ? PluginView.blocksFrom(p['blocks']) : null,
+          rfw: _rfw(p),
           badge: switch (p['badge']) {
             _ when !p.containsKey('badge') => null,
             null => '',
@@ -221,6 +232,7 @@ class PluginApi {
           _text(p, 'viewId'),
           title: (p['title'] as String?) ?? plugin.name,
           blocks: PluginView.blocksFrom(p['blocks']),
+          rfw: _rfw(p),
         );
         return {'tabId': tab.id};
       case 'view.update':
@@ -229,6 +241,7 @@ class PluginApi {
           _text(p, 'viewId'),
           title: p['title'] as String?,
           blocks: p.containsKey('blocks') ? PluginView.blocksFrom(p['blocks']) : null,
+          rfw: _rfw(p),
         );
         return {'open': ok};
       case 'command.busy':
@@ -247,6 +260,37 @@ class PluginApi {
         return null;
       case 'view.close':
         store.closePluginView(plugin, _text(p, 'viewId'));
+        return null;
+      case 'float.show':
+        final corner = p['corner'];
+        if (corner != null && FloatCorner.parse(corner) == null) {
+          throw const PluginRpcError(
+            PluginRpcError.invalidParams,
+            '"corner" é topLeft, topRight, bottomLeft ou bottomRight',
+          );
+        }
+        store.floats.show(
+          plugin,
+          _text(p, 'id'),
+          width: (p['width'] as num?)?.toDouble(),
+          height: (p['height'] as num?)?.toDouble(),
+          corner: FloatCorner.parse(corner),
+          blocks: p.containsKey('blocks') ? PluginView.blocksFrom(p['blocks']) : null,
+          rfw: _rfw(p),
+        );
+        return {'shown': true};
+      case 'float.update':
+        final shown = store.floats.update(
+          plugin,
+          _text(p, 'id'),
+          width: (p['width'] as num?)?.toDouble(),
+          height: (p['height'] as num?)?.toDouble(),
+          blocks: p.containsKey('blocks') ? PluginView.blocksFrom(p['blocks']) : null,
+          rfw: _rfw(p),
+        );
+        return {'shown': shown};
+      case 'float.hide':
+        store.floats.hide(plugin, _text(p, 'id'));
         return null;
       default:
         throw PluginRpcError(PluginRpcError.methodNotFound, 'método desconhecido: $method');
@@ -283,6 +327,7 @@ class PluginApi {
     'project': store.projectOf(t)?.name,
     'launcher': t.launcher?.name,
     'owner': t.owner,
+    'embedded': t.embedded,
     // O tag é conversa entre o plugin e os terminais dele.
     if (plugin != null && t.owner == plugin.id) 'tag': t.ownerTag,
     if (plugin?.allows(PluginPermission.hooks) ?? false)
@@ -337,6 +382,26 @@ class PluginApi {
 
   /// A pasta e o cwd de um painel novo: o `cwd` pedido, pendurado na pasta da
   /// lateral que o contém -- ou, sem `cwd`, onde está o painel em foco.
+  /// A interface própria de um pedido (ver [PluginView.rfwLibrary]):
+  /// `rfw: { library?, root? }` e `data`, cada um opcional.
+  PluginRfwUpdate? _rfw(Map<String, dynamic> p) {
+    final rfw = p['rfw'];
+    final data = p['data'];
+    if (rfw == null && data == null) return null;
+    if (rfw != null && rfw is! Map) {
+      throw const PluginRpcError(PluginRpcError.invalidParams, '"rfw" é { library, root? }');
+    }
+    if (data != null && data is! Map) {
+      throw const PluginRpcError(PluginRpcError.invalidParams, '"data" é um objeto');
+    }
+    final r = (rfw as Map?)?.cast<String, dynamic>();
+    return (
+      library: r?['library'] as String?,
+      root: r?['root'] as String?,
+      data: (data as Map?)?.cast<String, Object?>(),
+    );
+  }
+
   (Folder, String) _place(Map<String, dynamic> p) {
     final cwd = p['cwd'] as String?;
     if (cwd == null) {

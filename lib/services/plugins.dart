@@ -31,6 +31,13 @@ import 'shortcuts.dart';
 /// plugin já usa muda de forma incompatível; acrescentar método não sobe.
 const int mxPluginApi = 1;
 
+/// Até onde vão os blocos que esta janela desenha. Não é um contrato que
+/// quebra -- bloco desconhecido vira "bloco desconhecido" --, é a deixa pra
+/// um plugin que usa os novos (a lista do OrbStack, o terminal embutido)
+/// avisar que o app precisa de atualização em vez de desenhar pela metade.
+/// Um app sem o campo no `initialize` é o 1.
+const int mxPluginBlocks = 2;
+
 /// O nome do manifesto na raiz da pasta de um plugin.
 const String mxManifestName = 'maestria-plugin.json';
 
@@ -1139,6 +1146,12 @@ class Plugins extends ChangeNotifier {
       _log(p, 'processo ${conn.pid} subiu: ${m.main!.join(' ')}');
       await conn.request('initialize', {
         'apiVersion': mxPluginApi,
+        'blocks': mxPluginBlocks,
+        // A interface que o plugin monta com widgets (ver [PluginView.rfwLibrary]).
+        // 2: com o `Draggable` e o `DropTarget` de arrastar e soltar.
+        'rfw': 2,
+        // O painel pequeno por cima da janela (`float.show`). Ver [PluginFloats].
+        'floats': 1,
         'pluginId': p.id,
         'pluginDir': p.dir,
         'dataDir': p.dataDir,
@@ -1453,6 +1466,10 @@ class Plugins extends ChangeNotifier {
   }
 }
 
+/// O que um `view.open`/`view.update`/`sidebar.update` traz de interface
+/// própria: `rfw: { library?, root? }` e `data`. Ver [PluginView.rfwLibrary].
+typedef PluginRfwUpdate = ({String? library, String? root, Map<String, Object?>? data});
+
 /// Uma janela que um plugin desenhou: um título e uma lista de blocos.
 ///
 /// Os blocos são json que a Maestria desenha com o tema dela -- o Block Kit do
@@ -1474,6 +1491,27 @@ class PluginView {
   final String pluginName;
   final String id;
   String title;
+
+  /// A interface que o plugin monta ele mesmo (ver `ui/plugin_rfw.dart`): o
+  /// texto da biblioteca de widgets, o widget de cima e os dados. Com a
+  /// biblioteca, os blocos ficam de fora.
+  String? rfwLibrary;
+  String rfwRoot = 'root';
+  final Map<String, Object?> rfwData = {};
+
+  /// Sobe quando os dados mudam: é como o painel sabe o que repassar.
+  int rfwRevision = 0;
+
+  /// Troca a biblioteca e/ou junta dados (cada chave de cima substitui a que
+  /// havia). Ver [PluginView.rfwLibrary].
+  void setRfw({String? library, String? root, Map<String, Object?>? data}) {
+    if (library != null) rfwLibrary = library;
+    if (root != null) rfwRoot = root;
+    if (data != null) {
+      rfwData.addAll(data);
+      rfwRevision += 1;
+    }
+  }
 
   List<Map<String, dynamic>> _blocks;
   List<Map<String, dynamic>> get blocks => _blocks;
@@ -1500,7 +1538,9 @@ class PluginView {
     final seen = <String>{};
     void visit(List<Map<String, dynamic>> of) {
       for (final b in of) {
-        if (b['type'] == 'row') visit(blocksFrom(b['children']));
+        if (b['type'] == 'row' || b['type'] == 'card' || b['type'] == 'columns') {
+          visit(blocksFrom(b['children']));
+        }
         if (b['type'] != 'console' || b['id'] is! String) continue;
         final id = b['id'] as String;
         seen.add(id);
@@ -1529,17 +1569,42 @@ class PluginView {
 /// cada lote por `view.update` seria reenviar a janela inteira e repintar o
 /// app inteiro a cada lote. Aqui o lote entra por `view.appendLines`, e quem
 /// escuta é só o console na tela.
+/// Um pedaço de uma linha de console com cor própria: o nome do serviço na
+/// frente de um log do compose, o `ERROR` no meio da linha, a cor que o
+/// programa pediu com um código ANSI.
+typedef PluginSpan = ({String text, String? tone, bool bold});
+
+/// Uma linha de console. `spans`, quando vem, é a linha em pedaços -- e
+/// `text` continua sendo a linha inteira, que é o que se busca e se copia.
+typedef PluginLine = ({String text, String? tone, List<PluginSpan>? spans});
+
 class PluginConsole extends ChangeNotifier {
-  final List<({String text, String? tone})> lines = [];
+  final List<PluginLine> lines = [];
 
   /// Quantas linhas ficam. As mais velhas saem primeiro.
   int max = 5000;
 
-  static ({String text, String? tone})? _line(Object? raw) => switch (raw) {
-    final String text => (text: text, tone: null),
-    {'text': final Object? text} => (text: '${text ?? ''}', tone: raw['tone'] as String?),
+  static PluginLine? _line(Object? raw) => switch (raw) {
+    final String text => (text: text, tone: null, spans: null),
+    {'spans': final List spans} => _fromSpans(spans, raw['tone'] as String?),
+    {'text': final Object? text} => (
+      text: '${text ?? ''}',
+      tone: raw['tone'] as String?,
+      spans: null,
+    ),
     _ => null,
   };
+
+  static PluginLine _fromSpans(List raw, String? tone) {
+    final spans = <PluginSpan>[
+      for (final s in raw)
+        if (s case {'text': final Object? t})
+          (text: '${t ?? ''}', tone: s['tone'] as String?, bold: s['bold'] == true)
+        else if (s is String)
+          (text: s, tone: null, bold: false),
+    ];
+    return (text: spans.map((s) => s.text).join(), tone: tone, spans: spans);
+  }
 
   void replace(Object? raw) {
     lines.clear();
