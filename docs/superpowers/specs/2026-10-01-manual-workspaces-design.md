@@ -107,7 +107,11 @@ vai para `~/.maestria/config.json.bak-2.4.0`.
 ### Desenho
 
 - A raiz segue o `rootOrder`. O workspace é uma seção que dobra, com nome, cor,
-  contador de sessões e `⋯`.
+  a conta de pastas ("4 pastas"), o aviso de sessões esperando por você quando
+  dobrada (como hoje) e `⋯`.
+- Um workspace sem pastas continua na lateral, com "0 pastas", até alguém
+  desfazê-lo ou fechá-lo. Hoje a seção some com a última pasta; com workspace
+  criado na mão, sumir sozinho seria perder o ATRIUM ao tirar o último repo.
 - Dentro da seção, as pastas seguem o `folderRoots`. Cada pasta mostra o mesmo
   de hoje: features e hotfixes, sessões, worktrees.
 - Uma pasta em dois workspaces aparece completa nos dois, e cada aparição dobra
@@ -134,7 +138,11 @@ vai para `~/.maestria/config.json.bak-2.4.0`.
 - Dentro de um workspace, arrastar entre as pastas dele reordena o
   `folderRoots`.
 - Uma pasta de um workspace solta numa linha da raiz sai do workspace de origem
-  e fica solta na vaga em que caiu.
+  e fica solta na vaga em que caiu (se ela ainda estiver em outro workspace,
+  só sai do de origem).
+- Uma pasta solta sobre uma pasta *dentro* de um workspace entra nesse
+  workspace, na vaga em que caiu. Vale a mesma regra da raiz: a linha em que se
+  soltou diz em que faixa a pasta vai morar.
 - Um workspace arrastado na raiz reordena o `rootOrder`, como hoje.
 
 ### Menus
@@ -145,7 +153,13 @@ vai para `~/.maestria/config.json.bak-2.4.0`.
 - **Workspace:** "renomear…", "cor ▸", "associar .code-workspace…" ou
   "desassociar .code-workspace", "abrir no vscode" (só com arquivo associado),
   "desfazer workspace" (as pastas voltam para a raiz e nada fecha) e "fechar
-  workspace…" (como hoje: tira as pastas da lateral e fecha as sessões delas).
+  workspace…" (como hoje: tira as pastas da lateral e fecha as sessões delas;
+  uma pasta que também está em outro workspace só sai deste, e as sessões dela
+  continuam abertas).
+- Importar um `.code-workspace` põe as pastas dele no workspace associado a
+  esse arquivo (criando um, se não houver), mesmo que alguma já esteja em outro
+  workspace: com o espelho, a pasta passa a estar nos dois. Hoje o import não
+  "rouba" a pasta do primeiro workspace.
 - "Remover" uma pasta pelo menu dela tira o repo de todos os workspaces e fecha
   as sessões dele, como hoje.
 
@@ -186,9 +200,10 @@ vai para `~/.maestria/config.json.bak-2.4.0`.
   da bandeja dos avulsos. O diálogo é o de hoje (nome e brief), com o título
   "nova feature em <pasta>" ou "novo hotfix em <pasta>".
 - O menu da linha ganha "virar hotfix" ou "virar feature".
-- Feature mantém o glifo de hoje. Hotfix ganha um glifo próprio em svg, em
-  `assets/icons/`, e uma etiqueta discreta "hotfix" ao lado do nome. Não há cor
-  automática.
+- Feature mantém o glifo de hoje (`Icons.track_changes`). Hotfix usa
+  `Icons.bolt`, que o Material já tem (o projeto só recorre a svg em
+  `assets/icons/` quando o Material não tem o desenho), e uma etiqueta discreta
+  "hotfix" ao lado do nome. Não há cor automática.
 - Não muda: brief como `--append-system-prompt`, cor herdada pelos painéis,
   concluir com confete, dissolver e mover.
 
