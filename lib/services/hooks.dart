@@ -13,6 +13,13 @@ class HookEvent {
   final Map<String, dynamic> payload;
 }
 
+/// O retrato que a linha de status do Claude Code manda a cada atualização.
+class StatusEvent {
+  StatusEvent(this.tabId, this.payload);
+  final String tabId;
+  final Map<String, dynamic> payload;
+}
+
 /// A loopback HTTP server that Claude Code's hooks report into.
 ///
 /// This is the whole trick behind live panel titles. The alternative -- tailing
@@ -23,7 +30,10 @@ class HookServer {
   HttpServer? _server;
   final _controller = StreamController<HookEvent>.broadcast();
 
+  final _statusController = StreamController<StatusEvent>.broadcast();
+
   Stream<HookEvent> get events => _controller.stream;
+  Stream<StatusEvent> get statuses => _statusController.stream;
   int get port => _server?.port ?? 0;
   bool get running => _server != null;
 
@@ -49,7 +59,11 @@ class HookServer {
             ? <String, dynamic>{}
             : jsonDecode(body) as Map<String, dynamic>;
         final name = (payload['hook_event_name'] as String?) ?? '';
-        if (tabId.isNotEmpty && name.isNotEmpty) {
+        if (segments.firstOrNull == 'status') {
+          // Outro canal, outro stream: a linha de status não é um hook e não
+          // pode passar pelo redutor de estado do painel.
+          if (tabId.isNotEmpty) _statusController.add(StatusEvent(tabId, payload));
+        } else if (tabId.isNotEmpty && name.isNotEmpty) {
           _controller.add(HookEvent(tabId, name, payload));
         }
       } catch (_) {

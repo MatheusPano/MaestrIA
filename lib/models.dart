@@ -1028,3 +1028,34 @@ class Launcher {
     );
   }
 }
+
+
+/// Quanto da janela de contexto uma sessão do Claude já ocupa.
+///
+/// Vem da linha de status do Claude Code e vive só na memória do painel: é um
+/// retrato do momento, não uma configuração, então nunca vai pro config.
+class ContextUsage {
+  const ContextUsage({required this.percent, required this.tokens, required this.window});
+
+  final int percent;
+  final int tokens;
+  final int window;
+
+  /// Lê o json da linha de status. Null é "sem número agora": antes da
+  /// primeira resposta e depois de um `/compact` o Claude Code manda
+  /// `current_usage` e o percentual nulos, e inventar um zero ali mentiria.
+  static ContextUsage? fromStatusLine(Object? json) {
+    if (json is! Map) return null;
+    final window = json['context_window'];
+    if (window is! Map) return null;
+    final percent = window['used_percentage'];
+    final size = window['context_window_size'];
+    final usage = window['current_usage'];
+    if (percent is! num || size is! num || size <= 0 || usage is! Map) return null;
+    num count(String key) => usage[key] is num ? usage[key] as num : 0;
+    final tokens = count('input_tokens') +
+        count('cache_creation_input_tokens') +
+        count('cache_read_input_tokens');
+    return ContextUsage(percent: percent.round(), tokens: tokens.round(), window: size.round());
+  }
+}
