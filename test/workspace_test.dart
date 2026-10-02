@@ -913,6 +913,13 @@ void main() {
       expect(infra.collapsed, isFalse);
     });
 
+    test('um nome vazio não cria workspace', () {
+      final store = three();
+      addTearDown(store.dispose);
+      expect(() => store.createWorkspace('   '), throwsArgumentError);
+      expect(store.workspaces, isEmpty);
+    });
+
     test('renomear, pintar e associar um arquivo', () {
       final store = three();
       addTearDown(store.dispose);

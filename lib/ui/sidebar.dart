@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import '../services/notify.dart';
 import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
@@ -203,13 +204,21 @@ class _Footer extends StatelessWidget {
       child: Row(
         spacing: _StripIcon.gap,
         children: [
-          _StripIcon(
-            // Sem rótulo: `create_new_folder` já é a pasta *e* o +, então a
-            // palavra ao lado era repetição. O tooltip continua dizendo o que
-            // ele adiciona.
-            icon: Icons.create_new_folder_outlined,
-            tooltip: 'adicionar uma pasta ao cockpit',
-            onPressed: () => showAddFolder(context, store),
+          // Um menu ancorado no ícone: pasta, import de .code-workspace ou
+          // workspace novo. O Builder dá o contexto do próprio ícone, que é de
+          // onde sai a âncora.
+          Builder(
+            builder: (context) => _StripIcon(
+              // Sem rótulo: `create_new_folder` já é a pasta *e* o +, então a
+              // palavra ao lado era repetição. O tooltip continua dizendo o que
+              // ele adiciona.
+              icon: Icons.create_new_folder_outlined,
+              tooltip: 'adicionar uma pasta ao cockpit',
+              onPressed: () {
+                final box = context.findRenderObject() as RenderBox;
+                _showFooterAdd(context, store, box.localToGlobal(Offset.zero));
+              },
+            ),
           ),
           // O histórico, inteiro: todas as pastas de uma vez, repartido por
           // pasta -- e este é o único lugar por onde se chega nele. A lista
@@ -2150,6 +2159,44 @@ class _ClearButton extends StatelessWidget {
   }
 }
 
+/// O que o + do rodapé põe na lateral: uma pasta, as pastas de um
+/// `.code-workspace` ou um workspace novo.
+Future<void> _showFooterAdd(BuildContext context, AppStore store, Offset anchor) async {
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
+    items: [
+      mxItem(
+        'folder',
+        glyph: Icon(Icons.create_new_folder_outlined, size: 14, color: Mx.fgDim),
+        label: 'adicionar pasta…',
+      ),
+      mxItem(
+        'import',
+        glyph: Icon(Icons.file_open_outlined, size: 14, color: Mx.fgDim),
+        label: 'importar .code-workspace…',
+      ),
+      mxDivider(),
+      mxItem(
+        'workspace',
+        glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.accent),
+        label: 'novo workspace…',
+      ),
+    ],
+  );
+  if (choice == null || !context.mounted) return;
+  switch (choice) {
+    case 'folder':
+      await showAddFolder(context, store);
+    case 'import':
+      final picked = await Notifier.chooseWorkspace();
+      if (picked.path case final path?) await store.importWorkspace(path);
+      if (!picked.available) store.showBanner('não consegui abrir o seletor de arquivos', sticky: true);
+    case 'workspace':
+      await showNewWorkspace(context, store);
+  }
+}
+
 /// What the + offers: [openHereItems], plus the one thing only the + has.
 ///
 /// A bandeja dos avulsos oferece projeto como qualquer pasta. Ela não é uma
@@ -2313,6 +2360,36 @@ Future<void> showFolderMenu(
       // pintou e que não é de projeto pintado. Ver [tintItem] e
       // [AppStore.chosenTintOf].
       tintItem(folder.tint),
+      // Em que workspaces a pasta está: marcar e desmarcar é como ela fica em
+      // vários -- o repo de infra de dois produtos.
+      MxSubmenuItem(
+        label: 'adicionar a workspace',
+        glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.fgDim),
+        items: () => [
+          for (final w in store.workspaces)
+            MxSubItem(
+              value: 'ws:${w.id}',
+              label: w.name,
+              glyph: Icon(
+                w.folderRoots.contains(folder.root) ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 13,
+                color: Mx.fgDim,
+              ),
+            ),
+          MxSubItem(
+            value: 'ws:new',
+            label: 'novo workspace…',
+            glyph: Icon(Icons.add, size: 13, color: Mx.fgDim),
+            divided: store.workspaces.isNotEmpty,
+          ),
+        ],
+      ),
+      if (within != null)
+        mxItem(
+          'leave',
+          glyph: Icon(Icons.logout, size: 14, color: Mx.fgDim),
+          label: 'tirar deste workspace',
+        ),
       mxDivider(),
       // E o que tira coisas da lateral.
       mxItem(
@@ -2359,6 +2436,16 @@ Future<void> showFolderMenu(
       if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
     case final pick when isTintChoice(pick):
       store.setFolderTint(folder, tintPicked(pick));
+    case 'ws:new':
+      await showNewWorkspace(context, store, preselect: folder);
+    case final pick when pick.startsWith('ws:'):
+      if (store.workspaceById(pick.substring(3)) case final w?) {
+        w.folderRoots.contains(folder.root)
+            ? store.removeFromWorkspace(folder, w)
+            : store.addToWorkspace(folder, w);
+      }
+    case 'leave':
+      store.removeFromWorkspace(folder, within!);
     case 'sweep':
       store.closeSettled(folder);
     case 'remove':

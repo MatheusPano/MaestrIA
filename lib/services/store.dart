@@ -1636,10 +1636,14 @@ class AppStore extends ChangeNotifier {
     List<Folder> folders = const [],
     String? codeWorkspacePath,
   }) {
+    // Como o renomear: um workspace sem nome é um cabeçalho sem texto. Quem
+    // pergunta o nome (o diálogo) já barra antes; isto é a rede de baixo.
+    final label = name.trim();
+    if (label.isEmpty) throw ArgumentError.value(name, 'name', 'não pode ser vazio');
     _pinRootOrder();
     final w = Workspace(
       id: newWorkspaceId(),
-      name: name.trim(),
+      name: label,
       codeWorkspacePath: codeWorkspacePath,
     );
     workspaces.add(w);

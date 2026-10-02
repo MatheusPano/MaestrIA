@@ -276,32 +276,86 @@ class _RowDragState extends State<_RowDrag> {
   }
 }
 
-/// O que dá pra fazer com a seção de um workspace. Uma linha, e é a que faltava
-/// pra ele ter volta: importar põe as pastas, isto tira.
-///
-/// Só ela porque a seção não é dona de nada -- abrir, renomear e remover
-/// continuam sendo da pasta, cada uma com o menu que sempre teve. Ver
-/// [Workspace].
+/// O que dá pra fazer com um workspace. As pastas continuam com o menu delas;
+/// este é o do conjunto.
 Future<void> showWorkspaceMenu(
   BuildContext context,
   AppStore store,
   Workspace workspace,
   Offset anchor,
 ) async {
+  final file = workspace.codeWorkspacePath;
   final choice = await mxMenu<String>(
     context,
     at: anchor,
     items: [
-      // As reticências prometem a pergunta que vem: fechar leva as pastas e as
-      // sessões delas, e isso não acontece num clique só.
+      mxItem(
+        'rename',
+        glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
+        label: 'renomear…',
+      ),
+      tintItem(workspace.tint),
+      mxDivider(),
+      if (file == null)
+        mxItem(
+          'link',
+          glyph: Icon(Icons.link, size: 14, color: Mx.fgDim),
+          label: 'associar .code-workspace…',
+        )
+      else ...[
+        mxItem(
+          'vscode',
+          glyph: Icon(Icons.open_in_new, size: 14, color: Mx.fgDim),
+          label: 'abrir no vscode',
+        ),
+        mxItem(
+          'unlink',
+          glyph: Icon(Icons.link_off, size: 14, color: Mx.fgDim),
+          label: 'desassociar .code-workspace',
+        ),
+      ],
+      mxDivider(),
+      // Desfazer não fecha nada: as pastas voltam pra raiz. Fechar leva as
+      // pastas só deste workspace e as sessões delas, e por isso pergunta.
+      mxItem(
+        'dissolve',
+        glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.fgDim),
+        label: 'desfazer workspace',
+      ),
       mxItem(
         'close',
-        glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.fgDim),
+        glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.red),
         label: 'fechar workspace…',
         color: Mx.red,
       ),
     ],
   );
-  if (choice != 'close' || !context.mounted) return;
-  await confirmCloseWorkspace(context, store, workspace);
+  if (choice == null || !context.mounted) return;
+
+  switch (choice) {
+    case 'rename':
+      final name = await promptText(
+        context,
+        title: 'renomear workspace',
+        initial: workspace.name,
+        label: 'nome',
+      );
+      if (name != null) store.renameWorkspace(workspace, name);
+    case final pick when isTintChoice(pick):
+      store.setWorkspaceTint(workspace, tintPicked(pick));
+    case 'link':
+      final picked = await Notifier.chooseWorkspace();
+      if (picked.path case final path?) store.linkCodeWorkspace(workspace, path);
+      if (!picked.available) store.showBanner('não consegui abrir o seletor de arquivos', sticky: true);
+    case 'vscode':
+      await store.openInEditor(file!);
+    case 'unlink':
+      store.linkCodeWorkspace(workspace, null);
+    case 'dissolve':
+      final name = workspace.name;
+      store.dissolveWorkspace(workspace);
+      store.showBanner('workspace "$name" desfeito — as pastas continuam na lateral');
+    case 'close':
+      await confirmCloseWorkspace(context, store, workspace);
+  }
 }

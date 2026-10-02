@@ -1043,6 +1043,80 @@ class _Fact extends StatelessWidget {
   );
 }
 
+/// Um workspace novo: o nome e as pastas da lateral que entram nele.
+///
+/// As pastas são as que já estão na lateral: é o caso de quem montou o
+/// cockpit repo por repo e agora quer juntar os do mesmo produto. Pasta nova
+/// entra pelo "adicionar pasta…" de sempre, e depois pelo menu dela.
+Future<Workspace?> showNewWorkspace(
+  BuildContext context,
+  AppStore store, {
+  Folder? preselect,
+}) async {
+  final name = TextEditingController();
+  final picked = <String>{if (preselect != null) preselect.root};
+
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        backgroundColor: Mx.bgSidebar,
+        title: const Text('novo workspace', style: TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: name,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: _field('nome', 'ATRIUM'),
+                onSubmitted: (_) => Navigator.pop(ctx, true),
+              ),
+              const SizedBox(height: 12),
+              if (store.folders.isNotEmpty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final f in store.folders)
+                        CheckboxListTile(
+                          dense: true,
+                          value: picked.contains(f.root),
+                          title: Text(f.name, style: const TextStyle(fontSize: 13)),
+                          onChanged: (on) => setState(
+                            () => on == true ? picked.add(f.root) : picked.remove(f.root),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('criar')),
+        ],
+      ),
+    ),
+  );
+
+  if (go != true) return null;
+  final label = name.text.trim();
+  if (label.isEmpty) return null;
+  return store.createWorkspace(
+    label,
+    folders: [
+      for (final f in store.folders)
+        if (picked.contains(f.root)) f,
+    ],
+  );
+}
+
 /// Pergunta antes de fechar um workspace, com os dois fatos que decidem a
 /// resposta: quantas pastas saem, e quantas sessões vão junto.
 ///
