@@ -18,7 +18,7 @@ MxTab panel(
   AppStore store,
   String name, {
   Folder? folder,
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
   TabKind kind = TabKind.claude,
   ClaudeStatus? status,
 }) {
@@ -31,7 +31,7 @@ MxTab panel(
     branch: '',
     customLabel: name,
   );
-  tab.projectId = project?.id;
+  tab.featureOrHotfixId = featureOrHotfix?.id;
   if (status != null) tab.hooks.status = status;
   store.tabs.add(tab);
   return tab;
@@ -81,8 +81,8 @@ void main() {
     // ninguém procura uma sessão pelo id dela.
     test('acha também pela pasta, pelo projeto e pela branch', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      final tab = panel(store, 'um', project: project)..branch = 'feature/TASK#47730';
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      final tab = panel(store, 'um', featureOrHotfix: featureOrHotfix)..branch = 'feature/TASK#47730';
 
       for (final term in ['meu-repo', 'google', 'TASK#47730', 'shell']) {
         store.setQuery(term);
@@ -122,13 +122,13 @@ void main() {
       final store = storeWithFolder();
       final elsewhere = Folder(root: '/outro', name: 'outro-repo');
       store.folders.add(elsewhere);
-      final project = store.addProject(elsewhere, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(elsewhere, 'permissão do google');
       final here = panel(store, 'aqui');
-      final there = panel(store, 'lá', folder: elsewhere, project: project);
+      final there = panel(store, 'lá', folder: elsewhere, featureOrHotfix: featureOrHotfix);
       final neither = panel(store, 'nem', folder: elsewhere);
 
       store.toggleFilterFolder(store.folders.first);
-      store.toggleFilterProject(project);
+      store.toggleFilterFeatureOrHotfix(featureOrHotfix);
       expect(store.matches(here), isTrue);
       expect(store.matches(there), isTrue);
       expect(store.matches(neither), isFalse);

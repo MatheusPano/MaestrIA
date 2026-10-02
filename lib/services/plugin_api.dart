@@ -95,7 +95,7 @@ class PluginApi {
         ];
       case 'projects.list':
         return [
-          for (final pr in store.projects)
+          for (final pr in store.featuresOrHotfixes)
             {'id': pr.id, 'name': pr.name, 'folder': pr.folderRoot, 'brief': pr.brief},
         ];
       case 'chats.list':
@@ -155,7 +155,7 @@ class PluginApi {
           cwd: cwd,
           label: p['label'] as String?,
           prompt: p['prompt'] as String?,
-          project: store.focusedProject,
+          featureOrHotfix: store.focusedFeatureOrHotfix,
         );
         return {'tabId': tab.id};
       case 'session.openShell':
@@ -324,7 +324,7 @@ class PluginApi {
     'onScreen': store.isOpen(t),
     'focused': store.focusedTab?.id == t.id,
     'startedAt': t.startedAt.toIso8601String(),
-    'project': store.projectOf(t)?.name,
+    'project': store.featureOrHotfixOf(t)?.name,
     'launcher': t.launcher?.name,
     'owner': t.owner,
     'embedded': t.embedded,

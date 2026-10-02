@@ -76,16 +76,16 @@ class Folder with SidebarRow {
   )..tint = MxTint.byName(j['tint'] as String?);
 }
 
-/// A named piece of work inside a folder: "permissão do google", not
-/// `learning-app-lms`.
+/// Uma feature ou um hotfix dentro de uma pasta: "permissão do google", não
+/// `learning-app-lms`. Até a 2.4.0 se chamava projeto.
 ///
 /// It lives only here. No branch, no directory, nothing written into the repo
 /// — git has no opinion about why four of these panels are open at the same
 /// time, and that "why" is the one thing the sidebar could not say. A folder
 /// answers *where* a session runs; a project answers *what for*, which is also
 /// the scope in which handing work from one agent to the next makes any sense.
-class Project {
-  Project({
+class FeatureOrHotfix {
+  FeatureOrHotfix({
     required this.id,
     required this.folderRoot,
     required this.name,
@@ -142,7 +142,7 @@ class Project {
     if (tint != null) 'tint': tint!.name,
   };
 
-  static Project fromJson(Map<String, dynamic> j) => Project(
+  static FeatureOrHotfix fromJson(Map<String, dynamic> j) => FeatureOrHotfix(
     id: j['id'] as String,
     folderRoot: j['folderRoot'] as String,
     name: j['name'] as String,

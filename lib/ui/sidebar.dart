@@ -756,11 +756,11 @@ class _FolderGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     // Panels that belong to a project are drawn inside it, not twice. Com uma
     // busca em curso é só o que ela achou -- e um projeto sem achado sai junto.
-    final projects = store
-        .projectsOf(folder)
+    final featuresOrHotfixes = store
+        .featuresOrHotfixesOf(folder)
         .where((p) => !store.filtering || store.visible(store.tabsIn(p)).isNotEmpty)
         .toList();
-    final tabs = store.visible(store.tabsOf(folder).where((t) => t.projectId == null));
+    final tabs = store.visible(store.tabsOf(folder).where((t) => t.featureOrHotfixId == null));
     final all = store.worktrees[folder.root] ?? const <WorktreeInfo>[];
     // Only the repo's own worktrees. Claude Code keeps transient ones under
     // ~/.local/state, and offering to do anything to one of those is offering
@@ -875,8 +875,8 @@ class _FolderGroup extends StatelessWidget {
             // pendurado nela.
             color: folder.tint?.color,
             children: [
-              for (final p in projects)
-                _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
+              for (final p in featuresOrHotfixes)
+                _FeatureOrHotfixGroup(key: ValueKey(p.id), store: store, folder: folder, featureOrHotfix: p),
               ..._panelRows(store, tabs),
               // The strip of chips used to end the nest; the rail still wants
               // to run a little past the last row rather than stop dead on it.
@@ -1017,11 +1017,11 @@ class _LooseTray extends StatelessWidget {
     final folder = store.loose;
     // Ver [_FolderGroup]: painel de projeto se desenha dentro dele e não duas
     // vezes, e projeto sem achado sai da lateral enquanto a busca durar.
-    final projects = store
-        .projectsOf(folder)
+    final featuresOrHotfixes = store
+        .featuresOrHotfixesOf(folder)
         .where((p) => !store.filtering || store.visible(store.tabsIn(p)).isNotEmpty)
         .toList();
-    final tabs = store.visible(store.tabsOf(folder).where((t) => t.projectId == null));
+    final tabs = store.visible(store.tabsOf(folder).where((t) => t.featureOrHotfixId == null));
     final alerts = store.needingHuman(folder);
     // Tudo que está na bandeja, projetos inclusive -- o número na régua conta
     // o lugar, e não a lista de linhas soltas que por acaso vem embaixo dela.
@@ -1075,7 +1075,7 @@ class _LooseTray extends StatelessWidget {
                 _AddButton(
                   store: store,
                   folder: folder,
-                  shown: hovered || (tabs.isEmpty && projects.isEmpty),
+                  shown: hovered || (tabs.isEmpty && featuresOrHotfixes.isEmpty),
                 ),
                 _LooseMenu(store: store),
               ],
@@ -1084,8 +1084,8 @@ class _LooseTray extends StatelessWidget {
         ),
         // Os projetos primeiro e as linhas soltas depois, como numa pasta: o
         // que tem nome vem antes do que sobrou.
-        for (final p in projects)
-          _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
+        for (final p in featuresOrHotfixes)
+          _FeatureOrHotfixGroup(key: ValueKey(p.id), store: store, folder: folder, featureOrHotfix: p),
         ..._panelRows(store, tabs),
       ],
     );
@@ -1435,7 +1435,7 @@ class _LooseMenu extends StatelessWidget {
           ],
         );
         if (choice == null || !context.mounted) return;
-        if (choice == 'newproject') await showNewProject(context, store, store.loose);
+        if (choice == 'newproject') await showNewFeatureOrHotfix(context, store, store.loose);
         if (choice == 'sweep') _sweep(store, store.loose);
       },
     );
@@ -1654,38 +1654,38 @@ Future<void> showGroupMenu(
 /// folder one level up, which is the point: the sidebar is now three deep —
 /// where the code is, what it is for, and who is working on it. Na bandeja o
 /// primeiro degrau não existe, e é a mesma linha sem nada por cima.
-class _ProjectGroup extends StatelessWidget {
-  const _ProjectGroup({
+class _FeatureOrHotfixGroup extends StatelessWidget {
+  const _FeatureOrHotfixGroup({
     super.key,
     required this.store,
     required this.folder,
-    required this.project,
+    required this.featureOrHotfix,
   });
 
   final AppStore store;
   final Folder folder;
-  final Project project;
+  final FeatureOrHotfix featureOrHotfix;
 
   @override
   Widget build(BuildContext context) {
-    final tabs = store.visible(store.tabsIn(project));
-    final alerts = store.needingHumanIn(project);
+    final tabs = store.visible(store.tabsIn(featureOrHotfix));
+    final alerts = store.needingHumanIn(featureOrHotfix);
     // Ver [_FolderGroup]: durante a busca, o que está dobrado abre.
-    final collapsed = project.collapsed && !store.filtering;
+    final collapsed = featureOrHotfix.collapsed && !store.filtering;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Dropping a panel on the header is how it joins: the same drag that
         // reorders panels, aimed one row higher.
-        _ProjectDrop(
+        _FeatureOrHotfixDrop(
           store: store,
-          project: project,
+          featureOrHotfix: featureOrHotfix,
           child: _Hoverable(
             builder: (hovered) => InkWell(
-              onTap: () => store.toggleProjectCollapsed(project),
+              onTap: () => store.toggleFeatureOrHotfixCollapsed(featureOrHotfix),
               onSecondaryTapDown: (d) =>
-                  showProjectMenu(context, store, folder, project, d.globalPosition),
+                  showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, d.globalPosition),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(7, 8, 4, 8),
                 child: Row(
@@ -1700,11 +1700,11 @@ class _ProjectGroup extends StatelessWidget {
                     // roxa de sempre até alguém pintá-lo, e a partir daí é
                     // ela que diz de que projeto são os painéis pendurados
                     // aqui embaixo. Ver [MxTint].
-                    Icon(Icons.track_changes, size: 15, color: project.tint?.color ?? Mx.purple),
+                    Icon(Icons.track_changes, size: 15, color: featureOrHotfix.tint?.color ?? Mx.purple),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        project.name,
+                        featureOrHotfix.name,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                       ),
@@ -1712,9 +1712,9 @@ class _ProjectGroup extends StatelessWidget {
                     // The briefing is invisible by nature — it is in a system
                     // prompt you never see scroll by. This is the only place
                     // that says a project has one.
-                    if (project.brief.trim().isNotEmpty)
+                    if (featureOrHotfix.brief.trim().isNotEmpty)
                       Tooltip(
-                        message: project.brief.trim(),
+                        message: featureOrHotfix.brief.trim(),
                         child: Padding(
                           padding: const EdgeInsets.only(right: 5),
                           child: Icon(Icons.sticky_note_2_outlined, size: 13, color: Mx.fgFaint),
@@ -1725,13 +1725,13 @@ class _ProjectGroup extends StatelessWidget {
                     _AddButton(
                       store: store,
                       folder: folder,
-                      project: project,
+                      featureOrHotfix: featureOrHotfix,
                       shown: hovered || tabs.isEmpty,
                     ),
                     _RowButton(
                       tooltip: 'o que fazer com esse projeto',
                       icon: Icons.more_horiz,
-                      onTap: (anchor) => showProjectMenu(context, store, folder, project, anchor),
+                      onTap: (anchor) => showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, anchor),
                     ),
                   ],
                 ),
@@ -1747,7 +1747,7 @@ class _ProjectGroup extends StatelessWidget {
             rail: 15,
             // A trilha é o que liga as sessões ao projeto delas; pintada, ela
             // diz de relance onde aquele bloco de cor começa e acaba.
-            color: project.tint?.color,
+            color: featureOrHotfix.tint?.color,
             children: [..._panelRows(store, tabs), const SizedBox(height: 4)],
           ),
       ],
@@ -1760,26 +1760,26 @@ class _ProjectGroup extends StatelessWidget {
 /// Only panels of the same folder light it up — a project's briefing talks
 /// about a checkout, so a session running somewhere else could not be told to
 /// obey it.
-class _ProjectDrop extends StatefulWidget {
-  const _ProjectDrop({required this.store, required this.project, required this.child});
+class _FeatureOrHotfixDrop extends StatefulWidget {
+  const _FeatureOrHotfixDrop({required this.store, required this.featureOrHotfix, required this.child});
 
   final AppStore store;
-  final Project project;
+  final FeatureOrHotfix featureOrHotfix;
   final Widget child;
 
   @override
-  State<_ProjectDrop> createState() => _ProjectDropState();
+  State<_FeatureOrHotfixDrop> createState() => _FeatureOrHotfixDropState();
 }
 
-class _ProjectDropState extends State<_ProjectDrop> {
+class _FeatureOrHotfixDropState extends State<_FeatureOrHotfixDrop> {
   bool _over = false;
 
   @override
   Widget build(BuildContext context) {
     return DragTarget<MxTab>(
       onWillAcceptWithDetails: (d) {
-        if (d.data.folderRoot != widget.project.folderRoot) return false;
-        if (d.data.projectId == widget.project.id) return false;
+        if (d.data.folderRoot != widget.featureOrHotfix.folderRoot) return false;
+        if (d.data.featureOrHotfixId == widget.featureOrHotfix.id) return false;
         setState(() => _over = true);
         return true;
       },
@@ -1788,7 +1788,7 @@ class _ProjectDropState extends State<_ProjectDrop> {
       },
       onAcceptWithDetails: (d) {
         setState(() => _over = false);
-        widget.store.assign(d.data, widget.project);
+        widget.store.assign(d.data, widget.featureOrHotfix);
       },
       builder: (context, _, _) => Container(
         margin: const EdgeInsets.symmetric(horizontal: 7),
@@ -2246,14 +2246,14 @@ class _HoverableState extends State<_Hoverable> {
 /// Hidden or shown, the space is reserved: a control that appears under the
 /// pointer must not shove the rest of the row sideways when it does.
 class _AddButton extends StatelessWidget {
-  const _AddButton({required this.store, required this.folder, this.project, required this.shown});
+  const _AddButton({required this.store, required this.folder, this.featureOrHotfix, required this.shown});
 
   final AppStore store;
   final Folder folder;
 
   /// Set on a project's header: what the menu starts joins that project and
   /// comes up with its briefing.
-  final Project? project;
+  final FeatureOrHotfix? featureOrHotfix;
 
   /// Whether the pointer is on the row this rides on — or the group has
   /// nothing in it, in which case there are no rows to hover over and the +
@@ -2273,13 +2273,13 @@ class _AddButton extends StatelessWidget {
         child: _RowButton(
           // Three different rows can hold one of these, and the tooltip is the
           // only thing that says which of them you are about to add to.
-          tooltip: project != null
+          tooltip: featureOrHotfix != null
               ? 'abrir algo nesse projeto'
               : folder.isLoose
               ? 'abrir algo sem pasta'
               : 'abrir algo nessa pasta',
           icon: Icons.add,
-          onTap: (anchor) => _showAddMenu(context, store, folder, project, anchor),
+          onTap: (anchor) => _showAddMenu(context, store, folder, featureOrHotfix, anchor),
         ),
       ),
     );
@@ -2329,7 +2329,7 @@ Future<void> _showAddMenu(
   BuildContext context,
   AppStore store,
   Folder folder,
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
   Offset anchor,
 ) async {
   final choice = await mxMenu<String>(
@@ -2339,7 +2339,7 @@ Future<void> _showAddMenu(
       ...openHereItems(store),
       // Depois do risco porque não é abrir um painel: é dar nome ao trabalho
       // que os painéis vão fazer.
-      if (project == null) ...[
+      if (featureOrHotfix == null) ...[
         mxDivider(),
         mxItem(
           'projeto',
@@ -2352,10 +2352,10 @@ Future<void> _showAddMenu(
   if (choice == null || !context.mounted) return;
 
   if (choice == 'projeto') {
-    await showNewProject(context, store, folder);
+    await showNewFeatureOrHotfix(context, store, folder);
     return;
   }
-  await openHereChoice(context, store, choice, folder: folder, project: project);
+  await openHereChoice(context, store, choice, folder: folder, featureOrHotfix: featureOrHotfix);
 }
 
 /// The ⋯ on a repo header. One definition, two ways in: this and the header's
@@ -2519,7 +2519,7 @@ Future<void> showFolderMenu(
     case 'worktrees':
       await showWorktreesMenu(context, store, folder, worktrees, anchor);
     case 'newproject':
-      await showNewProject(context, store, folder);
+      await showNewFeatureOrHotfix(context, store, folder);
     case 'rename':
       final name = await promptText(
         context,

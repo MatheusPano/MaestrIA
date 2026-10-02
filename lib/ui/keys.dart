@@ -41,16 +41,16 @@ class MxKeys {
       // dentro de "permissão do google" é uma terceira sessão naquele job, não
       // uma sessão avulsa do lado dele.
       case MxAction.newClaude:
-        store.openClaude(folder, cwd: folder.root, project: store.focusedProject);
+        store.openClaude(folder, cwd: folder.root, featureOrHotfix: store.focusedFeatureOrHotfix);
       case MxAction.newShell:
-        store.openShell(folder, project: store.focusedProject);
+        store.openShell(folder, featureOrHotfix: store.focusedFeatureOrHotfix);
       case MxAction.newTask:
         // Uma worktree precisa de um repo pra ser worktree de.
         if (folder.isLoose) {
           store.showBanner('nova task precisa de uma pasta — o painel em foco não está em nenhuma');
           return;
         }
-        showNewTask(context, store, folder, project: store.focusedProject);
+        showNewTask(context, store, folder, featureOrHotfix: store.focusedFeatureOrHotfix);
       case MxAction.renamePane:
         // O painel em foco é o objeto da frase: sem nenhum não há o que
         // renomear, e o banner diz isso em vez de abrir um diálogo vazio.

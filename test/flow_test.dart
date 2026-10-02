@@ -20,7 +20,7 @@ class NoPty extends AppStore {
     required String cwd,
     String? label,
     String? resumeId,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
   }) {

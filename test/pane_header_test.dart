@@ -221,16 +221,16 @@ void main() {
       final store = AppStore();
       addTearDown(store.dispose);
       final tab = panel(store);
-      final project = store.addProject(tab.folder, 'permissão do google');
-      tab.projectId = project.id;
+      final featureOrHotfix = store.addFeatureOrHotfix(tab.folder, 'permissão do google');
+      tab.featureOrHotfixId = featureOrHotfix.id;
 
       expect(store.tintOf(tab), isNull);
-      store.setProjectTint(project, MxTint.cyan);
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.cyan);
       // Herdada e não copiada: o painel continua sem cor própria.
       expect(tab.tint, isNull);
       expect(store.tintOf(tab), MxTint.cyan.color);
       // E repintar o projeto repinta o painel, que é o ponto de herdar.
-      store.setProjectTint(project, MxTint.red);
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.red);
       expect(store.tintOf(tab), MxTint.red.color);
     });
 
@@ -240,17 +240,17 @@ void main() {
       final store = AppStore();
       addTearDown(store.dispose);
       final tab = panel(store);
-      final project = store.addProject(tab.folder, 'permissão do google');
-      tab.projectId = project.id;
+      final featureOrHotfix = store.addFeatureOrHotfix(tab.folder, 'permissão do google');
+      tab.featureOrHotfixId = featureOrHotfix.id;
       store.setTabTint(tab, MxTint.red);
       expect(store.tintOf(tab), MxTint.red.color);
 
-      store.setProjectTint(project, MxTint.cyan);
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.cyan);
       expect(store.tintOf(tab), MxTint.cyan.color);
       // Guardada por baixo, não perdida: o projeto ficando sem cor devolve a
       // do painel, em vez de deixá-lo sem cor nenhuma.
       expect(tab.tint, MxTint.red);
-      store.setProjectTint(project, null);
+      store.setFeatureOrHotfixTint(featureOrHotfix, null);
       expect(store.tintOf(tab), MxTint.red.color);
     });
 
@@ -258,12 +258,12 @@ void main() {
       final store = AppStore();
       addTearDown(store.dispose);
       final tab = panel(store)..tint = MxTint.yellow;
-      final project = store.addProject(tab.folder, 'permissão do google');
-      tab.projectId = project.id;
-      store.setProjectTint(project, MxTint.cyan);
+      final featureOrHotfix = store.addFeatureOrHotfix(tab.folder, 'permissão do google');
+      tab.featureOrHotfixId = featureOrHotfix.id;
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.cyan);
       expect(store.tintOf(tab), MxTint.cyan.color);
 
-      tab.projectId = null;
+      tab.featureOrHotfixId = null;
       expect(store.tintOf(tab), MxTint.yellow.color);
     });
 
@@ -285,9 +285,9 @@ void main() {
       expect(store.tintOf(tab), MxTint.red.color);
 
       // E o projeto, se houver, manda nos dois.
-      final project = store.addProject(tab.folder, 'permissão do google');
-      tab.projectId = project.id;
-      store.setProjectTint(project, MxTint.cyan);
+      final featureOrHotfix = store.addFeatureOrHotfix(tab.folder, 'permissão do google');
+      tab.featureOrHotfixId = featureOrHotfix.id;
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.cyan);
       expect(store.tintOf(tab), MxTint.cyan.color);
     });
 
@@ -305,12 +305,12 @@ void main() {
     test('a do projeto também atravessa o fechamento da janela', () {
       final store = AppStore();
       addTearDown(store.dispose);
-      final project = store.addProject(panel(store).folder, 'permissão do google');
-      expect(project.toJson()['tint'], isNull);
+      final featureOrHotfix = store.addFeatureOrHotfix(panel(store).folder, 'permissão do google');
+      expect(featureOrHotfix.toJson()['tint'], isNull);
 
-      store.setProjectTint(project, MxTint.magenta);
-      expect(project.toJson()['tint'], 'magenta');
-      expect(Project.fromJson(project.toJson()).tint, MxTint.magenta);
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.magenta);
+      expect(featureOrHotfix.toJson()['tint'], 'magenta');
+      expect(FeatureOrHotfix.fromJson(featureOrHotfix.toJson()).tint, MxTint.magenta);
     });
 
     test('atravessa o fechamento da janela, pelo papel e não pelo valor', () {

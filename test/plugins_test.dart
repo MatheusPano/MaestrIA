@@ -2079,11 +2079,11 @@ void main() {
       expect(store.actions, ['recolher', 'projeto'], reason: 'a seta e a linha separadas');
 
       // A linha sem seta guarda o lugar dela: os avatares de cima ficam numa coluna.
-      final project = tester.getTopLeft(find.byIcon(Icons.layers_outlined));
+      final featureOrHotfix = tester.getTopLeft(find.byIcon(Icons.layers_outlined));
       final loose = tester.getTopLeft(find.byIcon(Icons.inventory_2_outlined).last);
-      expect(loose.dx, project.dx);
+      expect(loose.dx, featureOrHotfix.dx);
       final child = tester.getTopLeft(find.byIcon(Icons.inventory_2_outlined).first);
-      expect(child.dx, greaterThan(project.dx), reason: 'o filho recuado');
+      expect(child.dx, greaterThan(featureOrHotfix.dx), reason: 'o filho recuado');
 
       expect(find.text(':3311'), findsOneWidget);
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -2350,7 +2350,7 @@ class _ShellStore extends AppStore {
     Folder f, {
     String? cwd,
     String? command,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     Launcher? launcher,
     bool place = true,
   }) {

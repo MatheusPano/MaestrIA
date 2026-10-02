@@ -117,33 +117,33 @@ Future<bool> openHereChoice(
   AppStore store,
   String choice, {
   required Folder folder,
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
   String? cwd,
   String? label,
 }) async {
   switch (choice) {
     case 'claude':
-      store.openClaude(folder, cwd: cwd ?? folder.root, label: label, project: project);
+      store.openClaude(folder, cwd: cwd ?? folder.root, label: label, featureOrHotfix: featureOrHotfix);
     case 'fluxo':
-      await showNewFlow(context, store, folder: folder, cwd: cwd, project: project);
+      await showNewFlow(context, store, folder: folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
     case 'shell':
-      store.openShell(folder, cwd: cwd, project: project);
+      store.openShell(folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
     case 'markdown':
       // O painel nativo abre no lugar em que se clicou -- a raiz da pasta, ou
       // o checkout da worktree --, e o leitor nasce morando lá.
-      await store.openMarkdown(folder: folder, cwd: cwd, project: project);
+      await store.openMarkdown(folder: folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
     case 'novo':
       // Criar e abrir de uma vez: você veio ao menu pra abrir um painel, e um
       // programa que nasce sem estrear obrigaria a voltar aqui pra usá-lo.
       final launcher = await showNewLauncher(context, store);
       if (launcher != null) {
-        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, project: project);
+        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, featureOrHotfix: featureOrHotfix);
       }
     default:
       if (!choice.startsWith('launcher:')) return false;
       final launcher = store.launcherById(choice.split(':').last);
       if (launcher != null) {
-        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, project: project);
+        store.openLauncher(launcher, folder, cwd: cwd ?? folder.root, featureOrHotfix: featureOrHotfix);
       }
   }
   return true;
@@ -326,11 +326,11 @@ Future<void> showPanelMenu(
       // mentindo. A linha fica, desligada, dizendo de onde a cor vem: tirá-la
       // seria esconder a única explicação de por que este painel está ciano,
       // e o menu do projeto é a dois cliques daqui.
-      if (store.projectOf(tab)?.tint case final fromProject?)
+      if (store.featureOrHotfixOf(tab)?.tint case final fromFeatureOrHotfix?)
         mxItem(
           'tint-project',
-          glyph: Icon(Icons.circle, size: 12, color: fromProject.color),
-          label: 'cor: ${fromProject.label} — do projeto',
+          glyph: Icon(Icons.circle, size: 12, color: fromFeatureOrHotfix.color),
+          label: 'cor: ${fromFeatureOrHotfix.label} — do projeto',
           enabled: false,
         )
       else
@@ -420,7 +420,7 @@ Future<void> showPanelMenu(
       // Um leitor e uma configuração não vão pra projeto nem se marcam como
       // concluídos: as duas coisas se dizem de um trabalho, e eles são uma
       // folha de papel e um editor. Estar fora de pasta não impede mais: a
-      // bandeja também tem projeto. Ver [showMoveToProject], que é quem diz
+      // bandeja também tem projeto. Ver [showMoveToFeatureOrHotfix], que é quem diz
       // quando ainda não tem nenhum.
       if (!tab.isPassive)
         mxItem(
@@ -507,7 +507,7 @@ Future<void> showPanelMenu(
     case 'chain':
       await showFlow(context, store, tab);
     case 'move':
-      await showMoveToProject(context, store, tab);
+      await showMoveToFeatureOrHotfix(context, store, tab);
     case 'rename':
       await showRenamePanel(context, store, tab);
     case final pick when isTintChoice(pick):
@@ -742,7 +742,7 @@ Future<void> showNewTask(
   BuildContext context,
   AppStore store,
   Folder folder, {
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
 }) async {
   final id = TextEditingController();
   final branch = TextEditingController(text: 'feature/TASK#{id}');
@@ -755,7 +755,7 @@ Future<void> showNewTask(
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
       title: Text(
-        'nova task em ${project?.name ?? folder.name}',
+        'nova task em ${featureOrHotfix?.name ?? folder.name}',
         style: const TextStyle(fontSize: 15),
       ),
       content: SizedBox(
@@ -828,7 +828,7 @@ Future<void> showNewTask(
     dirPattern: dir.text.trim(),
     baseRef: base.text.trim().isEmpty ? null : base.text.trim(),
     setupCommand: setup.text,
-    project: project,
+    featureOrHotfix: featureOrHotfix,
   );
 }
 
@@ -1182,7 +1182,7 @@ Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
 
 /// Name a new project. The briefing is a second, optional step: you know what
 /// you are calling the job before you know what to tell the agents about it.
-Future<void> showNewProject(BuildContext context, AppStore store, Folder folder) async {
+Future<void> showNewFeatureOrHotfix(BuildContext context, AppStore store, Folder folder) async {
   final name = TextEditingController();
   final brief = TextEditingController();
 
@@ -1234,18 +1234,18 @@ Future<void> showNewProject(BuildContext context, AppStore store, Folder folder)
   if (go != true) return;
   final label = name.text.trim();
   if (label.isEmpty) return;
-  store.addProject(folder, label, brief: brief.text.trim());
+  store.addFeatureOrHotfix(folder, label, brief: brief.text.trim());
 }
 
 /// Edit the standing context handed to every session of a project.
-Future<void> showProjectBrief(BuildContext context, AppStore store, Project project) async {
-  final brief = TextEditingController(text: project.brief);
+Future<void> showFeatureOrHotfixBrief(BuildContext context, AppStore store, FeatureOrHotfix featureOrHotfix) async {
+  final brief = TextEditingController(text: featureOrHotfix.brief);
 
   final go = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('briefing de ${project.name}', style: const TextStyle(fontSize: 15)),
+      title: Text('briefing de ${featureOrHotfix.name}', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 560,
         child: Column(
@@ -1275,15 +1275,15 @@ Future<void> showProjectBrief(BuildContext context, AppStore store, Project proj
       ],
     ),
   );
-  if (go == true) store.editProject(project, brief: brief.text.trim());
+  if (go == true) store.editFeatureOrHotfix(featureOrHotfix, brief: brief.text.trim());
 }
 
 /// Everything you can do to a project that is not "fold it".
-Future<void> showProjectMenu(
+Future<void> showFeatureOrHotfixMenu(
   BuildContext context,
   AppStore store,
   Folder folder,
-  Project project,
+  FeatureOrHotfix featureOrHotfix,
   Offset globalPosition,
 ) async {
   final choice = await mxMenu<String>(
@@ -1325,7 +1325,7 @@ Future<void> showProjectMenu(
       // A mesma linha do menu do painel, um andar acima: aqui ela pinta as
       // quatro sessões do projeto de uma vez, que é o que faz "de que
       // trabalho é este painel" ser respondido sem ler nada. Ver [tintItem].
-      tintItem(project.tint),
+      tintItem(featureOrHotfix.tint),
       mxDivider(),
       mxItem(
         'done',
@@ -1342,31 +1342,31 @@ Future<void> showProjectMenu(
   );
   if (choice == null || !context.mounted) return;
 
-  if (await openHereChoice(context, store, choice, folder: folder, project: project)) return;
+  if (await openHereChoice(context, store, choice, folder: folder, featureOrHotfix: featureOrHotfix)) return;
   if (!context.mounted) return;
 
   switch (choice) {
     case 'setup':
-      store.showSetup(folder: folder, project: project);
+      store.showSetup(folder: folder, featureOrHotfix: featureOrHotfix);
     case 'task':
-      await showNewTask(context, store, folder, project: project);
+      await showNewTask(context, store, folder, featureOrHotfix: featureOrHotfix);
     case 'brief':
-      await showProjectBrief(context, store, project);
+      await showFeatureOrHotfixBrief(context, store, featureOrHotfix);
     case 'rename':
       final name = await promptText(
         context,
         title: 'renomear projeto',
-        initial: project.name,
+        initial: featureOrHotfix.name,
         label: 'nome',
       );
-      if (name != null && name.trim().isNotEmpty) store.editProject(project, name: name);
+      if (name != null && name.trim().isNotEmpty) store.editFeatureOrHotfix(featureOrHotfix, name: name);
     case final pick when isTintChoice(pick):
-      store.setProjectTint(project, tintPicked(pick));
+      store.setFeatureOrHotfixTint(featureOrHotfix, tintPicked(pick));
     case 'done':
-      await confirmCompleteProject(context, store, project);
+      await confirmCompleteFeatureOrHotfix(context, store, featureOrHotfix);
     case 'dissolve':
       // The panels outlive it: see AppStore.removeProject.
-      store.removeProject(project);
+      store.removeFeatureOrHotfix(featureOrHotfix);
       store.showBanner(
         folder.isLoose
             ? 'projeto dissolvido — os painéis continuam abertos nos avulsos'
@@ -1387,23 +1387,23 @@ Future<void> showProjectMenu(
 /// close, whether any of them is still mid-turn, and the briefing that goes
 /// away with the project. Then confetti, because a job finishing is the one
 /// thing that happens in this window that is worth more than a banner.
-Future<void> confirmCompleteProject(
+Future<void> confirmCompleteFeatureOrHotfix(
   BuildContext context,
   AppStore store,
-  Project project,
+  FeatureOrHotfix featureOrHotfix,
 ) async {
-  final tabs = store.tabsIn(project);
+  final tabs = store.tabsIn(featureOrHotfix);
   final busy = tabs
       .where((t) => t.status == ClaudeStatus.working || t.status == ClaudeStatus.tool)
       .length;
-  final waiting = store.needingHumanIn(project);
-  final hasBrief = project.brief.trim().isNotEmpty;
+  final waiting = store.needingHumanIn(featureOrHotfix);
+  final hasBrief = featureOrHotfix.brief.trim().isNotEmpty;
 
   final go = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('concluir "${project.name}"?', style: const TextStyle(fontSize: 15)),
+      title: Text('concluir "${featureOrHotfix.name}"?', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 460,
         child: Column(
@@ -1455,20 +1455,20 @@ Future<void> confirmCompleteProject(
   );
   if (go != true || !context.mounted) return;
 
-  final closed = store.completeProject(project);
+  final closed = store.completeFeatureOrHotfix(featureOrHotfix);
   Confetti.fire(context);
   store.showBanner(
     closed == 0
-        ? '"${project.name}" concluído 🎉'
-        : '"${project.name}" concluído 🎉 — $closed painel(is) fechado(s)',
+        ? '"${featureOrHotfix.name}" concluído 🎉'
+        : '"${featureOrHotfix.name}" concluído 🎉 — $closed painel(is) fechado(s)',
   );
 }
 
 /// Which project a panel belongs to, as a list to pick from.
-Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) async {
+Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxTab tab) async {
   final folder = tab.folder;
-  final projects = store.projectsOf(folder);
-  if (projects.isEmpty) {
+  final featuresOrHotfixes = store.featuresOrHotfixesOf(folder);
+  if (featuresOrHotfixes.isEmpty) {
     store.showBanner(
       folder.isLoose
           ? 'os avulsos ainda não têm projeto — crie um pelo + da bandeja'
@@ -1483,7 +1483,7 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
       backgroundColor: Mx.bgSidebar,
       title: Text('mover "${tab.title}" pra…', style: const TextStyle(fontSize: 15)),
       children: [
-        for (final p in projects)
+        for (final p in featuresOrHotfixes)
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, p.id),
             child: Row(
@@ -1491,7 +1491,7 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
                 Icon(
                   Icons.track_changes,
                   size: 15,
-                  color: tab.projectId == p.id ? Mx.accent : Mx.purple,
+                  color: tab.featureOrHotfixId == p.id ? Mx.accent : Mx.purple,
                 ),
                 const SizedBox(width: 9),
                 Text(p.name, style: const TextStyle(fontSize: 13)),
@@ -1515,7 +1515,7 @@ Future<void> showMoveToProject(BuildContext context, AppStore store, MxTab tab) 
     ),
   );
   if (choice == null) return;
-  store.assign(tab, choice.isEmpty ? null : store.projectById(choice));
+  store.assign(tab, choice.isEmpty ? null : store.featureOrHotfixById(choice));
 }
 
 /// O menu do filtro da lateral: uma folha que fica aberta enquanto você marca.
@@ -1578,15 +1578,15 @@ class _FilterSheet extends StatelessWidget {
               ),
               // Os projetos entram um passo pra dentro da pasta deles: é assim
               // que a lateral os mostra, e o menu não é um segundo mapa.
-              for (final p in store.projectsOf(f))
+              for (final p in store.featuresOrHotfixesOf(f))
                 _FilterRow(
                   label: p.name,
                   icon: Icons.track_changes,
                   color: Mx.purple,
                   indent: 14,
-                  on: store.filterProjects.contains(p.id),
+                  on: store.filterFeaturesOrHotfixes.contains(p.id),
                   onTap: () {
-                    store.toggleFilterProject(p);
+                    store.toggleFilterFeatureOrHotfix(p);
                     redraw();
                   },
                 ),
@@ -1605,15 +1605,15 @@ class _FilterSheet extends StatelessWidget {
               ),
               // Um passo pra dentro da régua, como os projetos de uma pasta:
               // a bandeja também nomeia trabalho agora.
-              for (final p in store.projectsOf(store.loose))
+              for (final p in store.featuresOrHotfixesOf(store.loose))
                 _FilterRow(
                   label: p.name,
                   icon: Icons.track_changes,
                   color: Mx.purple,
                   indent: 14,
-                  on: store.filterProjects.contains(p.id),
+                  on: store.filterFeaturesOrHotfixes.contains(p.id),
                   onTap: () {
-                    store.toggleFilterProject(p);
+                    store.toggleFilterFeatureOrHotfix(p);
                     redraw();
                   },
                 ),

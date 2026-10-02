@@ -14,7 +14,7 @@ AppStore storeWithFolder() {
   return store;
 }
 
-MxTab panel(AppStore store, String name, {Folder? folder, Project? project}) {
+MxTab panel(AppStore store, String name, {Folder? folder, FeatureOrHotfix? featureOrHotfix}) {
   final tab = MxTab(
     id: name,
     folder: folder ?? store.folders.first,
@@ -23,7 +23,7 @@ MxTab panel(AppStore store, String name, {Folder? folder, Project? project}) {
     branch: '',
     customLabel: name,
   );
-  tab.projectId = project?.id;
+  tab.featureOrHotfixId = featureOrHotfix?.id;
   store.tabs.add(tab);
   return tab;
 }
@@ -39,8 +39,8 @@ void main() {
   group('a project', () {
     test('survives the config round trip', () {
       final store = storeWithFolder();
-      final made = store.addProject(store.folders.first, 'permissão do google', brief: 'contexto');
-      final back = Project.fromJson(made.toJson());
+      final made = store.addFeatureOrHotfix(store.folders.first, 'permissão do google', brief: 'contexto');
+      final back = FeatureOrHotfix.fromJson(made.toJson());
       expect(back.id, made.id);
       expect(back.name, 'permissão do google');
       expect(back.brief, 'contexto');
@@ -52,29 +52,29 @@ void main() {
       final store = storeWithFolder();
       final elsewhere = Folder(root: '/outro', name: 'outro-repo');
       store.folders.add(elsewhere);
-      final project = store.addProject(store.folders.first, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
 
       final mine = panel(store, 'aqui');
       final theirs = panel(store, 'longe', folder: elsewhere);
 
-      store.assign(mine, project);
-      store.assign(theirs, project);
-      expect(mine.projectId, project.id);
+      store.assign(mine, featureOrHotfix);
+      store.assign(theirs, featureOrHotfix);
+      expect(mine.featureOrHotfixId, featureOrHotfix.id);
       // A briefing describes a checkout the other session cannot see.
-      expect(theirs.projectId, isNull);
+      expect(theirs.featureOrHotfixId, isNull);
       store.dispose();
     });
 
     // Dropping the label you put on a job is not deciding the job is over.
     test('dissolved, it sets its panels loose instead of closing them', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      final tab = panel(store, 'um', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      final tab = panel(store, 'um', featureOrHotfix: featureOrHotfix);
 
-      store.removeProject(project);
+      store.removeFeatureOrHotfix(featureOrHotfix);
       expect(store.tabs, contains(tab));
-      expect(tab.projectId, isNull);
-      expect(store.projects, isEmpty);
+      expect(tab.featureOrHotfixId, isNull);
+      expect(store.featuresOrHotfixes, isEmpty);
       store.dispose();
     });
 
@@ -82,50 +82,50 @@ void main() {
     // over, so the sessions end with it.
     test('concluded, it closes its panels and says how many', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      final mine = panel(store, 'um', project: project);
-      final other = panel(store, 'dois', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      final mine = panel(store, 'um', featureOrHotfix: featureOrHotfix);
+      final other = panel(store, 'dois', featureOrHotfix: featureOrHotfix);
       final loose = panel(store, 'fora');
 
-      expect(store.completeProject(project), 2);
+      expect(store.completeFeatureOrHotfix(featureOrHotfix), 2);
       expect(store.tabs, isNot(contains(mine)));
       expect(store.tabs, isNot(contains(other)));
       // Only its own: a panel that was never part of the job stays open.
       expect(store.tabs, contains(loose));
-      expect(store.projects, isEmpty);
+      expect(store.featuresOrHotfixes, isEmpty);
       store.dispose();
     });
 
     test('concluded with nothing open, it just goes', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      expect(store.completeProject(project), 0);
-      expect(store.projects, isEmpty);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      expect(store.completeFeatureOrHotfix(featureOrHotfix), 0);
+      expect(store.featuresOrHotfixes, isEmpty);
       store.dispose();
     });
 
     test('goes with the folder it hung under', () async {
       final store = storeWithFolder();
-      store.addProject(store.folders.first, 'permissão do google');
+      store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
       await store.removeFolder(store.folders.first);
-      expect(store.projects, isEmpty);
+      expect(store.featuresOrHotfixes, isEmpty);
       store.dispose();
     });
 
     // The list a panel lands in is the answer to which job it is part of.
     test('adopts a panel dragged in among its own', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      final inside = panel(store, 'dentro', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      final inside = panel(store, 'dentro', featureOrHotfix: featureOrHotfix);
       final outside = panel(store, 'fora');
 
       store.moveTab(outside, inside);
-      expect(outside.projectId, project.id);
+      expect(outside.featureOrHotfixId, featureOrHotfix.id);
 
       // And back out, dropping it on a panel that belongs to no project.
       final loose = panel(store, 'solto');
       store.moveTab(outside, loose);
-      expect(outside.projectId, isNull);
+      expect(outside.featureOrHotfixId, isNull);
       store.dispose();
     });
   });
@@ -135,33 +135,33 @@ void main() {
   group('a project in the loose tray', () {
     test('hangs off the tray and takes its panels', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.loose, 'arrumar a máquina');
+      final featureOrHotfix = store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
 
-      expect(project.folderRoot, store.loose.root);
-      expect(store.projectsOf(store.loose), [project]);
+      expect(featureOrHotfix.folderRoot, store.loose.root);
+      expect(store.featuresOrHotfixesOf(store.loose), [featureOrHotfix]);
       // E não aparece na pasta de ninguém.
-      expect(store.projectsOf(store.folders.first), isEmpty);
+      expect(store.featuresOrHotfixesOf(store.folders.first), isEmpty);
 
       final solto = panel(store, 'solto', folder: store.loose);
-      store.assign(solto, project);
-      expect(solto.projectId, project.id);
+      store.assign(solto, featureOrHotfix);
+      expect(solto.featureOrHotfixId, featureOrHotfix.id);
       store.dispose();
     });
 
     test('refuses a panel that is in a folder', () {
       final store = storeWithFolder();
-      final project = store.addProject(store.loose, 'arrumar a máquina');
+      final featureOrHotfix = store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
       final noRepo = panel(store, 'no repo');
 
-      store.assign(noRepo, project);
-      expect(noRepo.projectId, isNull);
+      store.assign(noRepo, featureOrHotfix);
+      expect(noRepo.featureOrHotfixId, isNull);
       store.dispose();
     });
 
     test('survives the config round trip', () {
       final store = storeWithFolder();
-      final made = store.addProject(store.loose, 'ler o contrato', brief: 'contexto');
-      final back = Project.fromJson(made.toJson());
+      final made = store.addFeatureOrHotfix(store.loose, 'ler o contrato', brief: 'contexto');
+      final back = FeatureOrHotfix.fromJson(made.toJson());
       expect(back.folderRoot, store.loose.root);
       expect(back.name, 'ler o contrato');
       store.dispose();
@@ -169,8 +169,8 @@ void main() {
 
     testWidgets('is drawn in the tray, with its panels inside it', (tester) async {
       final store = storeWithFolder();
-      final project = store.addProject(store.loose, 'arrumar a máquina');
-      panel(store, 'no projeto', folder: store.loose, project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
+      panel(store, 'no projeto', folder: store.loose, featureOrHotfix: featureOrHotfix);
       panel(store, 'solto na bandeja', folder: store.loose);
 
       await pumpSidebar(tester, store);
@@ -192,7 +192,7 @@ void main() {
     // pra sempre, e um `pumpAndSettle` com uma delas na tela nunca volta.
     testWidgets('has no "nova task" in its menu', (tester) async {
       final store = storeWithFolder();
-      store.addProject(store.loose, 'arrumar a máquina');
+      store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
       await pumpSidebar(tester, store);
 
       await tester.tap(find.byTooltip('o que fazer com esse projeto'));
@@ -206,8 +206,8 @@ void main() {
   group('the sidebar', () {
     testWidgets('draws a project\'s panels inside it, and only there', (tester) async {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      panel(store, 'no projeto', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      panel(store, 'no projeto', featureOrHotfix: featureOrHotfix);
       panel(store, 'solto na pasta');
 
       await pumpSidebar(tester, store);
@@ -221,10 +221,10 @@ void main() {
 
     testWidgets('folded, a project is one line instead of its panels', (tester) async {
       final store = storeWithFolder();
-      final project = store.addProject(store.folders.first, 'permissão do google');
-      panel(store, 'no projeto', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+      panel(store, 'no projeto', featureOrHotfix: featureOrHotfix);
 
-      store.toggleProjectCollapsed(project);
+      store.toggleFeatureOrHotfixCollapsed(featureOrHotfix);
       await pumpSidebar(tester, store);
       expect(find.text('permissão do google'), findsOneWidget);
       expect(find.text('no projeto'), findsNothing);

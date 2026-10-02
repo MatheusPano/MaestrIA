@@ -102,4 +102,82 @@ void main() {
         .where((name) => name.startsWith('config.json') && name != 'config.json');
     expect(left, isEmpty);
   });
+
+  // O config que o 2.4.0 gravou chama de `projects` o que agora é
+  // `featuresOrHotfixes`. Lido sem isto, a janela abriria com as pastas e sem
+  // nenhuma das features.
+  test('as features gravadas como `projects` voltam', () {
+    final store = AppStore();
+    addTearDown(store.dispose);
+
+    store.readSidebar({
+      'folders': [
+        {'root': '/repo', 'name': 'meu-repo'},
+      ],
+      'projects': [
+        {'id': 'pj1', 'folderRoot': '/repo', 'name': 'permissão do google', 'brief': 'b'},
+      ],
+    });
+
+    expect(store.featuresOrHotfixes.single.id, 'pj1');
+    expect(store.featuresOrHotfixes.single.name, 'permissão do google');
+  });
+
+  test('e a chave nova vence a antiga quando as duas estão lá', () {
+    final store = AppStore();
+    addTearDown(store.dispose);
+
+    store.readSidebar({
+      'folders': [
+        {'root': '/repo', 'name': 'meu-repo'},
+      ],
+      'projects': [
+        {'id': 'velho', 'folderRoot': '/repo', 'name': 'velho'},
+      ],
+      'featuresOrHotfixes': [
+        {'id': 'novo', 'folderRoot': '/repo', 'name': 'novo'},
+      ],
+    });
+
+    expect(store.featuresOrHotfixes.map((f) => f.id), ['novo']);
+  });
+
+  // Antes dos projetos existirem, `projects` era a lista de pastas.
+  test('o config de antes dos projetos continua abrindo as pastas', () {
+    final store = AppStore();
+    addTearDown(store.dispose);
+
+    store.readSidebar({
+      'projects': [
+        {'root': '/repo', 'name': 'meu-repo'},
+      ],
+    });
+
+    expect(store.folders.single.root, '/repo');
+    expect(store.featuresOrHotfixes, isEmpty);
+  });
+
+  // Um grupo de painéis salvo antes do rename guarda a receita com
+  // `projectId`; o painel tem que voltar pra mesma feature.
+  test('a receita de painel lê o id da feature pelo nome novo e pelo antigo', () {
+    expect(featureOrHotfixIdIn({'featureOrHotfixId': 'a'}), 'a');
+    expect(featureOrHotfixIdIn({'projectId': 'b'}), 'b');
+    expect(featureOrHotfixIdIn({'featureOrHotfixId': 'a', 'projectId': 'b'}), 'a');
+    expect(featureOrHotfixIdIn({}), isNull);
+  });
+
+  test('o config grava as features com a chave nova', () async {
+    final store = AppStore();
+    addTearDown(store.dispose);
+    final folder = Folder(root: '/repo', name: 'meu-repo');
+    store.folders.add(folder);
+    final file = File(store.configPath);
+    if (file.existsSync()) file.deleteSync();
+
+    store.addFeatureOrHotfix(folder, 'permissão do google');
+    final saved = await savedConfig(store);
+
+    expect(saved.containsKey('projects'), isFalse);
+    expect((saved['featuresOrHotfixes'] as List).single['name'], 'permissão do google');
+  });
 }

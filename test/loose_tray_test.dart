@@ -112,7 +112,7 @@ void main() {
       expect(find.text('projeto…'), findsOneWidget);
     });
 
-    testWidgets("and a folder's + offers the same project line", (tester) async {
+    testWidgets("and a folder's + offers the same featureOrHotfix line", (tester) async {
       final store = storeWithFolder();
       await pumpSidebar(tester, store);
 
