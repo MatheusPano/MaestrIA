@@ -91,12 +91,32 @@ class PluginApi {
                     'prunable': w.prunable,
                   },
               ],
+              'workspaces': [for (final w in store.workspacesOf(f)) w.name],
             },
         ];
+      // `projects.list` é o nome de antes do rename, e plugins já instalados
+      // chamam por ele. Os dois respondem a mesma lista.
+      case 'featuresOrHotfixes.list':
       case 'projects.list':
         return [
           for (final pr in store.featuresOrHotfixes)
-            {'id': pr.id, 'name': pr.name, 'folder': pr.folderRoot, 'brief': pr.brief},
+            {
+              'id': pr.id,
+              'name': pr.name,
+              'kind': pr.kind.name,
+              'folder': pr.folderRoot,
+              'brief': pr.brief,
+            },
+        ];
+      case 'workspaces.list':
+        return [
+          for (final w in store.workspaces)
+            {
+              'id': w.id,
+              'name': w.name,
+              'folders': [for (final f in store.foldersOf(w)) f.root],
+              if (w.codeWorkspacePath != null) 'codeWorkspacePath': w.codeWorkspacePath,
+            },
         ];
       case 'chats.list':
         // Os títulos das conversas são o que você pediu nelas: a mesma
@@ -325,6 +345,10 @@ class PluginApi {
     'focused': store.focusedTab?.id == t.id,
     'startedAt': t.startedAt.toIso8601String(),
     'project': store.featureOrHotfixOf(t)?.name,
+    // `project` é o nome de antes do rename; fica pelos plugins que já o leem.
+    'featureOrHotfix': store.featureOrHotfixOf(t)?.name,
+    'featureOrHotfixKind': store.featureOrHotfixOf(t)?.kind.name,
+    'workspaces': [for (final w in store.workspacesOf(t.folder)) w.name],
     'launcher': t.launcher?.name,
     'owner': t.owner,
     'embedded': t.embedded,

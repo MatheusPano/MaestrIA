@@ -243,8 +243,10 @@ Os eventos só chegam depois de o `initialize` voltar.
 | `sessions.list` | — | lista de sessões (abaixo) |
 | `sessions.focused` | — | a sessão em foco, ou `null` |
 | `session.focus` | `tabId?` | — põe o painel na tela |
-| `folders.list` | — | as pastas da lateral: `name`, `root`, `isRepo`, `branch`, `worktrees: [{ path, branch, isMain, label, prunable }]` |
-| `projects.list` | — | `[{ id, name, folder, brief }]` |
+| `folders.list` | — | as pastas da lateral: `name`, `root`, `isRepo`, `branch`, `worktrees: [{ path, branch, isMain, label, prunable }]`, `workspaces: [nome]` |
+| `featuresOrHotfixes.list` | — | `[{ id, name, kind, folder, brief }]` — `kind` é `feature` ou `hotfix` |
+| `projects.list` | — | o mesmo de `featuresOrHotfixes.list`. Obsoleto: é o nome de quando feature/hotfix se chamava projeto |
+| `workspaces.list` | — | `[{ id, name, folders: [root], codeWorkspacePath? }]` — os workspaces da lateral, com as pastas na ordem em que aparecem |
 | `chats.list` | `day` (`AAAA-MM-DD`) | as conversas arquivadas do Claude Code naquele dia: `[{ sessionId, title, cwd, folder, at, size }]` · `hooks` |
 | `editor.open` | `path`, `line?` | — abre no VS Code (`code -g` com linha) |
 | `command.busy` | `command`, `busy` | — o botão do comando na lateral vira spinner enquanto `busy` |
@@ -271,10 +273,13 @@ Uma sessão é:
   "branch": "feature/TASK#47730", "status": "waitingPermission", "statusLabel": "permissão",
   "needsYou": true, "sessionId": "…", "done": false, "hibernated": false, "exited": false,
   "onScreen": true, "focused": false, "startedAt": "2026-09-23T09:12:00.000",
-  "project": "permissão do google", "launcher": null,
+  "project": "permissão do google", "featureOrHotfix": "permissão do google", "featureOrHotfixKind": "feature", "workspaces": ["ATRIUM"],
+  "launcher": null,
   "activity": { "prompts": 4, "tools": 31, "touched": ["lib/x.dart"], "lastPrompt": "…", "lastMessage": "…" }
 }
 ```
+
+`project` é o nome antigo de `featureOrHotfix` e continua vindo, por compatibilidade.
 
 `embedded` diz se é um terminal embutido (ver `session.openShell`).
 

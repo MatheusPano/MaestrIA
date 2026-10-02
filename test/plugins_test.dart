@@ -2339,6 +2339,46 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
   });
+
+  group('workspaces e feature/hotfix na API', () {
+    MxPlugin plugin() => MxPlugin(
+      dir: '/p',
+      manifest: const PluginManifest(id: 'p', name: 'P', version: '1'),
+    );
+
+    test('os métodos novos respondem, e os antigos continuam', () async {
+      final store = AppStore();
+      final infra = Folder(root: '/repos/infra', name: 'infra');
+      store.folders.add(infra);
+      final ws = store.createWorkspace('ATRIUM', folders: [infra]);
+      final fix = store.addFeatureOrHotfix(infra, 'login quebrado', kind: FeatureOrHotfixKind.hotfix);
+      final tab = MxTab(id: 't1', folder: infra, kind: TabKind.shell, cwd: infra.root, branch: '');
+      tab.featureOrHotfixId = fix.id;
+      store.tabs.add(tab);
+      final api = PluginApi(store);
+
+      expect(await api.handle(plugin(), 'workspaces.list', {}), [
+        {'id': ws.id, 'name': 'ATRIUM', 'folders': ['/repos/infra']},
+      ]);
+      final both = await api.handle(plugin(), 'featuresOrHotfixes.list', {}) as List;
+      expect((both.single as Map)['kind'], 'hotfix');
+      // O de antes, com o `kind` a mais.
+      final old = await api.handle(plugin(), 'projects.list', {}) as List;
+      expect((old.single as Map)['name'], 'login quebrado');
+      expect((old.single as Map)['kind'], 'hotfix');
+
+      final folders = await api.handle(plugin(), 'folders.list', {}) as List;
+      expect((folders.single as Map)['workspaces'], ['ATRIUM']);
+
+      final session = api.sessionJson(tab);
+      expect(session['project'], 'login quebrado');
+      expect(session['featureOrHotfix'], 'login quebrado');
+      expect(session['featureOrHotfixKind'], 'hotfix');
+      expect(session['workspaces'], ['ATRIUM']);
+
+      store.dispose();
+    });
+  });
 }
 
 /// Um [AppStore] que abre terminal sem pty e lembra se ele foi pra grade.
