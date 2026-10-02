@@ -360,7 +360,7 @@ void main() {
     testWidgets('não desloca os glifos que já estavam lá', (tester) async {
       final store = await pumpSidebar(tester);
 
-      final pasta = tester.getCenter(find.byTooltip('adicionar uma pasta ao cockpit'));
+      final pasta = tester.getCenter(find.byTooltip('adicionar pasta ou workspace'));
       final medidor = tester.getCenter(find.byTooltip('conta & uso'));
 
       expect(pasta.dx, lessThan(medidor.dx));

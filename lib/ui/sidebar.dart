@@ -213,7 +213,7 @@ class _Footer extends StatelessWidget {
               // palavra ao lado era repetição. O tooltip continua dizendo o que
               // ele adiciona.
               icon: Icons.create_new_folder_outlined,
-              tooltip: 'adicionar uma pasta ao cockpit',
+              tooltip: 'adicionar pasta ou workspace',
               onPressed: () {
                 final box = context.findRenderObject() as RenderBox;
                 _showFooterAdd(context, store, box.localToGlobal(Offset.zero));

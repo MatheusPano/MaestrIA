@@ -294,7 +294,7 @@ void main() {
       // não pelo tooltip, como sempre foi aqui. (O relatório também morava
       // nesta faixa; hoje ele é um plugin, e sem plugin instalado não há
       // botão dele.)
-      expect(find.byTooltip('adicionar uma pasta ao cockpit'), findsOneWidget);
+      expect(find.byTooltip('adicionar pasta ou workspace'), findsOneWidget);
       for (final icon in [Icons.create_new_folder_outlined, Icons.history_outlined]) {
         final glyph = find.byIcon(icon);
         expect(glyph, findsOneWidget, reason: '$icon');

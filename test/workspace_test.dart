@@ -743,7 +743,7 @@ void main() {
       expect(store.featuresOrHotfixes.single.folderRoot, '/repos/atrium-backend');
     });
 
-    test('a pasta dobrada solta continua dobrada', () {
+    test('a pasta carimbada dobrada continua dobrada dentro do workspace', () {
       final store = AppStore();
       addTearDown(store.dispose);
 
@@ -897,6 +897,26 @@ void main() {
 
       expect(atrium.folderRoots, isEmpty);
       expect(uplii.folderRoots, isEmpty);
+    });
+
+    test('remover a pasta tira o seu lugar no rootOrder, pra re-adicionar no fim', () async {
+      final store = three();
+      store.dispose();
+
+      // Popula rootOrder criando um workspace
+      store.createWorkspace('W');
+
+      // Remove a pasta
+      await store.removeFolder(folder(store, 'atrium-api'));
+
+      // Re-adiciona a pasta com a mesma raiz
+      store.folders.add(Folder(root: '/repos/atrium-api', name: 'atrium-api'));
+
+      // Verifica que a pasta aparece no fim
+      expect(
+        store.sidebarRows.map((r) => r is Workspace ? 'ws:${r.name}' : (r as Folder).name),
+        ['atrium-web', 'infra', 'ws:W', 'atrium-api'],
+      );
     });
 
     test('cada aparição dobra por conta própria', () {

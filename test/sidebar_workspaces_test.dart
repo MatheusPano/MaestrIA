@@ -174,7 +174,7 @@ void main() {
     addTearDown(store.dispose);
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('adicionar uma pasta ao cockpit'));
+    await tester.tap(find.byTooltip('adicionar pasta ou workspace'));
     await tester.pumpAndSettle();
 
     expect(find.text('adicionar pasta…'), findsOneWidget);
@@ -186,7 +186,7 @@ void main() {
     final store = storeWith(['atrium-api', 'atrium-web', 'infra']);
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('adicionar uma pasta ao cockpit'));
+    await tester.tap(find.byTooltip('adicionar pasta ou workspace'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('novo workspace…'));
     await tester.pumpAndSettle();

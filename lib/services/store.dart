@@ -1552,6 +1552,7 @@ class AppStore extends ChangeNotifier {
       w.folderRoots.remove(p.root);
       w.collapsedFolders.remove(p.root);
     }
+    rootOrder.remove(rowKey(p));
     featuresOrHotfixes.removeWhere((pr) => pr.folderRoot == p.root);
     for (final t in tabs.where((t) => t.folderRoot == p.root).toList()) {
       closeTab(t);
