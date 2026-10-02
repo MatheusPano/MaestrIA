@@ -145,14 +145,29 @@ void main() {
     });
   });
 
+  testWidgets('um banner no meio dos 2s não segura o destaque', (tester) async {
+    final store = storeWith(['solta']);
+    final tab = shell(store, named(store, 'solta'), 't1', 'servidor');
+    store.revealTab(tab);
+
+    store.showBanner('x');
+    await tester.pump(const Duration(seconds: 3));
+
+    expect(store.revealedTabId, isNull);
+    store.dispose();
+  });
+
   group('revealTab na lateral', () {
     testWidgets('rola até a sessão num caminho todo dobrado', (tester) async {
       final store = storeWith([for (var i = 0; i < 12; i++) 'repo$i', 'alvo']);
       final alvo = named(store, 'alvo');
-      final ws = store.createWorkspace('ATRIUM', folders: [alvo]);
       for (var i = 0; i < 12; i++) {
         store.createWorkspace('W$i', folders: [named(store, 'repo$i')]);
       }
+      // Por último, pra a linha ficar abaixo da dobra da lateral de 300px.
+      final ws = store.createWorkspace('ATRIUM', folders: [alvo]);
+      store.moveRootRow(ws, store.sidebarRows.last);
+      expect(store.sidebarRows.last, ws);
       final tab = shell(store, alvo, 't1', 'sessão-escondida');
       ws.collapsed = true;
       ws.collapsedFolders.add(alvo.root);
@@ -169,6 +184,10 @@ void main() {
       final bar = tester.getRect(find.byType(Sidebar));
       expect(bar.contains(row.topLeft), isTrue);
       expect(bar.contains(row.bottomRight), isTrue);
+      final scroll = tester.state<ScrollableState>(
+        find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first,
+      );
+      expect(scroll.position.pixels, greaterThan(0));
       await tester.pump(const Duration(seconds: 3));
       store.dispose();
     });

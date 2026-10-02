@@ -3953,7 +3953,6 @@ class AppStore extends ChangeNotifier {
   void showBanner(String text, {bool sticky = false}) {
     banner = text;
     _bannerTimer?.cancel();
-    _revealTimer?.cancel();
     _bannerTimer = sticky ? null : Timer(bannerLife, clearBanner);
     notifyListeners();
   }
@@ -4566,6 +4565,7 @@ class AppStore extends ChangeNotifier {
     // write about: the panels it would describe are being killed right here.
     _saveDebounce?.cancel();
     _bannerTimer?.cancel();
+    _revealTimer?.cancel();
     _clearToasts();
     floats.dispose();
     agents.stop();

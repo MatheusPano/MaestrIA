@@ -58,7 +58,8 @@ class Sidebar extends StatelessWidget {
             child: ListView(
               // Tudo montado, mesmo fora da tela: "mostrar na lateral" rola até
               // a linha, e uma linha que a lista ainda não construiu não tem
-              // contexto pra ser rolada. São dezenas de linhas, não milhares.
+              // contexto pra ser rolada. Por isso a lista inteira fica montada
+              // o tempo todo; é aceitável porque são dezenas de linhas, não milhares.
               scrollCacheExtent: const ScrollCacheExtent.pixels(100000),
               padding: const EdgeInsets.only(top: 6, bottom: 20),
               children: [
