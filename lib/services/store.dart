@@ -1269,6 +1269,68 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A sessão que a lateral está revelando, e em que aparição. Ver [revealTab].
+  String? revealedTabId;
+  Workspace? revealedWithin;
+
+  /// O pedido de rolar até a linha revelada, ainda não atendido. A linha o
+  /// consome uma vez (ver [takeRevealScroll]); sem isso cada redesenho durante
+  /// os 2s de destaque rolaria a lista de novo.
+  bool _revealScrollPending = false;
+  Timer? _revealTimer;
+
+  /// "Mostrar na lateral": leva a pessoa do painel à linha dele na lista.
+  ///
+  /// Faz o que ela faria à mão -- traz a lateral, tira a busca que escondia a
+  /// sessão, abre workspace, pasta e projeto -- e por isso o que abriu fica
+  /// aberto. Não usa [showSidebarView]: com a lista já na tela ele a esconde,
+  /// e aqui o pedido é sempre "mostre".
+  ///
+  /// A pasta espelhada em mais de um workspace é revelada no primeiro deles
+  /// na ordem da lateral, a mesma escolha de [chosenTintOf]: o painel existe
+  /// uma vez só e é daquele de cima que se vê primeiro.
+  void revealTab(MxTab tab) {
+    sidebarHidden = false;
+    sidebarView = null;
+    if (filtering && !matches(tab)) clearSearch();
+
+    final Workspace? within = tab.folder.isLoose
+        ? null
+        : sidebarRows.whereType<Workspace>().firstWhereOrNull(
+            (w) => w.folderRoots.contains(tab.folderRoot),
+          );
+    if (within != null) {
+      within.collapsed = false;
+      within.collapsedFolders.remove(tab.folderRoot);
+    } else if (!tab.folder.isLoose) {
+      tab.folder.collapsed = false;
+    }
+    featureOrHotfixOf(tab)?.collapsed = false;
+
+    revealedTabId = tab.id;
+    revealedWithin = within;
+    _revealScrollPending = true;
+    _revealTimer?.cancel();
+    _revealTimer = Timer(const Duration(seconds: 2), () {
+      if (_gone || revealedTabId != tab.id) return;
+      revealedTabId = null;
+      revealedWithin = null;
+      _revealScrollPending = false;
+      notifyListeners();
+    });
+    _save();
+    _syncSidebar();
+    notifyListeners();
+  }
+
+  /// Se esta linha é a que deve rolar até a tela: verdadeiro uma vez só, e só
+  /// pra aparição revelada. Ver [_revealScrollPending].
+  bool takeRevealScroll(MxTab tab, Workspace? within) {
+    if (!_revealScrollPending || revealedTabId != tab.id || revealedWithin != within) return false;
+    _revealScrollPending = false;
+    return true;
+  }
+
   /// O plugin cuja aba própria está na tela agora. Ver [_syncSidebar].
   String? _sidebarLive;
 
@@ -3891,6 +3953,7 @@ class AppStore extends ChangeNotifier {
   void showBanner(String text, {bool sticky = false}) {
     banner = text;
     _bannerTimer?.cancel();
+    _revealTimer?.cancel();
     _bannerTimer = sticky ? null : Timer(bannerLife, clearBanner);
     notifyListeners();
   }

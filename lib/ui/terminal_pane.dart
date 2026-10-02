@@ -568,6 +568,17 @@ class _PaneHeader extends StatelessWidget {
                       pinned: store.isPinned(tab),
                       onPressed: () => store.togglePin(tab),
                     ),
+                  // Do painel pra linha dele na lateral: a pessoa que está
+                  // olhando a sessão e quer saber onde ela mora na lista.
+                  IconButton(
+                    tooltip: 'mostrar na lateral',
+                    iconSize: 16,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                    style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    onPressed: () => store.revealTab(tab),
+                    icon: Icon(Icons.my_location, color: Mx.fgDim),
+                  ),
                   // O tique fica antes do x porque é a outra forma de acabar
                   // com um painel — e a que fica com ele. Quem leu a resposta
                   // está olhando pra este header; é daqui que ele diz "essa
