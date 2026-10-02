@@ -1029,7 +1029,6 @@ class Launcher {
   }
 }
 
-
 /// Quanto da janela de contexto uma sessão do Claude já ocupa.
 ///
 /// Vem da linha de status do Claude Code e vive só na memória do painel: é um

@@ -46,6 +46,9 @@ void main() {
       expect(ContextUsage.fromStatusLine('nada'), isNull);
       expect(ContextUsage.fromStatusLine(status(size: null)), isNull);
       expect(ContextUsage.fromStatusLine(status(size: 0)), isNull);
+      expect(ContextUsage.fromStatusLine({'context_window': {'used_percentage': 'x', 'context_window_size': 200000, 'current_usage': {'input_tokens': 1}}}), isNull);
+      expect(ContextUsage.fromStatusLine({'context_window': {'used_percentage': 50, 'context_window_size': 200000, 'current_usage': 'x'}}), isNull);
+      expect(ContextUsage.fromStatusLine({'context_window': 'x'}), isNull);
     });
   });
 
@@ -94,6 +97,23 @@ void main() {
       expect(t.context, isNull);
 
       store.applyStatus(StatusEvent('nope', status()));
+      store.dispose();
+    });
+
+    test('notifica só uma vez quando aplica o mesmo body válido duas vezes', () {
+      final store = AppStore();
+      final t = tab();
+      store.tabs.add(t);
+      var n = 0;
+      store.addListener(() => n++);
+
+      final validStatus = status();
+      store.applyStatus(StatusEvent('t1', validStatus));
+      expect(n, 1);
+
+      store.applyStatus(StatusEvent('t1', validStatus));
+      expect(n, 1);
+
       store.dispose();
     });
   });
