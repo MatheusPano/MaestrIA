@@ -227,7 +227,7 @@ void main() {
       await tester.tap(find.text('renomear'));
       await tester.pumpAndSettle();
 
-      expect(find.text('renomear projeto'), findsOneWidget);
+      expect(find.text('renomear feature'), findsOneWidget);
       expect(store.pedidos, isEmpty);
     });
 
@@ -520,7 +520,7 @@ void main() {
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('cor: ciano — do projeto'), findsOneWidget);
+      expect(find.text('cor: ciano — da feature'), findsOneWidget);
       expect(find.text('cor'), findsNothing);
       await closeMenu(tester);
     });

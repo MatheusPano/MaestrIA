@@ -330,7 +330,7 @@ Future<void> showPanelMenu(
         mxItem(
           'tint-project',
           glyph: Icon(Icons.circle, size: 12, color: fromFeatureOrHotfix.color),
-          label: 'cor: ${fromFeatureOrHotfix.label} — do projeto',
+          label: 'cor: ${fromFeatureOrHotfix.label} — ${store.featureOrHotfixOf(tab)!.kind.ofThe}',
           enabled: false,
         )
       else
@@ -426,7 +426,7 @@ Future<void> showPanelMenu(
         mxItem(
           'move',
           glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-          label: 'mover pro projeto…',
+          label: 'mover pra feature/hotfix…',
         ),
       if (!tab.isPassive)
         mxItem(
@@ -1182,7 +1182,12 @@ Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
 
 /// Name a new project. The briefing is a second, optional step: you know what
 /// you are calling the job before you know what to tell the agents about it.
-Future<void> showNewFeatureOrHotfix(BuildContext context, AppStore store, Folder folder) async {
+Future<void> showNewFeatureOrHotfix(
+  BuildContext context,
+  AppStore store,
+  Folder folder, {
+  FeatureOrHotfixKind kind = FeatureOrHotfixKind.feature,
+}) async {
   final name = TextEditingController();
   final brief = TextEditingController();
 
@@ -1190,7 +1195,7 @@ Future<void> showNewFeatureOrHotfix(BuildContext context, AppStore store, Folder
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('novo projeto em ${folder.name}', style: const TextStyle(fontSize: 15)),
+      title: Text('${kind.newLabel} em ${folder.name}', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 560,
         child: Column(
@@ -1212,7 +1217,7 @@ Future<void> showNewFeatureOrHotfix(BuildContext context, AppStore store, Folder
               style: const TextStyle(fontSize: 13),
               decoration: _field(
                 'briefing (opcional)',
-                'o que todo agente desse projeto precisa saber antes de começar',
+                'o que todo agente ${kind.ofThis} precisa saber antes de começar',
               ),
             ),
             const SizedBox(height: 10),
@@ -1234,7 +1239,7 @@ Future<void> showNewFeatureOrHotfix(BuildContext context, AppStore store, Folder
   if (go != true) return;
   final label = name.text.trim();
   if (label.isEmpty) return;
-  store.addFeatureOrHotfix(folder, label, brief: brief.text.trim());
+  store.addFeatureOrHotfix(folder, label, brief: brief.text.trim(), kind: kind);
 }
 
 /// Edit the standing context handed to every session of a project.
@@ -1286,6 +1291,7 @@ Future<void> showFeatureOrHotfixMenu(
   FeatureOrHotfix featureOrHotfix,
   Offset globalPosition,
 ) async {
+  final kind = featureOrHotfix.kind;
   final choice = await mxMenu<String>(
     context,
     at: globalPosition,
@@ -1310,7 +1316,7 @@ Future<void> showFeatureOrHotfixMenu(
         mxItem(
           'task',
           glyph: Icon(Icons.call_split, size: 14, color: Mx.fgDim),
-          label: 'nova task nesse projeto…',
+          label: 'nova task ${kind.inThis}…',
         ),
       mxItem(
         'brief',
@@ -1326,16 +1332,21 @@ Future<void> showFeatureOrHotfixMenu(
       // quatro sessões do projeto de uma vez, que é o que faz "de que
       // trabalho é este painel" ser respondido sem ler nada. Ver [tintItem].
       tintItem(featureOrHotfix.tint),
+      mxItem(
+        'kind',
+        glyph: Icon(kind.other.icon, size: 14, color: Mx.fgDim),
+        label: 'virar ${kind.other.label}',
+      ),
       mxDivider(),
       mxItem(
         'done',
         glyph: Icon(Icons.task_alt, size: 14, color: Mx.green),
-        label: 'concluir projeto',
+        label: 'concluir ${kind.label}',
       ),
       mxItem(
         'dissolve',
         glyph: Icon(Icons.track_changes, size: 14, color: Mx.red),
-        label: 'dissolver projeto',
+        label: 'dissolver ${kind.label}',
         color: Mx.red,
       ),
     ],
@@ -1355,13 +1366,15 @@ Future<void> showFeatureOrHotfixMenu(
     case 'rename':
       final name = await promptText(
         context,
-        title: 'renomear projeto',
+        title: 'renomear ${kind.label}',
         initial: featureOrHotfix.name,
         label: 'nome',
       );
       if (name != null && name.trim().isNotEmpty) store.editFeatureOrHotfix(featureOrHotfix, name: name);
     case final pick when isTintChoice(pick):
       store.setFeatureOrHotfixTint(featureOrHotfix, tintPicked(pick));
+    case 'kind':
+      store.setFeatureOrHotfixKind(featureOrHotfix, kind.other);
     case 'done':
       await confirmCompleteFeatureOrHotfix(context, store, featureOrHotfix);
     case 'dissolve':
@@ -1369,8 +1382,8 @@ Future<void> showFeatureOrHotfixMenu(
       store.removeFeatureOrHotfix(featureOrHotfix);
       store.showBanner(
         folder.isLoose
-            ? 'projeto dissolvido — os painéis continuam abertos nos avulsos'
-            : 'projeto dissolvido — os painéis continuam abertos na pasta',
+            ? '${kind.dissolved} — os painéis continuam abertos nos avulsos'
+            : '${kind.dissolved} — os painéis continuam abertos na pasta',
       );
   }
 }
@@ -1414,7 +1427,7 @@ Future<void> confirmCompleteFeatureOrHotfix(
               icon: tabs.isEmpty ? Icons.check_rounded : Icons.close_rounded,
               color: tabs.isEmpty ? Mx.green : Mx.fgDim,
               text: tabs.isEmpty
-                  ? 'não tem painel aberto nesse projeto'
+                  ? 'não tem painel aberto ${featureOrHotfix.kind.inThis}'
                   : 'fecha ${tabs.length} painel(is) — as sessões terminam aqui',
             ),
             if (busy > 0)
@@ -1438,7 +1451,7 @@ Future<void> confirmCompleteFeatureOrHotfix(
             _Fact(
               icon: Icons.folder_outlined,
               color: Mx.fgFaint,
-              text: 'nada é mexido no repo: o projeto só existia aqui',
+              text: 'nada é mexido no repo: ${featureOrHotfix.kind.the} só existia aqui',
             ),
           ],
         ),
@@ -1471,8 +1484,8 @@ Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxT
   if (featuresOrHotfixes.isEmpty) {
     store.showBanner(
       folder.isLoose
-          ? 'os avulsos ainda não têm projeto — crie um pelo + da bandeja'
-          : 'essa pasta ainda não tem projeto — crie um pelo "+ projeto"',
+          ? 'os avulsos ainda não têm feature nem hotfix — crie pelo + da bandeja'
+          : 'essa pasta ainda não tem feature nem hotfix — crie pelo + da pasta',
     );
     return;
   }
@@ -1489,7 +1502,7 @@ Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxT
             child: Row(
               children: [
                 Icon(
-                  Icons.track_changes,
+                  p.kind.icon,
                   size: 15,
                   color: tab.featureOrHotfixId == p.id ? Mx.accent : Mx.purple,
                 ),
@@ -1581,7 +1594,7 @@ class _FilterSheet extends StatelessWidget {
               for (final p in store.featuresOrHotfixesOf(f))
                 _FilterRow(
                   label: p.name,
-                  icon: Icons.track_changes,
+                  icon: p.kind.icon,
                   color: Mx.purple,
                   indent: 14,
                   on: store.filterFeaturesOrHotfixes.contains(p.id),
@@ -1608,7 +1621,7 @@ class _FilterSheet extends StatelessWidget {
               for (final p in store.featuresOrHotfixesOf(store.loose))
                 _FilterRow(
                   label: p.name,
-                  icon: Icons.track_changes,
+                  icon: p.kind.icon,
                   color: Mx.purple,
                   indent: 14,
                   on: store.filterFeaturesOrHotfixes.contains(p.id),

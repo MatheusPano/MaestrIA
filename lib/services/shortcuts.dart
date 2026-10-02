@@ -374,7 +374,7 @@ enum MxAction {
   newClaude(
     id: 'claude',
     label: 'nova sessão claude',
-    hint: 'na pasta e no projeto do painel em foco',
+    hint: 'na pasta e na feature/hotfix do painel em foco',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyT, meta: true)],
     linux: [

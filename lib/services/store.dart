@@ -1823,7 +1823,12 @@ class AppStore extends ChangeNotifier {
     return tab == null ? null : featureOrHotfixOf(tab);
   }
 
-  FeatureOrHotfix addFeatureOrHotfix(Folder f, String name, {String brief = ''}) {
+  FeatureOrHotfix addFeatureOrHotfix(
+    Folder f,
+    String name, {
+    String brief = '',
+    FeatureOrHotfixKind kind = FeatureOrHotfixKind.feature,
+  }) {
     final featureOrHotfix = FeatureOrHotfix(
       // Not the tab counter: this one outlives the window, and `tab3` would
       // name a different project every time the app restarts.
@@ -1831,6 +1836,7 @@ class AppStore extends ChangeNotifier {
       folderRoot: f.root,
       name: name,
       brief: brief,
+      kind: kind,
     );
     featuresOrHotfixes.add(featureOrHotfix);
     _save();
@@ -1852,6 +1858,15 @@ class AppStore extends ChangeNotifier {
   /// num diálogo de texto, e este é uma escolha de menu que vale na hora.
   void setFeatureOrHotfixTint(FeatureOrHotfix featureOrHotfix, MxTint? tint) {
     featureOrHotfix.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
+  /// Troca a natureza depois de criada: o "login quebrado" que parecia
+  /// feature e era hotfix. Nada mais muda -- ver [FeatureOrHotfixKind].
+  void setFeatureOrHotfixKind(FeatureOrHotfix featureOrHotfix, FeatureOrHotfixKind kind) {
+    if (featureOrHotfix.kind == kind) return;
+    featureOrHotfix.kind = kind;
     _save();
     notifyListeners();
   }

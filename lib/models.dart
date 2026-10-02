@@ -76,6 +76,67 @@ class Folder with SidebarRow {
   )..tint = MxTint.byName(j['tint'] as String?);
 }
 
+/// O que uma [FeatureOrHotfix] é: trabalho novo ou correção urgente.
+///
+/// Só muda como ela se diz -- o nome nos menus e o glifo na linha. O briefing,
+/// a cor e o ciclo de vida são os mesmos nos dois, e é por isso que é um campo
+/// e não duas classes. Os textos moram aqui porque o português concorda em
+/// gênero ("nessa feature", "nesse hotfix"), e cada menu que fala dela
+/// escreveria a concordância de novo.
+enum FeatureOrHotfixKind {
+  feature(
+    label: 'feature',
+    newLabel: 'nova feature',
+    the: 'a feature',
+    inThis: 'nessa feature',
+    thisOne: 'essa feature',
+    ofThis: 'dessa feature',
+    ofThe: 'da feature',
+    dissolved: 'feature dissolvida',
+    icon: Icons.track_changes,
+  ),
+  hotfix(
+    label: 'hotfix',
+    newLabel: 'novo hotfix',
+    the: 'o hotfix',
+    inThis: 'nesse hotfix',
+    thisOne: 'esse hotfix',
+    ofThis: 'desse hotfix',
+    ofThe: 'do hotfix',
+    dissolved: 'hotfix dissolvido',
+    icon: Icons.bolt,
+  );
+
+  const FeatureOrHotfixKind({
+    required this.label,
+    required this.newLabel,
+    required this.the,
+    required this.inThis,
+    required this.thisOne,
+    required this.ofThis,
+    required this.ofThe,
+    required this.dissolved,
+    required this.icon,
+  });
+
+  final String label;
+  final String newLabel;
+  final String the;
+  final String inThis;
+  final String thisOne;
+  final String ofThis;
+  final String ofThe;
+  final String dissolved;
+  final IconData icon;
+
+  /// O outro: é o que o "virar…" do menu oferece.
+  FeatureOrHotfixKind get other => this == feature ? hotfix : feature;
+
+  /// Feature pro que não diz nada -- tudo que a 2.4.0 gravou.
+  static FeatureOrHotfixKind byName(String? name) =>
+      values.firstWhere((k) => k.name == name, orElse: () => feature);
+}
+
 /// Uma feature ou um hotfix dentro de uma pasta: "permissão do google", não
 /// `learning-app-lms`. Até a 2.4.0 se chamava projeto.
 ///
@@ -91,6 +152,7 @@ class FeatureOrHotfix {
     required this.name,
     this.brief = '',
     this.collapsed = false,
+    this.kind = FeatureOrHotfixKind.feature,
   });
 
   /// Stable across renames, because panels point at it and the config file
@@ -119,6 +181,9 @@ class FeatureOrHotfix {
 
   bool collapsed;
 
+  /// Feature ou hotfix. Ver [FeatureOrHotfixKind].
+  FeatureOrHotfixKind kind;
+
   /// A cor deste projeto, quando alguém escolheu uma -- e a dos painéis dele,
   /// que é o ponto. Ver [MxTint] e `AppStore.tintOf`.
   ///
@@ -139,6 +204,7 @@ class FeatureOrHotfix {
     'name': name,
     'brief': brief,
     'collapsed': collapsed,
+    'kind': kind.name,
     if (tint != null) 'tint': tint!.name,
   };
 
@@ -148,6 +214,7 @@ class FeatureOrHotfix {
     name: j['name'] as String,
     brief: (j['brief'] as String?) ?? '',
     collapsed: (j['collapsed'] as bool?) ?? false,
+    kind: FeatureOrHotfixKind.byName(j['kind'] as String?),
   )..tint = MxTint.byName(j['tint'] as String?);
 }
 

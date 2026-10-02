@@ -109,7 +109,7 @@ void main() {
       expect(find.text('sessão do claude'), findsOneWidget);
       expect(find.text('terminal'), findsOneWidget);
       // Projeto inclusive: nomear um trabalho não pede repo nenhum.
-      expect(find.text('projeto…'), findsOneWidget);
+      expect(find.text('feature…'), findsOneWidget);
     });
 
     testWidgets("and a folder's + offers the same featureOrHotfix line", (tester) async {
@@ -118,7 +118,7 @@ void main() {
 
       await tester.tap(find.byTooltip('abrir algo nessa pasta'));
       await tester.pumpAndSettle();
-      expect(find.text('projeto…'), findsOneWidget);
+      expect(find.text('feature…'), findsOneWidget);
     });
 
     testWidgets('the + waits for the pointer once there is a row to hover', (tester) async {

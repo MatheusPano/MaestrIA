@@ -195,10 +195,10 @@ void main() {
       store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('o que fazer com esse projeto'));
+      await tester.tap(find.byTooltip('o que fazer com essa feature'));
       await tester.pumpAndSettle();
       expect(find.text('sessão do claude'), findsOneWidget);
-      expect(find.text('nova task nesse projeto…'), findsNothing);
+      expect(find.text('nova task nessa feature…'), findsNothing);
       store.dispose();
     });
   });
@@ -228,6 +228,77 @@ void main() {
       await pumpSidebar(tester, store);
       expect(find.text('permissão do google'), findsOneWidget);
       expect(find.text('no projeto'), findsNothing);
+      store.dispose();
+    });
+  });
+
+  group('feature ou hotfix', () {
+    test('a natureza sobrevive ao config, e o que não diz nada é feature', () {
+      final store = storeWithFolder();
+      addTearDown(store.dispose);
+      final made = store.addFeatureOrHotfix(
+        store.folders.first,
+        'login quebrado',
+        kind: FeatureOrHotfixKind.hotfix,
+      );
+
+      expect(FeatureOrHotfix.fromJson(made.toJson()).kind, FeatureOrHotfixKind.hotfix);
+      expect(made.toJson()['kind'], 'hotfix');
+      // O que a 2.4.0 gravou não tem `kind`.
+      expect(
+        FeatureOrHotfix.fromJson({'id': 'a', 'folderRoot': '/repo', 'name': 'x'}).kind,
+        FeatureOrHotfixKind.feature,
+      );
+    });
+
+    test('dá pra virar hotfix depois de criado, e voltar', () {
+      final store = storeWithFolder();
+      addTearDown(store.dispose);
+      final made = store.addFeatureOrHotfix(store.folders.first, 'login quebrado');
+
+      store.setFeatureOrHotfixKind(made, FeatureOrHotfixKind.hotfix);
+      expect(made.kind, FeatureOrHotfixKind.hotfix);
+      store.setFeatureOrHotfixKind(made, FeatureOrHotfixKind.feature);
+      expect(made.kind, FeatureOrHotfixKind.feature);
+    });
+
+    testWidgets('o hotfix se diz na linha: raio e etiqueta', (tester) async {
+      final store = storeWithFolder();
+      store.addFeatureOrHotfix(store.folders.first, 'login quebrado', kind: FeatureOrHotfixKind.hotfix);
+      store.addFeatureOrHotfix(store.folders.first, 'permissão do google');
+
+      await pumpSidebar(tester, store);
+
+      expect(find.text('hotfix'), findsOneWidget);
+      expect(find.byIcon(Icons.bolt), findsOneWidget);
+      expect(find.byIcon(Icons.track_changes), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('o menu da pasta oferece as duas', (tester) async {
+      final store = storeWithFolder();
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('o que fazer com essa pasta'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('nova feature…'), findsOneWidget);
+      expect(find.text('novo hotfix…'), findsOneWidget);
+      expect(find.text('novo projeto…'), findsNothing);
+      store.dispose();
+    });
+
+    testWidgets('o menu de um hotfix fala de hotfix', (tester) async {
+      final store = storeWithFolder();
+      store.addFeatureOrHotfix(store.folders.first, 'login quebrado', kind: FeatureOrHotfixKind.hotfix);
+      await pumpSidebar(tester, store);
+
+      await tester.tap(find.byTooltip('o que fazer com esse hotfix'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('concluir hotfix'), findsOneWidget);
+      expect(find.text('dissolver hotfix'), findsOneWidget);
+      expect(find.text('virar feature'), findsOneWidget);
       store.dispose();
     });
   });

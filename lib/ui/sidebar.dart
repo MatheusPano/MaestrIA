@@ -408,7 +408,7 @@ class _FilterButton extends StatelessWidget {
     return _MiniButton(
       icon: Icons.filter_list_rounded,
       tooltip: active == 0
-          ? 'filtrar por pasta, projeto ou estado'
+          ? 'filtrar por pasta, feature/hotfix ou estado'
           : '$active ${active == 1 ? 'filtro' : 'filtros'} — clique pra mexer',
       // O ponto é o que diz, com o menu fechado, que a lista na sua frente não
       // é a lista inteira. Sem ele, um filtro esquecido é uma sessão que
@@ -1422,10 +1422,11 @@ class _LooseMenu extends StatelessWidget {
           context,
           at: anchor,
           items: [
+            for (final kind in FeatureOrHotfixKind.values)
             mxItem(
-              'newproject',
-              glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-              label: 'novo projeto…',
+              'new:${kind.name}',
+              glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+              label: '${kind.newLabel}…',
             ),
             mxItem(
               'sweep',
@@ -1435,7 +1436,15 @@ class _LooseMenu extends StatelessWidget {
           ],
         );
         if (choice == null || !context.mounted) return;
-        if (choice == 'newproject') await showNewFeatureOrHotfix(context, store, store.loose);
+        if (choice.startsWith('new:')) {
+          await showNewFeatureOrHotfix(
+            context,
+            store,
+            store.loose,
+            kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+          );
+          return;
+        }
         if (choice == 'sweep') _sweep(store, store.loose);
       },
     );
@@ -1700,7 +1709,7 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
                     // roxa de sempre até alguém pintá-lo, e a partir daí é
                     // ela que diz de que projeto são os painéis pendurados
                     // aqui embaixo. Ver [MxTint].
-                    Icon(Icons.track_changes, size: 15, color: featureOrHotfix.tint?.color ?? Mx.purple),
+                    Icon(featureOrHotfix.kind.icon, size: 15, color: featureOrHotfix.tint?.color ?? Mx.purple),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1709,6 +1718,17 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
                         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                       ),
                     ),
+                    // A natureza só se escreve quando não é a de sempre: uma
+                    // lista em que toda linha diz "feature" é uma lista em que
+                    // a palavra não diz nada.
+                    if (featureOrHotfix.kind == FeatureOrHotfixKind.hotfix)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text(
+                          'hotfix',
+                          style: TextStyle(fontSize: 10.5, color: Mx.fgFaint),
+                        ),
+                      ),
                     // The briefing is invisible by nature — it is in a system
                     // prompt you never see scroll by. This is the only place
                     // that says a project has one.
@@ -1729,7 +1749,7 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
                       shown: hovered || tabs.isEmpty,
                     ),
                     _RowButton(
-                      tooltip: 'o que fazer com esse projeto',
+                      tooltip: 'o que fazer com ${featureOrHotfix.kind.thisOne}',
                       icon: Icons.more_horiz,
                       onTap: (anchor) => showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, anchor),
                     ),
@@ -2274,7 +2294,7 @@ class _AddButton extends StatelessWidget {
           // Three different rows can hold one of these, and the tooltip is the
           // only thing that says which of them you are about to add to.
           tooltip: featureOrHotfix != null
-              ? 'abrir algo nesse projeto'
+              ? 'abrir algo ${featureOrHotfix!.kind.inThis}'
               : folder.isLoose
               ? 'abrir algo sem pasta'
               : 'abrir algo nessa pasta',
@@ -2341,18 +2361,24 @@ Future<void> _showAddMenu(
       // que os painéis vão fazer.
       if (featureOrHotfix == null) ...[
         mxDivider(),
+        for (final kind in FeatureOrHotfixKind.values)
         mxItem(
-          'projeto',
-          glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-          label: 'projeto…',
+          'new:${kind.name}',
+          glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+          label: '${kind.label}…',
         ),
       ],
     ],
   );
   if (choice == null || !context.mounted) return;
 
-  if (choice == 'projeto') {
-    await showNewFeatureOrHotfix(context, store, folder);
+  if (choice.startsWith('new:')) {
+    await showNewFeatureOrHotfix(
+      context,
+      store,
+      folder,
+      kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+    );
     return;
   }
   await openHereChoice(context, store, choice, folder: folder, featureOrHotfix: featureOrHotfix);
@@ -2477,10 +2503,11 @@ Future<void> showFolderMenu(
       // `refreshGit` já roda de dez em dez segundos sozinho (ver
       // [AppStore.start]) -- uma linha de menu pra pedir o que acontece de
       // graça é uma linha que só ensina a duvidar dela.
+      for (final kind in FeatureOrHotfixKind.values)
       mxItem(
-        'newproject',
-        glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-        label: 'novo projeto…',
+        'new:${kind.name}',
+        glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+        label: '${kind.newLabel}…',
       ),
       mxItem(
         'rename',
@@ -2513,13 +2540,21 @@ Future<void> showFolderMenu(
   if (await openHereChoice(context, store, choice, folder: folder)) return;
   if (!context.mounted) return;
 
+  if (choice.startsWith('new:')) {
+    await showNewFeatureOrHotfix(
+      context,
+      store,
+      folder,
+      kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+    );
+    return;
+  }
+
   switch (choice) {
     case 'setup':
       store.showSetup(folder: folder);
     case 'worktrees':
       await showWorktreesMenu(context, store, folder, worktrees, anchor);
-    case 'newproject':
-      await showNewFeatureOrHotfix(context, store, folder);
     case 'rename':
       final name = await promptText(
         context,
