@@ -5,6 +5,7 @@ import 'dart:io';
 import '../models.dart';
 import 'docs.dart';
 import 'paths.dart';
+import 'shell.dart';
 
 class HookEvent {
   HookEvent(this.tabId, this.name, this.payload);
@@ -43,11 +44,44 @@ class HookServer {
   /// json -- e ele é uma dica, não um estado. Perdê-lo custa uma porta nova.
   static File get portFile => File('$mxStateDir/hook-port');
 
+  /// O script que o `statusLine` de cada sessão roda. Ver [statusLineScript].
+  static File get statusLineFile => File('$mxStateDir/statusline.sh');
+
+  /// A linha de status de uma sessão aberta pelo app.
+  ///
+  /// É o único jeito documentado de ver o `context_window` de uma sessão que
+  /// roda num terminal: o Claude Code manda o json só pro comando da linha de
+  /// status. O script repassa esse json pra janela e devolve a linha de status
+  /// que o usuário já tinha -- que o `--settings` substituiria, se o script não
+  /// a rodasse por ele.
+  ///
+  /// O `curl` vai com o stderr descartado *por fora* do comando: sem `curl`
+  /// instalado, o "not found" do shell sairia na linha de status do usuário.
+  static const statusLineScript = r'''#!/bin/sh
+# A linha de status de uma sessão aberta pela maestria: manda o que o
+# Claude Code mostrou pra janela e devolve a linha de status do usuário.
+url="$1"
+user="$2"
+input=$(cat)
+# Em segundo plano e com a saída descartada: a linha de status não pode
+# esperar pela janela, nem quando ela está fechada -- nem quebrar quando
+# não há curl.
+{ printf '%s' "$input" | curl -s -m 1 -X POST -H 'Content-Type: application/json' \
+  --data-binary @- "$url"; } >/dev/null 2>&1 &
+if [ -n "$user" ]; then
+  # `--decode` é o que o Linux e o macOS de hoje entendem; o `-D` é a volta
+  # do macOS antigo.
+  cmd=$(printf '%s' "$user" | base64 --decode 2>/dev/null || printf '%s' "$user" | base64 -D)
+  printf '%s' "$input" | sh -c "$cmd"
+fi
+''';
+
   Future<void> start() async {
     if (_server != null) return;
     final server = await _bind();
     _server = server;
     _remember(server.port);
+    _writeStatusLine();
     server.listen((req) async {
       // /hook/<tabId> -- the tab is in the URL because a session id only
       // arrives with the first event, and panels need a home before that.
@@ -129,6 +163,50 @@ class HookServer {
     }
   }
 
+  /// Grava o script a cada subida: uma versão nova do app pode trazer um
+  /// script novo, e as sessões o leem pelo caminho, não pelo conteúdo.
+  void _writeStatusLine() {
+    try {
+      statusLineFile.parent.createSync(recursive: true);
+      statusLineFile.writeAsStringSync(statusLineScript);
+    } on FileSystemException {
+      // Sem o script a sessão fica sem linha de status e o painel sem a ficha
+      // do contexto; os hooks seguem funcionando. Não é motivo pra não abrir.
+    }
+  }
+
+  /// O `statusLine` que a sessão em [cwd] teria sem o app.
+  ///
+  /// A ordem é a do spec: o `settings.local.json` do projeto, o `settings.json`
+  /// do projeto, o do usuário -- o primeiro que tiver um `statusLine` do tipo
+  /// `command`. Arquivo que falta ou não é json é pulado. [home] só existe
+  /// pros testes não lerem o `~/.claude` de quem os roda.
+  static Map<String, dynamic>? userStatusLine(String? cwd, {String? home}) {
+    home ??= Platform.environment['HOME'];
+    final candidates = [
+      if (cwd != null && cwd.isNotEmpty) ...[
+        '$cwd/.claude/settings.local.json',
+        '$cwd/.claude/settings.json',
+      ],
+      if (home != null && home.isNotEmpty) '$home/.claude/settings.json',
+    ];
+    for (final path in candidates) {
+      try {
+        final json = jsonDecode(File(path).readAsStringSync());
+        if (json is! Map) continue;
+        final line = json['statusLine'];
+        if (line is Map && line['type'] == 'command' && line['command'] is String) {
+          return Map<String, dynamic>.from(line);
+        }
+      } on FileSystemException {
+        continue;
+      } on FormatException {
+        continue;
+      }
+    }
+    return null;
+  }
+
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
@@ -141,8 +219,17 @@ class HookServer {
   /// no writing to ~/.claude/settings.json. A short timeout matters: if the
   /// cockpit is closed mid-session, a blocking hook must fail fast, not hang
   /// the session for the default ten minutes.
-  String settingsFor(String tabId) {
+  ///
+  /// O `statusLine` vai junto, e ele sim substitui o do usuário -- por isso
+  /// o comando do usuário viaja dentro dele (ver [statusLineScript]). Em
+  /// base64 porque esse comando passa por dois shells até rodar, e base64 não
+  /// tem nada que um shell interprete. [home] só existe pros testes.
+  String settingsFor(String tabId, {String? cwd, String? home}) {
     final url = 'http://127.0.0.1:$port/hook/$tabId';
+    final user = userStatusLine(cwd, home: home);
+    final userCommand = user?['command'] as String? ?? '';
+    final encoded = userCommand.isEmpty ? '' : base64.encode(utf8.encode(userCommand));
+    final statusUrl = 'http://127.0.0.1:$port/status/$tabId';
     Map<String, dynamic> group({String? matcher}) => {
       if (matcher != null) 'matcher': matcher,
       'hooks': [
@@ -162,6 +249,11 @@ class HookServer {
         // segundo plano terminou -- ver [HookState.forksOut] --, e sem ele
         // "quando terminar" só sabe que o *turno* acabou.
         'SubagentStop': [group()],
+      },
+      'statusLine': {
+        'type': 'command',
+        'command': 'sh ${Sh.q(statusLineFile.path)} ${Sh.q(statusUrl)} ${Sh.q(encoded)}',
+        if (user?['padding'] case final padding?) 'padding': padding,
       },
     });
   }

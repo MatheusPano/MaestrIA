@@ -2285,7 +2285,7 @@ class AppStore extends ChangeNotifier {
     final parts = [
       'claude',
       '--name ${Sh.q(name)}',
-      '--settings ${Sh.q(hooks.settingsFor(tab.id))}',
+      '--settings ${Sh.q(hooks.settingsFor(tab.id, cwd: tab.cwd))}',
       if (brief.isNotEmpty) '--append-system-prompt ${Sh.q(brief)}',
       if (resumeId != null) '--resume ${Sh.q(resumeId)}',
       // Positional, so it comes last: `claude [flags] '<prompt>'` opens the
