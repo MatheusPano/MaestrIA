@@ -291,8 +291,7 @@ void main() {
       await dragRow(tester, 'gama', 'alfa');
       expect(rowOrder(store), ['gama', 'alfa', 'beta']);
       store.dispose();
-        // O arrasto da lateral é devolvido na Task 5.
-    }, skip: true);
+    });
 
     // O clique que o arrasto engoliu: no cabeçalho, clicar dobra a pasta.
     testWidgets('um clique que escorregou um pixel ainda dobra a pasta', (tester) async {

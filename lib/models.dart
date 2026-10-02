@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// workspace (que leva as pastas dela junto).
 ///
 /// Existe pra que uma coisa só: arrastar. As duas linhas se reordenam entre
-/// si -- ver `AppStore.sidebarRows` e `AppStore.moveRow` --, e um arrasto
+/// si -- ver `AppStore.sidebarRows` e `AppStore.drop` --, e um arrasto
 /// precisa de um tipo que seja as duas. Não tem membro nenhum de propósito:
 /// o que uma linha *é* continua sendo [Folder] ou [Workspace].
 mixin SidebarRow {}
