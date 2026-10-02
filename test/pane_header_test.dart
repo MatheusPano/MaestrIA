@@ -379,4 +379,96 @@ void main() {
       expect(find.descendant(of: find.byType(PaneKeyHint), matching: find.text('⌘1')), findsOne);
     });
   });
+
+  group('a ficha do contexto', () {
+    Future<AppStore> pumpWithContext(
+      WidgetTester tester,
+      ContextUsage? usage, {
+      double width = 720,
+    }) async {
+      final store = AppStore();
+      final tab = panel(store);
+      tab.context = usage;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: width,
+              height: 320,
+              child: TerminalPane(store: store, tab: tab),
+            ),
+          ),
+        ),
+      );
+      return store;
+    }
+
+    Color percentColor(WidgetTester tester, String text) =>
+        tester.widget<Text>(find.text(text)).style!.color!;
+
+    test('formatTokens', () {
+      expect(formatTokens(999), '999');
+      expect(formatTokens(1000), '1 mil');
+      expect(formatTokens(116010), '116 mil');
+      expect(formatTokens(200000), '200 mil');
+      expect(formatTokens(1000000), '1 mi');
+      expect(formatTokens(1200000), '1,2 mi');
+    });
+
+    testWidgets('mostra o percentual e o tooltip com os tokens', (tester) async {
+      final store = await pumpWithContext(
+        tester,
+        ContextUsage(percent: 58, tokens: 116010, window: 200000),
+      );
+      expect(find.text('58%'), findsOneWidget);
+      expect(find.byTooltip('116 mil de 200 mil tokens'), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('a cor muda nas faixas 60 e 85', (tester) async {
+      final expected = {59: Mx.fgDim, 60: Mx.yellow, 84: Mx.yellow, 85: Mx.red};
+      for (final e in expected.entries) {
+        final store = await pumpWithContext(
+          tester,
+          ContextUsage(percent: e.key, tokens: 1000, window: 2000),
+        );
+        expect(percentColor(tester, '${e.key}%'), e.value, reason: '${e.key}%');
+        store.dispose();
+      }
+    });
+
+    testWidgets('sem context não há ficha', (tester) async {
+      final store = await pumpWithContext(tester, null);
+      expect(find.textContaining('%'), findsNothing);
+      store.dispose();
+    });
+
+    testWidgets('num terminal a ficha não aparece', (tester) async {
+      final store = AppStore();
+      final tab = MxTab(
+        id: 'tab1',
+        folder: Folder(root: '/repo', name: 'meu-repo'),
+        kind: TabKind.shell,
+        cwd: '/repo',
+        branch: '',
+      );
+      store.tabs.add(tab);
+      store.panes = PaneLeaf(tab.id);
+      store.focusedPaneId = tab.id;
+      tab.context = ContextUsage(percent: 58, tokens: 1, window: 2);
+      await pumpPane(tester, store, tab);
+      expect(find.text('58%'), findsNothing);
+      store.dispose();
+    });
+
+    testWidgets('num cabeçalho estreito a ficha some', (tester) async {
+      final store = await pumpWithContext(
+        tester,
+        ContextUsage(percent: 58, tokens: 1, window: 2),
+        width: 175,
+      );
+      expect(find.text('58%'), findsNothing);
+      store.dispose();
+    });
+  });
 }
