@@ -815,14 +815,12 @@ class _Chip extends StatelessWidget {
 
 /// Tokens em prosa curta: `116 mil`, `1,2 mi`.
 String formatTokens(int n) {
-  String short(double v) {
-    final r = v.roundToDouble() == v ? v.round().toString() : v.toStringAsFixed(1);
-    return r.replaceAll('.', ',');
-  }
-
-  if (n >= 1000000) return '${short(n / 1000000)} mi';
-  if (n >= 1000) return '${short((n / 1000).floorToDouble())} mil';
-  return '$n';
+  if (n < 1000) return '$n';
+  final thousands = (n / 1000).round();
+  // 999.500 em diante arredonda para 1000 mil: vira `1 mi`, nunca `1000 mil`.
+  if (thousands < 1000) return '$thousands mil';
+  final tenths = (n / 100000).round();
+  return tenths % 10 == 0 ? '${tenths ~/ 10} mi' : '${tenths ~/ 10},${tenths % 10} mi';
 }
 
 class _ContextChip extends StatelessWidget {
@@ -850,6 +848,7 @@ class _ContextChip extends StatelessWidget {
           children: [
             for (var i = 0; i < 5; i++)
               Container(
+                key: ValueKey('context-segment-${i < filled ? 'filled' : 'empty'}-$i'),
                 width: 4,
                 height: 7,
                 margin: EdgeInsets.only(right: i < 4 ? 1 : 0),

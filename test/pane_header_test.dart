@@ -407,12 +407,42 @@ void main() {
         tester.widget<Text>(find.text(text)).style!.color!;
 
     test('formatTokens', () {
-      expect(formatTokens(999), '999');
-      expect(formatTokens(1000), '1 mil');
-      expect(formatTokens(116010), '116 mil');
-      expect(formatTokens(200000), '200 mil');
-      expect(formatTokens(1000000), '1 mi');
-      expect(formatTokens(1200000), '1,2 mi');
+      const expected = {
+        999: '999',
+        1000: '1 mil',
+        1499: '1 mil',
+        1500: '2 mil',
+        116010: '116 mil',
+        116900: '117 mil',
+        999499: '999 mil',
+        999500: '1 mi',
+        1000000: '1 mi',
+        1040000: '1 mi',
+        1050000: '1,1 mi',
+        1200000: '1,2 mi',
+        1950000: '2 mi',
+        1999999: '2 mi',
+        200000: '200 mil',
+      };
+      for (final e in expected.entries) {
+        expect(formatTokens(e.key), e.value, reason: '${e.key}');
+      }
+    });
+
+    testWidgets('os segmentos preenchidos seguem o percentual', (tester) async {
+      const expected = {0: 0, 1: 1, 20: 1, 21: 2, 100: 5};
+      for (final e in expected.entries) {
+        final store = await pumpWithContext(
+          tester,
+          ContextUsage(percent: e.key, tokens: 1, window: 2),
+        );
+        expect(
+          find.byWidgetPredicate((w) => w.key.toString().contains('context-segment-filled')),
+          findsNWidgets(e.value),
+          reason: '${e.key}%',
+        );
+        store.dispose();
+      }
     });
 
     testWidgets('mostra o percentual e o tooltip com os tokens', (tester) async {
@@ -462,6 +492,8 @@ void main() {
     });
 
     testWidgets('num cabeçalho estreito a ficha some', (tester) async {
+      // 175 é a largura do painel: dentro do bloco do título sobra menos de 170,
+      // o corte que esconde as fichas.
       final store = await pumpWithContext(
         tester,
         ContextUsage(percent: 58, tokens: 1, window: 2),
