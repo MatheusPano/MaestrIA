@@ -488,6 +488,12 @@ enum MxFilter {
 String? featureOrHotfixIdIn(Map<String, dynamic> pane) =>
     (pane['featureOrHotfixId'] ?? pane['projectId']) as String?;
 
+/// Uma linha da lateral no lugar em que ela está desenhada.
+///
+/// A mesma pasta aparece uma vez em cada workspace dela, e um arrasto precisa
+/// saber de qual das aparições ela saiu: é o [within] -- null na raiz.
+typedef RowPlace = ({SidebarRow row, Workspace? within});
+
 class AppStore extends ChangeNotifier {
   // --- ditado (vocalização) — fora desta versão ------------------------------
   // Sem o ditado o construtor não tem mais o que ligar.
@@ -1756,6 +1762,91 @@ class AppStore extends ChangeNotifier {
         : within.collapsedFolders.add(f.root);
     _save();
     notifyListeners();
+  }
+
+  /// Põe [row] na vaga de [target], na raiz.
+  ///
+  /// A vaga é a mesma de [moveTab]: o que veio de cima empurra o alvo pra cima
+  /// e para embaixo dele; o que veio de baixo para em cima. Nos dois casos é a
+  /// linha em que se soltou.
+  void moveRootRow(SidebarRow row, SidebarRow target) {
+    _pinRootOrder();
+    if (!_slide(rootOrder, rootOrder.indexOf(rowKey(row)), rootOrder.indexOf(rowKey(target)))) {
+      return;
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// Reordena [f] entre as pastas de [w], na vaga de [target].
+  void moveInWorkspace(Workspace w, Folder f, Folder target) {
+    if (!_slide(w.folderRoots, w.folderRoots.indexOf(f.root), w.folderRoots.indexOf(target.root))) {
+      return;
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// Leva [f] pra [to], saindo de [from] quando ele é dado. Se a pasta já
+  /// estava em [to] (espelhada), só sai de [from].
+  void moveFolder(Folder f, {Workspace? from, required Workspace to, Folder? before}) {
+    addToWorkspace(f, to, before: before);
+    if (from != null && from != to) removeFromWorkspace(f, from);
+  }
+
+  /// Tira o item de [from] e o devolve na vaga de [to]. Falso quando não há o
+  /// que mexer. Ver [moveTab], que é a mesma conta na lista de painéis.
+  bool _slide<T>(List<T> list, int from, int to) {
+    if (from < 0 || to < 0 || from == to) return false;
+    list.insert(to, list.removeAt(from));
+    return true;
+  }
+
+  /// Se soltar [from] sobre [onto] faz alguma coisa. [into] é soltar no meio
+  /// do cabeçalho de um workspace -- entrar nele --, e não na borda de uma
+  /// linha, que é reordenar.
+  ///
+  /// A regra é uma só: a linha em que se soltou diz em que faixa a linha
+  /// arrastada vai morar. Solta numa linha da raiz, mora na raiz; solta numa
+  /// pasta de dentro de um workspace, mora naquele workspace. Uma seção só
+  /// mora na raiz.
+  bool canDrop(RowPlace from, RowPlace onto, {bool into = false}) {
+    if (into) {
+      return from.row is Folder && onto.row is Workspace && from.within != onto.row;
+    }
+    if (identical(from.row, onto.row) && from.within == onto.within) return false;
+    if (from.row is Workspace) return onto.within == null;
+    return true;
+  }
+
+  /// Faz o que [canDrop] diz que dá pra fazer. Ver lá a regra.
+  void drop(RowPlace from, RowPlace onto, {bool into = false}) {
+    if (!canDrop(from, onto, into: into)) return;
+    final row = from.row;
+    if (into) {
+      moveFolder(row as Folder, from: from.within, to: onto.row as Workspace);
+      return;
+    }
+    if (row is Workspace) {
+      moveRootRow(row, onto.row);
+      return;
+    }
+    final f = row as Folder;
+    final lane = onto.within;
+    if (lane == null) {
+      if (from.within == null) {
+        moveRootRow(f, onto.row);
+      } else {
+        removeFromWorkspace(f, from.within!, at: onto.row);
+      }
+      return;
+    }
+    final target = onto.row as Folder;
+    if (from.within == lane) {
+      moveInWorkspace(lane, f, target);
+    } else {
+      moveFolder(f, from: from.within, to: lane, before: target);
+    }
   }
 
   /// Se a busca achou alguma coisa nesta seção -- numa sessão de qualquer
