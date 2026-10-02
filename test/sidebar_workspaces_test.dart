@@ -146,4 +146,22 @@ void main() {
     expect(store.standsAlone(named(store, 'api')), isTrue);
     store.dispose();
   });
+
+  // Só pasta entra num workspace: um workspace no meio do cabeçalho de outro
+  // reordena, como o cabeçalho inteiro fazia antes das duas zonas.
+  testWidgets('um workspace solto no meio do cabeçalho de outro só reordena', (tester) async {
+    final store = storeWith(['api', 'web']);
+    final atrium = store.createWorkspace('ATRIUM', folders: [named(store, 'api')]);
+    final uplii = store.createWorkspace('UPLII', folders: [named(store, 'web')]);
+    await pumpSidebar(tester, store);
+    List<String> order() => store.sidebarRows.map((r) => (r as Workspace).name).toList();
+    expect(order(), ['ATRIUM', 'UPLII']);
+
+    await dragTo(tester, 'ATRIUM', header(tester, 'UPLII').center);
+
+    expect(order(), ['UPLII', 'ATRIUM']);
+    expect(store.foldersOf(atrium).map((f) => f.name), ['api']);
+    expect(store.foldersOf(uplii).map((f) => f.name), ['web']);
+    store.dispose();
+  });
 }

@@ -172,8 +172,9 @@ vai para `~/.maestria/config.json.bak-2.4.0`.
 
 ### Contadores
 
-- O contador do cabeçalho de um workspace conta as sessões das pastas dele. Uma
-  sessão de um repo espelhado conta em cada workspace em que ele está.
+- O aviso no cabeçalho de um workspace dobrado conta as sessões esperando por
+  você nas pastas dele. Uma sessão de um repo espelhado conta em cada workspace
+  em que ele está.
 - O sino e o badge da dock contam cada sessão uma vez.
 
 ### Busca e filtro

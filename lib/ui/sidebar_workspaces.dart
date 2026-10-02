@@ -173,11 +173,20 @@ class _RowDragState extends State<_RowDrag> {
 
   void _hover(RowDragData d, Offset feedbackTopLeft) {
     if (_same(d)) return;
-    final into = widget.acceptsInto && _overMiddle(feedbackTopLeft + d.grab);
+    // Só uma pasta entra num workspace. Um workspace sobre o meio de outro
+    // cabeçalho cai na zona de reordenar, senão o meio seria um buraco em que
+    // o cartão some sem efeito. A pasta sobre o meio do próprio workspace
+    // continua sem fazer nada, de propósito: soltá-la ali não a tira de lá.
+    final into =
+        widget.acceptsInto && d.from.row is Folder && _overMiddle(feedbackTopLeft + d.grab);
     final ok = widget.store.canDrop(d.from, widget.place, into: into);
+    final incoming = ok ? d : null;
+    final intoNow = ok && into;
+    // O onMove chega a cada pixel do arrasto; redesenhar só quando muda.
+    if (identical(incoming, _incoming) && intoNow == _into) return;
     setState(() {
-      _incoming = ok ? d : null;
-      _into = ok && into;
+      _incoming = incoming;
+      _into = intoNow;
     });
   }
 
