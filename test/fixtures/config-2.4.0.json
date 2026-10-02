@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {"root": "/repos/atrium-backend", "name": "atrium-backend", "collapsed": false, "workspace": "/repos/atrium.code-workspace"},
+    {"root": "/repos/atrium-frontend", "name": "atrium-frontend", "collapsed": true, "workspace": "/repos/atrium.code-workspace"},
+    {"root": "/repos/solta", "name": "solta", "collapsed": false},
+    {"root": "/repos/uplii-ai", "name": "uplii-ai", "collapsed": false, "workspace": "/repos/uplii.code-workspace"}
+  ],
+  "workspaces": [
+    {"path": "/repos/atrium.code-workspace", "name": "atrium", "collapsed": true}
+  ],
+  "projects": [
+    {"id": "pj1", "folderRoot": "/repos/atrium-backend", "name": "permissão do google", "brief": "", "collapsed": false}
+  ]
+}

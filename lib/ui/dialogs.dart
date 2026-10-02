@@ -1055,7 +1055,9 @@ Future<void> confirmCloseWorkspace(
   AppStore store,
   Workspace workspace,
 ) async {
-  final folders = store.foldersOf(workspace);
+  // Só as que saem: a pasta espelhada em outro workspace fica lá, com as
+  // sessões dela.
+  final folders = store.closingWith(workspace);
   final sessions = folders.fold<int>(0, (a, f) => a + store.tabsOf(f).length);
 
   final go = await showDialog<bool>(
@@ -1069,11 +1071,13 @@ Future<void> confirmCloseWorkspace(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              workspace.path,
-              style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgFaint),
-            ),
-            const SizedBox(height: 14),
+            if (workspace.codeWorkspacePath case final path?) ...[
+              Text(
+                path,
+                style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgFaint),
+              ),
+              const SizedBox(height: 14),
+            ],
             _Fact(
               icon: Icons.folder_off_outlined,
               color: Mx.fgDim,

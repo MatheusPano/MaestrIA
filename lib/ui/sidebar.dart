@@ -75,7 +75,7 @@ class Sidebar extends StatelessWidget {
                 for (final row in store.sidebarRows) ...[
                   if (row case final Workspace w)
                     if (!store.filtering || store.hasHitsInWorkspace(w))
-                      _WorkspaceSection(key: ValueKey(w.path), store: store, workspace: w),
+                      _WorkspaceSection(key: ValueKey(w.id), store: store, workspace: w),
                   if (row case final Folder p)
                     if (!store.filtering || store.hasHits(p))
                       _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
@@ -926,8 +926,7 @@ class _RowDragState extends State<_RowDrag> {
   /// primeira pasta dela, que é onde a lateral a desenha -- ver
   /// [AppStore.sidebarRows].
   int _orderOf(SidebarRow row) {
-    final block = widget.store.foldersOfRow(row);
-    return block.isEmpty ? -1 : widget.store.folders.indexOf(block.first);
+    return widget.store.sidebarRows.indexOf(row);
   }
 
   @override
@@ -941,9 +940,8 @@ class _RowDragState extends State<_RowDrag> {
           // pixel, então isso é um clique cujo ponteiro escorregou -- e ele
           // vale pelo clique que era pra ser.
           if (identical(d.data, widget.row)) return true;
-          if (!widget.store.canMoveRow(d.data, widget.row)) return false;
-          setState(() => _incoming = d.data);
-          return true;
+          // Task 4 devolve o arrasto.
+          return false;
         },
         onLeave: (_) {
           if (_incoming != null) setState(() => _incoming = null);
@@ -953,7 +951,7 @@ class _RowDragState extends State<_RowDrag> {
           if (identical(d.data, widget.row)) {
             _toggle();
           } else {
-            widget.store.moveRow(d.data, widget.row);
+            // Task 4 devolve o arrasto.
           }
         },
         builder: (context, _, _) => Stack(

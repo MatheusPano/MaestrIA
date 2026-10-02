@@ -524,13 +524,22 @@ class AppStore extends ChangeNotifier {
 
   final List<Folder> folders = [];
 
-  /// Os workspaces do VS Code que viraram seção na lateral. Ver [Workspace] --
-  /// as pastas apontam pra cá por [Folder.workspace], e é a lateral que aninha
-  /// (o mesmo arranjo de [featuresOrHotfixes] dentro de [folders]).
+  /// Os workspaces da lateral. Ver [Workspace] -- cada um é dono da lista
+  /// das pastas dele, e é a lateral que aninha (o mesmo arranjo de
+  /// [featuresOrHotfixes] dentro de [folders]).
   ///
-  /// Um workspace sem nenhuma pasta apontando pra ele não existe: seria um
-  /// cabeçalho sobre coisa nenhuma. Quem garante isso é [reconcileWorkspaces].
+  /// Um workspace pode ficar vazio: o criado na mão não some porque o último
+  /// repo saiu dele. Quem o tira da lateral é [dissolveWorkspace] ou
+  /// [closeWorkspace].
   final List<Workspace> workspaces = [];
+
+  /// A ordem da raiz da lateral: `workspace:<id>` e `folder:<root>`.
+  ///
+  /// Até a 2.4.0 a ordem saía da lista de pastas, com a seção no lugar da
+  /// primeira pasta dela. Com a mesma pasta em dois workspaces, essa conta
+  /// deixa de ter resposta. Vazio é o config de antes disto, e aí
+  /// [sidebarRows] faz a conta antiga. Ver [rowKey].
+  final List<String> rootOrder = [];
 
   /// The named jobs inside those folders. Flat, keyed back to a folder by
   /// [FeatureOrHotfix.folderRoot] -- the sidebar is what nests them.
@@ -791,8 +800,11 @@ class AppStore extends ChangeNotifier {
     // the old key keeps a config written by yesterday's build from opening
     // as an empty sidebar.
     final legacy = j['folders'] == null;
-    for (final p in ((legacy ? j['projects'] : j['folders']) as List? ?? const [])) {
-      folders.add(Folder.fromJson(p as Map<String, dynamic>));
+    final rawFolders = ((legacy ? j['projects'] : j['folders']) as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    for (final p in rawFolders) {
+      folders.add(Folder.fromJson(p));
     }
     if (!legacy) {
       // Até a 2.4.0 a chave era `projects`, e é o que está no disco de quem
@@ -804,7 +816,28 @@ class AppStore extends ChangeNotifier {
     for (final w in (j['workspaces'] as List? ?? const [])) {
       if (Workspace.fromJson(w) case final workspace?) workspaces.add(workspace);
     }
-    reconcileWorkspaces();
+    // O carimbo da 2.4.0: a pasta dizia de que `.code-workspace` veio, e a
+    // seção era o arquivo. Agora é o workspace que lista as pastas dele.
+    for (final p in rawFolders) {
+      final path = p['workspace'];
+      if (path is! String || path.isEmpty) continue;
+      var w = workspaces.firstWhereOrNull((w) => w.codeWorkspacePath == path);
+      if (w == null) {
+        w = Workspace(id: newWorkspaceId(), name: CodeWorkspace.nameOf(path), codeWorkspacePath: path);
+        workspaces.add(w);
+      }
+      final root = p['root'] as String;
+      if (!w.folderRoots.contains(root)) w.folderRoots.add(root);
+      // O `collapsed` era um por pasta. Dentro de um workspace ele passa a ser
+      // da aparição ali -- e é ali que a pasta carimbada aparecia.
+      if (p['collapsed'] == true) w.collapsedFolders.add(root);
+    }
+    rootOrder
+      ..clear()
+      ..addAll([
+        for (final k in j['rootOrder'] as List? ?? const [])
+          if (k is String) k,
+      ]);
   }
 
   Future<void> _loadConfig() async {
@@ -1027,6 +1060,7 @@ class AppStore extends ChangeNotifier {
           // Ao lado das pastas porque é delas que ele fala: a seção é um jeito
           // de desenhar um punhado delas junto. Ver [Workspace].
           if (workspaces.isNotEmpty) 'workspaces': workspaces.map((w) => w.toJson()).toList(),
+          'rootOrder': [for (final r in sidebarRows) rowKey(r)],
           'featuresOrHotfixes': featuresOrHotfixes.map((p) => p.toJson()).toList(),
           // Ao lado do layout e escritos com o mesmo json que ele: um grupo é
           // um layout guardado com nome. Ver [PaneGroup].
@@ -1424,7 +1458,8 @@ class AppStore extends ChangeNotifier {
   /// Um `.code-workspace` do VS Code, aberto como o que ele é aqui: as pastas
   /// dele, todas de uma vez.
   ///
-  /// Nada de novo fica no config além das pastas -- ver [CodeWorkspace]. O
+  /// No config ficam as pastas e o [Workspace] que as lista, com o arquivo
+  /// guardado como de onde ele veio -- ver [CodeWorkspace]. O
   /// arquivo é um jeito de adicionar pasta, e o que ele evita é justamente o
   /// que ele parece pouco: adicionar uma a uma, no dedo, uma lista que já
   /// existe escrita em algum lugar.
@@ -1453,10 +1488,6 @@ class AppStore extends ChangeNotifier {
         missing.add(entry.path);
         continue;
       }
-      // Só quando não tem dono: uma pasta que já veio de outro workspace
-      // continua daquele. O arquivo mais recente não é mais verdadeiro que o
-      // primeiro, e trocar por baixo mudaria o que o "abrir no vscode" dela faz.
-      folder.workspace ??= ws.path;
       if (!outcome.created) {
         already.add(folder);
         continue;
@@ -1467,12 +1498,20 @@ class AppStore extends ChangeNotifier {
       if (entry.name != null && folder.root == entry.path) folder.name = entry.name!;
       added.add(folder);
     }
-    // A seção só existe se alguma pasta de fato aponta pra ela: um arquivo
-    // cujas pastas todas sumiram do disco -- ou que só listava pastas que já
-    // eram de outro workspace -- não vira um cabeçalho vazio na lateral.
-    final mine = folders.any((f) => f.workspace == ws.path);
-    if (mine && !workspaces.any((w) => w.path == ws.path)) {
-      workspaces.add(Workspace(path: ws.path, name: ws.name));
+    // As pastas que o arquivo lista e que existem, novas ou não. Com o
+    // espelho, uma que já está em outro workspace passa a estar nos dois.
+    final adopted = [...added, ...already];
+    if (adopted.isNotEmpty) {
+      var w = workspaces.firstWhereOrNull((w) => w.codeWorkspacePath == ws.path);
+      if (w == null) {
+        _pinRootOrder();
+        w = Workspace(id: newWorkspaceId(), name: ws.name, codeWorkspacePath: ws.path);
+        workspaces.add(w);
+        rootOrder.add(rowKey(w));
+      }
+      for (final f in adopted) {
+        if (!w.folderRoots.contains(f.root)) w.folderRoots.add(f.root);
+      }
     }
     _save();
     if (added.isNotEmpty) await refreshGit();
@@ -1503,7 +1542,10 @@ class AppStore extends ChangeNotifier {
 
   Future<void> removeFolder(Folder p) async {
     folders.remove(p);
-    reconcileWorkspaces();
+    for (final w in workspaces) {
+      w.folderRoots.remove(p.root);
+      w.collapsedFolders.remove(p.root);
+    }
     featuresOrHotfixes.removeWhere((pr) => pr.folderRoot == p.root);
     for (final t in tabs.where((t) => t.folderRoot == p.root).toList()) {
       closeTab(t);
@@ -1514,115 +1556,181 @@ class AppStore extends ChangeNotifier {
 
   // --- workspaces ---------------------------------------------------------
 
-  /// As pastas de um workspace, na ordem em que a lateral as desenharia.
-  List<Folder> foldersOf(Workspace w) => folders.where((f) => f.workspace == w.path).toList();
+  /// As pastas de um workspace, na ordem em que ele as desenha. Um root que
+  /// não é mais pasta da lateral não aparece.
+  List<Folder> foldersOf(Workspace w) => [
+    for (final root in w.folderRoots)
+      if (folders.firstWhereOrNull((f) => f.root == root) case final f?) f,
+  ];
 
-  /// O workspace de uma pasta, se ela tem um.
-  Workspace? workspaceOf(Folder f) =>
-      f.workspace == null ? null : workspaces.firstWhereOrNull((w) => w.path == f.workspace);
+  /// Os workspaces em que a pasta está, na ordem da lista de workspaces.
+  List<Workspace> workspacesOf(Folder f) =>
+      workspaces.where((w) => w.folderRoots.contains(f.root)).toList();
 
-  /// O que a lateral desenha, de cima pra baixo: um [Workspace] ou uma
-  /// [Folder] solta, na ordem de [folders].
+  /// A pasta que não está em workspace nenhum: é ela que a raiz desenha.
+  bool standsAlone(Folder f) => !workspaces.any((w) => w.folderRoots.contains(f.root));
+
+  Workspace? workspaceById(String? id) =>
+      id == null ? null : workspaces.firstWhereOrNull((w) => w.id == id);
+
+  /// A chave de uma linha da raiz no [rootOrder].
+  String rowKey(SidebarRow row) =>
+      row is Workspace ? 'workspace:${row.id}' : 'folder:${(row as Folder).root}';
+
+  SidebarRow? _rowOf(String key) {
+    if (key.startsWith('workspace:')) return workspaceById(key.substring('workspace:'.length));
+    if (key.startsWith('folder:')) {
+      final f = folders.firstWhereOrNull((f) => f.root == key.substring('folder:'.length));
+      return f != null && standsAlone(f) ? f : null;
+    }
+    return null;
+  }
+
+  /// O que a raiz da lateral desenha, de cima pra baixo: workspaces e pastas
+  /// soltas.
   ///
-  /// Um workspace entra no lugar da *primeira* pasta dele e leva as outras
-  /// junto -- é o que faz as sete pastas de um cliente aparecerem em bloco sem
-  /// reordenar nada por baixo. A lista de pastas continua sendo a ordem
-  /// verdadeira; isto é só como ela é lida.
+  /// Primeiro o que o [rootOrder] conhece, na ordem dele. Depois o que ele
+  /// ainda não conhece -- tudo, num config de antes dele; ou a pasta que
+  /// acabou de entrar -- na conta antiga: a seção no lugar da primeira pasta
+  /// dela. Uma chave que não aponta mais pra nada é pulada.
   List<SidebarRow> get sidebarRows {
     final rows = <SidebarRow>[];
     final seen = <String>{};
+    void add(SidebarRow r) {
+      if (seen.add(rowKey(r))) rows.add(r);
+    }
+
+    for (final key in rootOrder) {
+      if (_rowOf(key) case final row?) add(row);
+    }
     for (final f in folders) {
-      final w = workspaceOf(f);
-      if (w == null) {
-        rows.add(f);
-      } else if (seen.add(w.path)) {
-        rows.add(w);
+      final ws = workspacesOf(f);
+      if (ws.isEmpty) {
+        add(f);
+      } else {
+        ws.forEach(add);
       }
     }
+    workspaces.forEach(add);
     return rows;
   }
 
-  /// As pastas de uma linha da lateral: uma seção leva as dela, uma pasta
-  /// solta leva só a si. Juntando as de [sidebarRows] na ordem sai [folders]
-  /// de volta, que é o que faz [moveRow] poder reescrever a lista inteira.
-  List<Folder> foldersOfRow(SidebarRow row) => row is Workspace ? foldersOf(row) : [row as Folder];
-
-  /// A faixa em que uma linha se move: a raiz da lateral, ou o miolo de uma
-  /// seção.
-  ///
-  /// Uma pasta carimbada só se reordena entre as pastas do mesmo workspace --
-  /// arrastá-la pra fora seria tirá-la do workspace, que é outra operação
-  /// (o menu dela tem), e não o que quem estava arrumando a lista pediu. É a
-  /// mesma regra que segura um painel dentro da pasta dele em [moveTab].
-  String? _laneOf(SidebarRow row) => row is Folder ? row.workspace : null;
-
-  /// Se [row] pode ir pro lugar de [target]. Ver [_laneOf].
-  bool canMoveRow(SidebarRow row, SidebarRow target) =>
-      !identical(row, target) && _laneOf(row) == _laneOf(target);
-
-  /// Põe [row] na vaga de [target] na lateral, arrastando.
-  ///
-  /// A ordem das pastas é a ordem de [folders], e era a ordem em que foram
-  /// adicionadas: a pasta aberta agora caía em último e ficava lá. Isto é o
-  /// que deixa arrumá-la.
-  ///
-  /// Uma seção viaja inteira -- é uma linha só na tela, e as sete pastas de um
-  /// cliente que se separassem no caminho não seriam mais um bloco. Por isso a
-  /// conta é feita em blocos de pasta, e não em índices de [folders]: mover
-  /// uma linha é mover o bloco dela pra vaga do bloco de baixo ou de cima.
-  ///
-  /// A vaga é a mesma de [moveTab], pelo mesmo motivo: o que veio de cima
-  /// empurra o alvo pra cima e para embaixo dele; o que veio de baixo para em
-  /// cima. Nos dois casos é a linha em que se soltou.
-  void moveRow(SidebarRow row, SidebarRow target) {
-    if (!canMoveRow(row, target)) return;
-    final rows = sidebarRows;
-    final blocks = [for (final r in rows) foldersOfRow(r)];
-    // Dentro de uma seção a conta é entre as pastas dela; na raiz, entre os
-    // blocos. As duas listas são a mesma mexida -- ver [_slide].
-    if (row is Folder && row.workspace != null) {
-      final block = blocks.firstWhereOrNull((b) => b.contains(row));
-      if (block == null) return;
-      if (!_slide(block, block.indexOf(row), block.indexOf(target as Folder))) return;
-    } else {
-      if (!_slide(blocks, rows.indexOf(row), rows.indexOf(target))) return;
-    }
-    // Reescrita inteira, e não uma remoção e uma inserção: assim a lista volta
-    // com as pastas de cada seção juntas, que é como a lateral já as lê.
-    folders
+  /// Grava no [rootOrder] a ordem que a lateral está desenhando agora. Toda
+  /// mexida na raiz começa por aqui: é ela que transforma a conta derivada
+  /// num config que já diz a ordem.
+  void _pinRootOrder() {
+    final keys = [for (final r in sidebarRows) rowKey(r)];
+    rootOrder
       ..clear()
-      ..addAll(blocks.expand((b) => b));
+      ..addAll(keys);
+  }
+
+  Workspace createWorkspace(
+    String name, {
+    List<Folder> folders = const [],
+    String? codeWorkspacePath,
+  }) {
+    _pinRootOrder();
+    final w = Workspace(
+      id: newWorkspaceId(),
+      name: name.trim(),
+      codeWorkspacePath: codeWorkspacePath,
+    );
+    workspaces.add(w);
+    rootOrder.add(rowKey(w));
+    for (final f in folders) {
+      if (!w.folderRoots.contains(f.root)) w.folderRoots.add(f.root);
+    }
+    _save();
+    notifyListeners();
+    return w;
+  }
+
+  /// Põe [f] em [w], na vaga de [before] quando ela é dada, ou no fim.
+  void addToWorkspace(Folder f, Workspace w, {Folder? before}) {
+    if (w.folderRoots.contains(f.root)) return;
+    _pinRootOrder();
+    final at = before == null ? -1 : w.folderRoots.indexOf(before.root);
+    at < 0 ? w.folderRoots.add(f.root) : w.folderRoots.insert(at, f.root);
     _save();
     notifyListeners();
   }
 
-  /// Tira o item de [from] e o devolve na vaga de [to]. Falso quando não há o
-  /// que mexer. Ver [moveTab], que é a mesma conta na lista de painéis.
-  bool _slide<T>(List<T> list, int from, int to) {
-    if (from < 0 || to < 0 || from == to) return false;
-    list.insert(to, list.removeAt(from));
-    return true;
+  /// Tira [f] de [w]. Se ela não estiver em mais nenhum, volta pra raiz: na
+  /// vaga de [at], quando dada, ou logo depois do workspace de onde saiu.
+  void removeFromWorkspace(Folder f, Workspace w, {SidebarRow? at}) {
+    if (!w.folderRoots.contains(f.root)) return;
+    _pinRootOrder();
+    w.folderRoots.remove(f.root);
+    w.collapsedFolders.remove(f.root);
+    if (standsAlone(f)) {
+      final target = at == null ? -1 : rootOrder.indexOf(rowKey(at));
+      final after = rootOrder.indexOf(rowKey(w)) + 1;
+      rootOrder.insert(target >= 0 ? target : after, rowKey(f));
+    }
+    _save();
+    notifyListeners();
   }
 
-  /// Fecha um workspace: as pastas dele saem da lateral, e a seção sai com
-  /// elas.
-  ///
-  /// É a volta exata do import, e o import só adicionou pastas -- nada aqui
-  /// toca o disco. O `.code-workspace` continua onde estava, os repos também,
-  /// e reabrir é o mesmo "adicionar pasta" de antes.
-  ///
-  /// Fechar é o verbo do VS Code, e é o certo: uma pasta *removida* uma a uma
-  /// pelo menu dela é a mesma operação, mas ninguém remove sete pastas
-  /// querendo remover sete pastas -- quer parar de trabalhar naquele cliente.
-  /// Os painéis das pastas fecham junto, como fecham em [removeFolder]; quem
-  /// confirma sabe quantos são, porque o diálogo conta antes.
+  void renameWorkspace(Workspace w, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == w.name) return;
+    w.name = trimmed;
+    _save();
+    notifyListeners();
+  }
+
+  /// A cor do workspace, ou null pra tirar. Ver [Workspace.tint].
+  void setWorkspaceTint(Workspace w, MxTint? tint) {
+    w.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
+  /// Associa um `.code-workspace`, ou desassocia com null. Não lê o arquivo:
+  /// ele diz o que o "abrir no vscode" abre, e não quais pastas entram.
+  void linkCodeWorkspace(Workspace w, String? path) {
+    final clean = path?.trim();
+    w.codeWorkspacePath = (clean == null || clean.isEmpty) ? null : expandHome(clean);
+    _save();
+    notifyListeners();
+  }
+
+  /// Desfaz o workspace: as pastas que só estavam nele voltam pra raiz, no
+  /// lugar da seção, e nenhuma sessão fecha.
+  void dissolveWorkspace(Workspace w) {
+    _pinRootOrder();
+    final at = rootOrder.indexOf(rowKey(w));
+    rootOrder.remove(rowKey(w));
+    workspaces.remove(w);
+    final freed = [
+      for (final f in foldersOf(w))
+        if (standsAlone(f)) rowKey(f),
+    ];
+    rootOrder.insertAll(at < 0 ? rootOrder.length : at, freed);
+    _save();
+    notifyListeners();
+  }
+
+  /// As pastas que saem da lateral ao fechar [w]: as que só estão nele. A
+  /// espelhada em outro workspace continua lá, com as sessões dela.
+  List<Folder> closingWith(Workspace w) =>
+      foldersOf(w).where((f) => workspacesOf(f).length == 1).toList();
+
+  /// Fecha um workspace: as pastas só dele saem da lateral com as sessões, e a
+  /// seção sai junto. Nada toca o disco -- nem os repos, nem o
+  /// `.code-workspace`.
   Future<void> closeWorkspace(Workspace w) async {
     final name = w.name;
-    final going = foldersOf(w);
+    final going = closingWith(w);
     for (final f in going) {
       await removeFolder(f);
     }
-    // A seção já saiu junto com a última pasta -- ver [reconcileWorkspaces].
+    _pinRootOrder();
+    rootOrder.remove(rowKey(w));
+    workspaces.remove(w);
+    _save();
+    notifyListeners();
     showBanner(
       going.length == 1
           ? 'workspace "$name" fechado — 1 pasta saiu da lateral'
@@ -1636,27 +1744,18 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Acerta as duas metades da ligação entre pasta e seção: toda pasta
-  /// carimbada tem uma seção, e toda seção tem pelo menos uma pasta.
-  ///
-  /// A primeira metade é migração. Uma pasta carimbada por uma build anterior
-  /// à seção -- ou por um config que perdeu a lista -- não tem onde se
-  /// pendurar, e a seção nasce dela com o nome do arquivo; sem isso, quem
-  /// importou um workspace ontem teria que importar de novo pra ver o bloco.
-  ///
-  /// A segunda é limpeza: uma seção vazia não é uma seção, é um cabeçalho
-  /// sobre coisa nenhuma, que nem dobrar dobraria.
-  ///
-  /// Idempotente de propósito -- roda ao ler o config e a cada pasta removida,
-  /// que são os dois momentos em que a ligação pode ter ficado torta.
-  @visibleForTesting
-  void reconcileWorkspaces() {
-    for (final f in folders) {
-      final path = f.workspace;
-      if (path == null || workspaces.any((w) => w.path == path)) continue;
-      workspaces.add(Workspace(path: path, name: CodeWorkspace.nameOf(path)));
-    }
-    workspaces.removeWhere((w) => !folders.any((f) => f.workspace == w.path));
+  /// Se a pasta está dobrada onde está sendo desenhada: dentro de [within], ou
+  /// solta na raiz.
+  bool isFolderCollapsed(Folder f, {Workspace? within}) =>
+      within == null ? f.collapsed : within.collapsedFolders.contains(f.root);
+
+  void toggleFolderCollapsed(Folder f, {Workspace? within}) {
+    if (within == null) return toggleCollapsed(f);
+    within.collapsedFolders.contains(f.root)
+        ? within.collapsedFolders.remove(f.root)
+        : within.collapsedFolders.add(f.root);
+    _save();
+    notifyListeners();
   }
 
   /// Se a busca achou alguma coisa nesta seção -- numa sessão de qualquer
@@ -2679,7 +2778,8 @@ class AppStore extends ChangeNotifier {
   /// Só o caminho: havia um `openFolderInEditor` que, dada uma pasta importada
   /// de um workspace, abria o arranjo inteiro em vez do terço dela. Ele tinha
   /// uma porta só -- a linha 'abrir no vscode' do menu da pasta --, e a linha
-  /// saiu do menu. Ver [Folder.workspace], que é o que sobrou do assunto.
+  /// saiu do menu. Ver [Workspace.codeWorkspacePath], que é o que sobrou do
+  /// assunto.
   Future<void> openInEditor(String path) async {
     if (!Directory(path).existsSync() && !File(path).existsSync()) {
       showBanner(
@@ -3335,7 +3435,18 @@ class AppStore extends ChangeNotifier {
   /// Separada do [tintOf] porque a diferença entre escolhida e deduzida vale
   /// desenho: o que foi pedido é dito alto (ver `_TabRow`), o que a janela
   /// deduziu é dito baixo.
-  MxTint? chosenTintOf(MxTab tab) => featureOrHotfixOf(tab)?.tint ?? tab.tint ?? tab.folder.tint;
+  MxTint? chosenTintOf(MxTab tab) =>
+      featureOrHotfixOf(tab)?.tint ??
+      tab.tint ??
+      tab.folder.tint ??
+      // O fundo do fundo: a cor do primeiro workspace da pasta, na ordem da
+      // lateral. Um painel existe uma vez só, então de dois workspaces
+      // espelhando a pasta ele precisa escolher um -- e o de cima é o que se
+      // vê primeiro.
+      sidebarRows
+          .whereType<Workspace>()
+          .firstWhereOrNull((w) => w.folderRoots.contains(tab.folderRoot))
+          ?.tint;
 
   /// A cor com que este painel se lava, quando tem uma -- o cartão dele, o
   /// cabeçalho e a linha dele na lateral.

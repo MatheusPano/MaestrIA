@@ -65,16 +65,17 @@ AppStore storeWithFolders(List<String> names) {
 
 List<String> folderOrder(AppStore store) => store.folders.map((f) => f.name).toList();
 
-/// Carimba as pastas [names] como vindas do mesmo `.code-workspace`, que é o
-/// que faz a lateral desenhá-las numa seção só. Ver `AppStore.importWorkspace`.
-Workspace section(AppStore store, List<String> names, {String name = 'cefis'}) {
-  final ws = Workspace(path: '/repos/$name.code-workspace', name: name);
-  store.workspaces.add(ws);
-  for (final f in store.folders.where((f) => names.contains(f.name))) {
-    f.workspace = ws.path;
-  }
-  return ws;
-}
+// Task 4.
+// /// Carimba as pastas [names] como vindas do mesmo `.code-workspace`, que é o
+// /// que faz a lateral desenhá-las numa seção só. Ver `AppStore.importWorkspace`.
+// Workspace section(AppStore store, List<String> names, {String name = 'cefis'}) {
+//   final ws = Workspace(path: '/repos/$name.code-workspace', name: name);
+//   store.workspaces.add(ws);
+//   for (final f in store.folders.where((f) => names.contains(f.name))) {
+//     f.workspace = ws.path;
+//   }
+//   return ws;
+// }
 
 void main() {
   group('reordering panels', () {
@@ -166,67 +167,69 @@ void main() {
     });
   });
 
-  // A ordem das pastas é a ordem em que foram adicionadas até alguém arrumá-la:
-  // a que você abriu agora entra em último, e é de lá que ela sobe.
-  group('reordenar pastas', () {
-    test('uma pasta solta na vaga da linha em que foi solta', () {
-      final store = storeWithFolders(['um', 'dois', 'tres', 'quatro']);
-      store.moveRow(store.folders[3], store.folders[1]);
-      expect(folderOrder(store), ['um', 'quatro', 'dois', 'tres']);
-    });
-
-    test('e descendo, a mesma vaga', () {
-      final store = storeWithFolders(['um', 'dois', 'tres', 'quatro']);
-      store.moveRow(store.folders[0], store.folders[2]);
-      expect(folderOrder(store), ['dois', 'tres', 'um', 'quatro']);
-    });
-
-    test('soltar uma pasta nela mesma não muda nada', () {
-      final store = storeWithFolders(['um', 'dois']);
-      store.moveRow(store.folders[1], store.folders[1]);
-      expect(folderOrder(store), ['um', 'dois']);
-    });
-
-    // A seção é uma linha só na tela; as pastas dela não se separam no caminho.
-    test('uma seção viaja inteira', () {
-      final store = storeWithFolders(['um', 'api', 'web', 'dois']);
-      final ws = section(store, ['api', 'web']);
-      store.moveRow(ws, store.folders.first);
-      expect(folderOrder(store), ['api', 'web', 'um', 'dois']);
-    });
-
-    test('e uma pasta solta passa por cima da seção inteira', () {
-      final store = storeWithFolders(['um', 'api', 'web', 'dois']);
-      final ws = section(store, ['api', 'web']);
-      store.moveRow(store.folders.last, ws);
-      expect(folderOrder(store), ['um', 'dois', 'api', 'web']);
-    });
-
-    test('dentro da seção, a pasta se arruma entre as irmãs', () {
-      final store = storeWithFolders(['api', 'web', 'app']);
-      section(store, ['api', 'web', 'app']);
-      store.moveRow(store.folders[2], store.folders[0]);
-      expect(folderOrder(store), ['app', 'api', 'web']);
-    });
-
-    // Tirar a pasta do workspace é outra operação, e tem menu. Arrastar arruma.
-    test('uma pasta de workspace não sai dele arrastando', () {
-      final store = storeWithFolders(['api', 'web', 'solta']);
-      section(store, ['api', 'web']);
-      expect(store.canMoveRow(store.folders[0], store.folders[2]), isFalse);
-      store.moveRow(store.folders[0], store.folders[2]);
-      expect(folderOrder(store), ['api', 'web', 'solta']);
-    });
-  });
+  // Task 4.
+//   // A ordem das pastas é a ordem em que foram adicionadas até alguém arrumá-la:
+//   // a que você abriu agora entra em último, e é de lá que ela sobe.
+//   group('reordenar pastas', () {
+//     test('uma pasta solta na vaga da linha em que foi solta', () {
+//       final store = storeWithFolders(['um', 'dois', 'tres', 'quatro']);
+//       store.moveRow(store.folders[3], store.folders[1]);
+//       expect(folderOrder(store), ['um', 'quatro', 'dois', 'tres']);
+//     });
+//
+//     test('e descendo, a mesma vaga', () {
+//       final store = storeWithFolders(['um', 'dois', 'tres', 'quatro']);
+//       store.moveRow(store.folders[0], store.folders[2]);
+//       expect(folderOrder(store), ['dois', 'tres', 'um', 'quatro']);
+//     });
+//
+//     test('soltar uma pasta nela mesma não muda nada', () {
+//       final store = storeWithFolders(['um', 'dois']);
+//       store.moveRow(store.folders[1], store.folders[1]);
+//       expect(folderOrder(store), ['um', 'dois']);
+//     });
+//
+//     // A seção é uma linha só na tela; as pastas dela não se separam no caminho.
+//     test('uma seção viaja inteira', () {
+//       final store = storeWithFolders(['um', 'api', 'web', 'dois']);
+//       final ws = section(store, ['api', 'web']);
+//       store.moveRow(ws, store.folders.first);
+//       expect(folderOrder(store), ['api', 'web', 'um', 'dois']);
+//     });
+//
+//     test('e uma pasta solta passa por cima da seção inteira', () {
+//       final store = storeWithFolders(['um', 'api', 'web', 'dois']);
+//       final ws = section(store, ['api', 'web']);
+//       store.moveRow(store.folders.last, ws);
+//       expect(folderOrder(store), ['um', 'dois', 'api', 'web']);
+//     });
+//
+//     test('dentro da seção, a pasta se arruma entre as irmãs', () {
+//       final store = storeWithFolders(['api', 'web', 'app']);
+//       section(store, ['api', 'web', 'app']);
+//       store.moveRow(store.folders[2], store.folders[0]);
+//       expect(folderOrder(store), ['app', 'api', 'web']);
+//     });
+//
+//     // Tirar a pasta do workspace é outra operação, e tem menu. Arrastar arruma.
+//     test('uma pasta de workspace não sai dele arrastando', () {
+//       final store = storeWithFolders(['api', 'web', 'solta']);
+//       section(store, ['api', 'web']);
+//       expect(store.canMoveRow(store.folders[0], store.folders[2]), isFalse);
+//       store.moveRow(store.folders[0], store.folders[2]);
+//       expect(folderOrder(store), ['api', 'web', 'solta']);
+//     });
+//   });
 
   group('arrastar uma pasta', () {
-    testWidgets('pelo cabeçalho, pra vaga da linha em que se soltou', (tester) async {
-      final store = storeWithFolders(['alfa', 'beta', 'gama']);
-      await pumpSidebar(tester, store);
-      await dragRow(tester, 'gama', 'alfa');
-      expect(folderOrder(store), ['gama', 'alfa', 'beta']);
-      store.dispose();
-    });
+    // Task 4.
+//     testWidgets('pelo cabeçalho, pra vaga da linha em que se soltou', (tester) async {
+//       final store = storeWithFolders(['alfa', 'beta', 'gama']);
+//       await pumpSidebar(tester, store);
+//       await dragRow(tester, 'gama', 'alfa');
+//       expect(folderOrder(store), ['gama', 'alfa', 'beta']);
+//       store.dispose();
+//     });
 
     // O clique que o arrasto engoliu: no cabeçalho, clicar dobra a pasta.
     testWidgets('um clique que escorregou um pixel ainda dobra a pasta', (tester) async {
