@@ -84,6 +84,10 @@ class MxTab {
   final TermSession term = TermSession();
   final HookState hooks = HookState();
 
+  /// Quanto do contexto a sessão deste painel ocupa, ou null enquanto não há
+  /// número. Só memória: nunca vai pro config.
+  ContextUsage? context;
+
   /// O que este painel mostra, quando ele é um [TabKind.reader]. Null em todos
   /// os outros -- e não-null em todos os readers, que é o que [isReader]
   /// garante pra quem vai desreferenciar.
@@ -740,6 +744,7 @@ class AppStore extends ChangeNotifier {
   Future<void> init() async {
     await hooks.start();
     hooks.events.listen(applyHook);
+    hooks.statuses.listen(applyStatus);
     agents.updates.listen(applyAgents);
     plugins.onCall = PluginApi(this).handle;
     // Ligar, desligar ou ver um plugin cair muda o que os menus oferecem e o
@@ -2280,7 +2285,7 @@ class AppStore extends ChangeNotifier {
     final parts = [
       'claude',
       '--name ${Sh.q(name)}',
-      '--settings ${Sh.q(hooks.settingsFor(tab.id))}',
+      '--settings ${Sh.q(hooks.settingsFor(tab.id, cwd: tab.cwd))}',
       if (brief.isNotEmpty) '--append-system-prompt ${Sh.q(brief)}',
       if (resumeId != null) '--resume ${Sh.q(resumeId)}',
       // Positional, so it comes last: `claude [flags] '<prompt>'` opens the
@@ -4140,6 +4145,23 @@ class AppStore extends ChangeNotifier {
   }
 
   // --- incoming events ----------------------------------------------------
+
+  /// Um retrato da linha de status, aplicado. Só avisa quem escuta se o número
+  /// mudou: a linha de status repete o mesmo valor a cada atualização.
+  @visibleForTesting
+  void applyStatus(StatusEvent e) {
+    final tab = _byId(e.tabId);
+    if (tab == null) return;
+    final before = tab.context;
+    final now = ContextUsage.fromStatusLine(e.payload);
+    if (before?.percent == now?.percent &&
+        before?.tokens == now?.tokens &&
+        before?.window == now?.window) {
+      return;
+    }
+    tab.context = now;
+    notifyListeners();
+  }
 
   /// One hook event, applied. Visible because the edge it watches for is the
   /// whole contract of a queue: one turn, one step.
