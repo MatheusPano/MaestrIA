@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 /// workspace (que leva as pastas dela junto).
 ///
 /// Existe pra que uma coisa só: arrastar. As duas linhas se reordenam entre
-/// si -- ver `AppStore.sidebarRows` e `AppStore.moveRow` --, e um arrasto
+/// si -- ver `AppStore.sidebarRows` e `AppStore.drop` --, e um arrasto
 /// precisa de um tipo que seja as duas. Não tem membro nenhum de propósito:
 /// o que uma linha *é* continua sendo [Folder] ou [Workspace].
 mixin SidebarRow {}
 
 /// A repo the user works in. Worktrees of the same repo group under one folder.
 class Folder with SidebarRow {
-  Folder({required this.root, required this.name, this.collapsed = false, this.workspace})
+  Folder({required this.root, required this.name, this.collapsed = false})
     : isLoose = false;
 
   /// The one folder that is not a folder: the tray panels hang from when
@@ -20,7 +20,7 @@ class Folder with SidebarRow {
   /// to the config, and git never looks at it — a session you opened just to
   /// ask something is not a checkout. Its [root] is only the folder a panel
   /// starts in when you do not pick one.
-  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false, workspace = null;
+  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false;
 
   /// Main checkout path. Also the identity: worktrees resolve back to it.
   final String root;
@@ -29,22 +29,6 @@ class Folder with SidebarRow {
 
   /// See [Folder.loose]. Everything git-shaped in the UI asks this first.
   final bool isLoose;
-
-  /// O `.code-workspace` de onde ela veio, quando veio de um. É o caminho do
-  /// arquivo, que é também a identidade do [Workspace] -- é assim que a lateral
-  /// sabe quais pastas desenhar juntas.
-  ///
-  /// Serve a duas coisas, e as duas são o mesmo fato dito pra públicos
-  /// diferentes: a seção que junta as pastas na lateral, e o
-  /// `AppStore.openFolderInEditor` -- pro VS Code esta pasta é um terço de um
-  /// arranjo de três, e abri-la sozinha no editor é abrir um terço do que a
-  /// pessoa chama de projeto.
-  ///
-  /// Fica na pasta e não numa lista dentro do [Workspace] porque a pergunta
-  /// que se faz o tempo todo é "de que workspace é esta pasta", uma vez por
-  /// linha desenhada; e porque uma pasta pertence a um só -- ver
-  /// `AppStore.importWorkspace`, que não rouba a pasta de um arquivo anterior.
-  String? workspace;
 
   /// Filled in by `AppStore.refreshGit` from `git worktree list`: whether the
   /// folder turned out to be a repo at all, and what the main checkout is on.
@@ -64,7 +48,6 @@ class Folder with SidebarRow {
     'root': root,
     'name': name,
     'collapsed': collapsed,
-    if (workspace != null) 'workspace': workspace,
     if (tint != null) 'tint': tint!.name,
   };
 
@@ -72,25 +55,86 @@ class Folder with SidebarRow {
     root: j['root'] as String,
     name: j['name'] as String,
     collapsed: (j['collapsed'] as bool?) ?? false,
-    workspace: j['workspace'] as String?,
   )..tint = MxTint.byName(j['tint'] as String?);
 }
 
-/// A named piece of work inside a folder: "permissão do google", not
-/// `learning-app-lms`.
+/// O que uma [FeatureOrHotfix] é: trabalho novo ou correção urgente.
+///
+/// Só muda como ela se diz -- o nome nos menus e o glifo na linha. O briefing,
+/// a cor e o ciclo de vida são os mesmos nos dois, e é por isso que é um campo
+/// e não duas classes. Os textos moram aqui porque o português concorda em
+/// gênero ("nessa feature", "nesse hotfix"), e cada menu que fala dela
+/// escreveria a concordância de novo.
+enum FeatureOrHotfixKind {
+  feature(
+    label: 'feature',
+    newLabel: 'nova feature',
+    the: 'a feature',
+    inThis: 'nessa feature',
+    thisOne: 'essa feature',
+    ofThis: 'dessa feature',
+    ofThe: 'da feature',
+    dissolved: 'feature dissolvida',
+    icon: Icons.track_changes,
+  ),
+  hotfix(
+    label: 'hotfix',
+    newLabel: 'novo hotfix',
+    the: 'o hotfix',
+    inThis: 'nesse hotfix',
+    thisOne: 'esse hotfix',
+    ofThis: 'desse hotfix',
+    ofThe: 'do hotfix',
+    dissolved: 'hotfix dissolvido',
+    icon: Icons.bolt,
+  );
+
+  const FeatureOrHotfixKind({
+    required this.label,
+    required this.newLabel,
+    required this.the,
+    required this.inThis,
+    required this.thisOne,
+    required this.ofThis,
+    required this.ofThe,
+    required this.dissolved,
+    required this.icon,
+  });
+
+  final String label;
+  final String newLabel;
+  final String the;
+  final String inThis;
+  final String thisOne;
+  final String ofThis;
+  final String ofThe;
+  final String dissolved;
+  final IconData icon;
+
+  /// O outro: é o que o "virar…" do menu oferece.
+  FeatureOrHotfixKind get other => this == feature ? hotfix : feature;
+
+  /// Feature pro que não diz nada -- tudo que a 2.4.0 gravou.
+  static FeatureOrHotfixKind byName(String? name) =>
+      values.firstWhere((k) => k.name == name, orElse: () => feature);
+}
+
+/// Uma feature ou um hotfix dentro de uma pasta: "permissão do google", não
+/// `learning-app-lms`. Até a 2.4.0 se chamava projeto.
 ///
 /// It lives only here. No branch, no directory, nothing written into the repo
 /// — git has no opinion about why four of these panels are open at the same
 /// time, and that "why" is the one thing the sidebar could not say. A folder
 /// answers *where* a session runs; a project answers *what for*, which is also
 /// the scope in which handing work from one agent to the next makes any sense.
-class Project {
-  Project({
+class FeatureOrHotfix {
+  FeatureOrHotfix({
     required this.id,
     required this.folderRoot,
     required this.name,
     this.brief = '',
     this.collapsed = false,
+    this.kind = FeatureOrHotfixKind.feature,
   });
 
   /// Stable across renames, because panels point at it and the config file
@@ -119,6 +163,9 @@ class Project {
 
   bool collapsed;
 
+  /// Feature ou hotfix. Ver [FeatureOrHotfixKind].
+  FeatureOrHotfixKind kind;
+
   /// A cor deste projeto, quando alguém escolheu uma -- e a dos painéis dele,
   /// que é o ponto. Ver [MxTint] e `AppStore.tintOf`.
   ///
@@ -139,61 +186,113 @@ class Project {
     'name': name,
     'brief': brief,
     'collapsed': collapsed,
+    'kind': kind.name,
     if (tint != null) 'tint': tint!.name,
   };
 
-  static Project fromJson(Map<String, dynamic> j) => Project(
+  static FeatureOrHotfix fromJson(Map<String, dynamic> j) => FeatureOrHotfix(
     id: j['id'] as String,
     folderRoot: j['folderRoot'] as String,
     name: j['name'] as String,
     brief: (j['brief'] as String?) ?? '',
     collapsed: (j['collapsed'] as bool?) ?? false,
+    kind: FeatureOrHotfixKind.byName(j['kind'] as String?),
   )..tint = MxTint.byName(j['tint'] as String?);
 }
 
-/// Um workspace do VS Code, do jeito que ele existe aqui: um nome, e as pastas
-/// que apontam pra ele por [Folder.workspace].
+/// Um id novo de workspace. O contador vai junto do relógio porque a migração
+/// de um config antigo cria vários no mesmo microssegundo.
+String newWorkspaceId() =>
+    'ws${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}${(_workspaceSeq++).toRadixString(36)}';
+int _workspaceSeq = 0;
+
+/// Um punhado de pastas que se trabalham juntas: os repos de um produto.
 ///
-/// Não é dono de nada, e é o que o separa de uma pasta. As pastas continuam
-/// sendo pastas -- com os projetos, as worktrees e as sessões delas, no lugar
-/// onde sempre estiveram --, e dissolver isto devolve todas pra raiz da
-/// lateral sem fechar um painel. O que ele acrescenta é uma linha que dobra:
-/// as sete pastas de um cliente eram sete linhas permanentes, e o que se quer
-/// da metade delas na maior parte dos dias é não vê-las.
+/// Não é dono das sessões, e é o que o separa de uma pasta: as pastas
+/// continuam sendo pastas -- com as features, as worktrees e as sessões delas
+/// --, e desfazer isto devolve todas pra raiz da lateral sem fechar um painel.
+/// O que ele acrescenta é uma linha que dobra e um nome pro conjunto.
 ///
-/// Também não é um projeto e não é um grupo. Um projeto diz *para quê* as
-/// sessões existem e mora dentro de uma pasta; um grupo é um arranjo de
-/// painéis na tela. Este é o único que responde "que pastas se trabalham
-/// juntas" -- e a resposta não é nossa: está escrita num arquivo que o VS Code
-/// mantém. Ver [CodeWorkspace], que é o arquivo, e `AppStore.importWorkspace`,
-/// que é quem cria isto.
+/// É dono, sim, da lista das pastas dele ([folderRoots]): uma pasta pode estar
+/// em mais de um (o repo de infra de dois produtos), e cada um guarda a ordem
+/// em que a desenha. A pergunta "em que workspaces está esta pasta" é
+/// `AppStore.workspacesOf`.
+///
+/// O `.code-workspace` do VS Code é opcional ([codeWorkspacePath]): é de onde
+/// um workspace pode ter vindo, e o que o "abrir no vscode" dele abre.
 class Workspace with SidebarRow {
-  Workspace({required this.path, required this.name, this.collapsed = false});
+  Workspace({
+    required this.id,
+    required this.name,
+    this.collapsed = false,
+    this.codeWorkspacePath,
+    List<String>? folderRoots,
+    Set<String>? collapsedFolders,
+  }) : folderRoots = folderRoots ?? [],
+       collapsedFolders = collapsedFolders ?? {};
 
-  /// O arquivo. Também a identidade: é isto que as pastas guardam, e é por
-  /// isso que ele não muda -- mover o `.code-workspace` de lugar é, aqui, um
-  /// outro workspace.
-  final String path;
-
-  /// Como ele se chama na linha. Sai do nome do arquivo (ver
-  /// [CodeWorkspace.name]) e fica guardado, e não recalculado a cada leitura:
-  /// o dia em que der pra renomear, é este campo que guarda a escolha.
+  /// Estável entre renomes e entre execuções: é o que o [AppStore.rootOrder]
+  /// guarda.
+  final String id;
   String name;
-
   bool collapsed;
 
-  Map<String, dynamic> toJson() => {'path': path, 'name': name, if (collapsed) 'collapsed': true};
+  /// A cor do workspace, quando alguém escolheu uma. As pastas sem cor própria
+  /// herdam esta -- ver `AppStore.chosenTintOf`.
+  MxTint? tint;
 
-  /// Null pro registro que não desenharia nada -- sem caminho ou sem nome.
+  /// O `.code-workspace` associado, quando há um.
+  String? codeWorkspacePath;
+
+  /// As pastas deste workspace, pelo root, na ordem em que ele as desenha.
+  final List<String> folderRoots;
+
+  /// As pastas dobradas *aqui*. A mesma pasta em outro workspace dobra por
+  /// conta própria; a pasta solta na raiz usa o [Folder.collapsed].
+  final Set<String> collapsedFolders;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    if (collapsed) 'collapsed': true,
+    if (tint != null) 'tint': tint!.name,
+    if (codeWorkspacePath != null) 'codeWorkspacePath': codeWorkspacePath,
+    'folderRoots': folderRoots,
+    if (collapsedFolders.isNotEmpty) 'collapsedFolders': collapsedFolders.toList(),
+  };
+
+  /// Null pro registro que não desenharia nada: sem nome, ou sem id e sem
+  /// arquivo.
+  ///
+  /// Lê também o formato da 2.4.0 (`{path, name, collapsed}`), em que o
+  /// arquivo era a identidade: o `path` vira o [codeWorkspacePath] e o id
+  /// nasce aqui. As pastas daquele formato chegam por
+  /// `AppStore.readSidebar`, que lê o carimbo antigo delas.
+  ///
   /// Nulo e não exceção pelo mesmo motivo de [PaneGroup.fromJson]: quem lê é o
   /// carregador do config inteiro, e um registro estragado não pode custar as
   /// pastas e o layout.
   static Workspace? fromJson(Object? j) {
     if (j is! Map) return null;
-    final path = ((j['path'] as String?) ?? '').trim();
     final name = ((j['name'] as String?) ?? '').trim();
-    if (path.isEmpty || name.isEmpty) return null;
-    return Workspace(path: path, name: name, collapsed: (j['collapsed'] as bool?) ?? false);
+    final id = ((j['id'] as String?) ?? '').trim();
+    final legacyPath = ((j['path'] as String?) ?? '').trim();
+    if (name.isEmpty || (id.isEmpty && legacyPath.isEmpty)) return null;
+    return Workspace(
+      id: id.isEmpty ? newWorkspaceId() : id,
+      name: name,
+      collapsed: (j['collapsed'] as bool?) ?? false,
+      codeWorkspacePath:
+          (j['codeWorkspacePath'] as String?) ?? (legacyPath.isEmpty ? null : legacyPath),
+      folderRoots: [
+        for (final r in j['folderRoots'] as List? ?? const [])
+          if (r is String) r,
+      ],
+      collapsedFolders: {
+        for (final r in j['collapsedFolders'] as List? ?? const [])
+          if (r is String) r,
+      },
+    )..tint = MxTint.byName(j['tint'] as String?);
   }
 }
 

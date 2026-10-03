@@ -480,9 +480,9 @@ class _PaneHeader extends StatelessWidget {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (store.projectOf(tab) case final project?)
+                            if (store.featureOrHotfixOf(tab) case final featureOrHotfix?)
                               _Chip(
-                                text: project.name,
+                                text: featureOrHotfix.name,
                                 color: Mx.purple,
                                 icon: Icons.track_changes,
                               ),

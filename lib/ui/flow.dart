@@ -32,7 +32,7 @@ Future<void> showNewFlow(
   AppStore store, {
   required Folder folder,
   String? cwd,
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x66000000),
@@ -40,7 +40,7 @@ Future<void> showNewFlow(
     store: store,
     folder: folder,
     cwd: cwd ?? folder.root,
-    project: project,
+    featureOrHotfix: featureOrHotfix,
   ),
 );
 
@@ -80,7 +80,7 @@ class _FlowEditor extends StatefulWidget {
     required this.folder,
     required this.cwd,
     this.tab,
-    this.project,
+    this.featureOrHotfix,
   });
 
   final AppStore store;
@@ -90,7 +90,7 @@ class _FlowEditor extends StatefulWidget {
   final MxTab? tab;
   final Folder folder;
   final String cwd;
-  final Project? project;
+  final FeatureOrHotfix? featureOrHotfix;
 
   @override
   State<_FlowEditor> createState() => _FlowEditorState();
@@ -166,7 +166,7 @@ class _FlowEditorState extends State<_FlowEditor> {
       widget.store.startFlow(
         folder: widget.folder,
         cwd: widget.cwd,
-        project: widget.project,
+        featureOrHotfix: widget.featureOrHotfix,
         prompt: _opening.text.trim(),
         label: _label.text.trim().isEmpty ? null : _label.text.trim(),
         steps: steps,

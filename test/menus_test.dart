@@ -10,16 +10,16 @@ import 'package:maestria/ui/sidebar.dart';
 
 /// O painel que uma linha de menu pediu.
 class Pedido {
-  Pedido(this.kind, this.cwd, {this.label, this.project, this.launcher});
+  Pedido(this.kind, this.cwd, {this.label, this.featureOrHotfix, this.launcher});
 
   final String kind;
   final String cwd;
   final String? label;
-  final String? project;
+  final String? featureOrHotfix;
   final String? launcher;
 
   @override
-  String toString() => '$kind em $cwd (nome $label, projeto $project, programa $launcher)';
+  String toString() => '$kind em $cwd (nome $label, projeto $featureOrHotfix, programa $launcher)';
 }
 
 /// Um store que anota o painel pedido em vez de abrir um.
@@ -52,11 +52,11 @@ class NoPty extends AppStore {
     required String cwd,
     String? label,
     String? resumeId,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
   }) {
-    pedidos.add(Pedido('claude', cwd, label: label, project: project?.name));
+    pedidos.add(Pedido('claude', cwd, label: label, featureOrHotfix: featureOrHotfix?.name));
     return _fake(cwd, label: label);
   }
 
@@ -65,12 +65,12 @@ class NoPty extends AppStore {
     Folder f, {
     String? cwd,
     String? command,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     Launcher? launcher,
     bool place = true,
   }) {
     pedidos.add(
-      Pedido('shell', cwd ?? f.root, project: project?.name, launcher: launcher?.name),
+      Pedido('shell', cwd ?? f.root, featureOrHotfix: featureOrHotfix?.name, launcher: launcher?.name),
     );
     return _fake(cwd ?? f.root, launcher: launcher);
   }
@@ -79,10 +79,10 @@ class NoPty extends AppStore {
   /// agenda a escrita do config, e o que está em teste é de que lugar o leitor
   /// nasce -- o `cwd` do pedido -- e qual arquivo o painel nativo devolveu.
   @override
-  MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, Project? project}) {
+  MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     pedidos.add(
       Pedido('leitor', cwd ?? folder?.root ?? from?.cwd ?? '?', label: path,
-          project: project?.name),
+          featureOrHotfix: featureOrHotfix?.name),
     );
     return null;
   }
@@ -185,9 +185,9 @@ void main() {
     testWidgets('a ordem é sessão, terminal, fluxo', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
-      final project = store.addProject(folder, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
 
-      await openMenu(tester, (ctx) => showProjectMenu(ctx, store, folder, project, Offset.zero));
+      await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
 
       final sessao = tester.getTopLeft(find.text('sessão do claude')).dy;
       final terminal = tester.getTopLeft(find.text('terminal')).dy;
@@ -221,13 +221,13 @@ void main() {
     testWidgets('a escolha que não é do bloco fica pro menu de baixo', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
-      final project = store.addProject(folder, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
 
-      await openMenu(tester, (ctx) => showProjectMenu(ctx, store, folder, project, Offset.zero));
+      await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
       await tester.tap(find.text('renomear'));
       await tester.pumpAndSettle();
 
-      expect(find.text('renomear projeto'), findsOneWidget);
+      expect(find.text('renomear feature'), findsOneWidget);
       expect(store.pedidos, isEmpty);
     });
 
@@ -314,20 +314,20 @@ void main() {
       expect(store.ultimo.kind, 'claude');
       expect(store.ultimo.cwd, '/repo');
       // Numa pasta e em projeto nenhum: o menu do projeto é o da linha dele.
-      expect(store.ultimo.project, isNull);
+      expect(store.ultimo.featureOrHotfix, isNull);
     });
 
     testWidgets('no projeto, o painel nasce grudado nele', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
-      final project = store.addProject(folder, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
 
-      await openMenu(tester, (ctx) => showProjectMenu(ctx, store, folder, project, Offset.zero));
+      await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
       await tester.tap(find.text('terminal'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.kind, 'shell');
-      expect(store.ultimo.project, 'permissão do google');
+      expect(store.ultimo.featureOrHotfix, 'permissão do google');
     });
   });
 
@@ -474,14 +474,14 @@ void main() {
     testWidgets('escolher uma pinta o projeto, e com ele os painéis', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
-      final project = store.addProject(folder, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
       final tab = MxTab(
         id: 'tab1',
         folder: folder,
         kind: TabKind.claude,
         cwd: '/repo',
         branch: '',
-      )..projectId = project.id;
+      )..featureOrHotfixId = featureOrHotfix.id;
       store.tabs.add(tab);
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
@@ -489,14 +489,14 @@ void main() {
 
       await openMenu(
         tester,
-        (ctx) => showProjectMenu(ctx, store, folder, project, Offset.zero),
+        (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero),
       );
       await mouse.moveTo(tester.getCenter(find.text('cor')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('vermelho'));
       await tester.pumpAndSettle();
 
-      expect(project.tint, MxTint.red);
+      expect(featureOrHotfix.tint, MxTint.red);
       // O painel não ganhou cor própria -- ele herdou a do projeto.
       expect(tab.tint, isNull);
       expect(store.tintOf(tab), MxTint.red.color);
@@ -507,20 +507,20 @@ void main() {
     testWidgets('e o menu do painel passa a dizer que a cor é de lá', (tester) async {
       final store = storeWith();
       addTearDown(store.dispose);
-      final project = store.addProject(folder, 'permissão do google');
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
       final tab = MxTab(
         id: 'tab1',
         folder: folder,
         kind: TabKind.claude,
         cwd: '/repo',
         branch: '',
-      )..projectId = project.id;
+      )..featureOrHotfixId = featureOrHotfix.id;
       store.tabs.add(tab);
-      store.setProjectTint(project, MxTint.cyan);
+      store.setFeatureOrHotfixTint(featureOrHotfix, MxTint.cyan);
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('cor: ciano — do projeto'), findsOneWidget);
+      expect(find.text('cor: ciano — da feature'), findsOneWidget);
       expect(find.text('cor'), findsNothing);
       await closeMenu(tester);
     });

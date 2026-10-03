@@ -150,7 +150,7 @@ class MxTab {
   /// The project inside the folder this panel is part of, if any. Null is a
   /// panel that is just a panel in a folder -- the shape everything had before
   /// projects existed, and still the right one for a one-off session.
-  String? projectId;
+  String? featureOrHotfixId;
 
   /// De qual painel este nasceu, quando ele nasceu de um passo de fluxo.
   ///
@@ -379,7 +379,7 @@ class MxTab {
   Map<String, dynamic> get recipe => {
     'folderRoot': folder.root,
     if (folder.isLoose) 'loose': true,
-    if (projectId != null) 'projectId': projectId,
+    if (featureOrHotfixId != null) 'featureOrHotfixId': featureOrHotfixId,
     'kind': kind.name,
     'cwd': cwd,
     // Só o id: o nome e o comando são do programa, não do painel, e uma cópia
@@ -479,6 +479,21 @@ enum MxFilter {
   };
 }
 
+/// O id da feature/hotfix de uma receita de painel salva.
+///
+/// A receita gravada antes do rename chama o campo de `projectId`, e é isso
+/// que os grupos de painéis salvos guardam até alguém salvá-los de novo. Ver
+/// [MxTab.recipe].
+@visibleForTesting
+String? featureOrHotfixIdIn(Map<String, dynamic> pane) =>
+    (pane['featureOrHotfixId'] ?? pane['projectId']) as String?;
+
+/// Uma linha da lateral no lugar em que ela está desenhada.
+///
+/// A mesma pasta aparece uma vez em cada workspace dela, e um arrasto precisa
+/// saber de qual das aparições ela saiu: é o [within] -- null na raiz.
+typedef RowPlace = ({SidebarRow row, Workspace? within});
+
 class AppStore extends ChangeNotifier {
   // --- ditado (vocalização) — fora desta versão ------------------------------
   // Sem o ditado o construtor não tem mais o que ligar.
@@ -515,17 +530,26 @@ class AppStore extends ChangeNotifier {
 
   final List<Folder> folders = [];
 
-  /// Os workspaces do VS Code que viraram seção na lateral. Ver [Workspace] --
-  /// as pastas apontam pra cá por [Folder.workspace], e é a lateral que aninha
-  /// (o mesmo arranjo de [projects] dentro de [folders]).
+  /// Os workspaces da lateral. Ver [Workspace] -- cada um é dono da lista
+  /// das pastas dele, e é a lateral que aninha (o mesmo arranjo de
+  /// [featuresOrHotfixes] dentro de [folders]).
   ///
-  /// Um workspace sem nenhuma pasta apontando pra ele não existe: seria um
-  /// cabeçalho sobre coisa nenhuma. Quem garante isso é [reconcileWorkspaces].
+  /// Um workspace pode ficar vazio: o criado na mão não some porque o último
+  /// repo saiu dele. Quem o tira da lateral é [dissolveWorkspace] ou
+  /// [closeWorkspace].
   final List<Workspace> workspaces = [];
 
+  /// A ordem da raiz da lateral: `workspace:<id>` e `folder:<root>`.
+  ///
+  /// Até a 2.4.0 a ordem saía da lista de pastas, com a seção no lugar da
+  /// primeira pasta dela. Com a mesma pasta em dois workspaces, essa conta
+  /// deixa de ter resposta. Vazio é o config de antes disto, e aí
+  /// [sidebarRows] faz a conta antiga. Ver [rowKey].
+  final List<String> rootOrder = [];
+
   /// The named jobs inside those folders. Flat, keyed back to a folder by
-  /// [Project.folderRoot] -- the sidebar is what nests them.
-  final List<Project> projects = [];
+  /// [FeatureOrHotfix.folderRoot] -- the sidebar is what nests them.
+  final List<FeatureOrHotfix> featuresOrHotfixes = [];
 
   /// Where panels that belong to no repo live. Not in [folders]: it is never
   /// saved, never git-refreshed, and never removable -- it is a place to put
@@ -769,26 +793,64 @@ class AppStore extends ChangeNotifier {
   @visibleForTesting
   String get configPath => _configFile.path;
 
+  /// Lê do config o que a lateral desenha: as pastas, as features/hotfixes e
+  /// os workspaces.
+  ///
+  /// Separado do [_loadConfig] porque é aqui que moram as leituras de
+  /// formatos antigos, e cada uma delas é um config de verdade que alguém tem
+  /// no disco: testá-las sem montar o resto da janela é o que permite
+  /// garantir que nenhuma se perca.
+  @visibleForTesting
+  void readSidebar(Map<String, dynamic> j) {
+    // Before projects existed, folders were what `projects` meant. Reading
+    // the old key keeps a config written by yesterday's build from opening
+    // as an empty sidebar.
+    final legacy = j['folders'] == null;
+    final rawFolders = ((legacy ? j['projects'] : j['folders']) as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    for (final p in rawFolders) {
+      folders.add(Folder.fromJson(p));
+    }
+    if (!legacy) {
+      // Até a 2.4.0 a chave era `projects`, e é o que está no disco de quem
+      // atualizou.
+      for (final p in ((j['featuresOrHotfixes'] ?? j['projects']) as List? ?? const [])) {
+        featuresOrHotfixes.add(FeatureOrHotfix.fromJson(p as Map<String, dynamic>));
+      }
+    }
+    for (final w in (j['workspaces'] as List? ?? const [])) {
+      if (Workspace.fromJson(w) case final workspace?) workspaces.add(workspace);
+    }
+    // O carimbo da 2.4.0: a pasta dizia de que `.code-workspace` veio, e a
+    // seção era o arquivo. Agora é o workspace que lista as pastas dele.
+    for (final p in rawFolders) {
+      final path = p['workspace'];
+      if (path is! String || path.isEmpty) continue;
+      var w = workspaces.firstWhereOrNull((w) => w.codeWorkspacePath == path);
+      if (w == null) {
+        w = Workspace(id: newWorkspaceId(), name: CodeWorkspace.nameOf(path), codeWorkspacePath: path);
+        workspaces.add(w);
+      }
+      final root = p['root'] as String;
+      if (!w.folderRoots.contains(root)) w.folderRoots.add(root);
+      // O `collapsed` era um por pasta. Dentro de um workspace ele passa a ser
+      // da aparição ali -- e é ali que a pasta carimbada aparecia.
+      if (p['collapsed'] == true) w.collapsedFolders.add(root);
+    }
+    rootOrder
+      ..clear()
+      ..addAll([
+        for (final k in j['rootOrder'] as List? ?? const [])
+          if (k is String) k,
+      ]);
+  }
+
   Future<void> _loadConfig() async {
     try {
       if (!_configFile.existsSync()) return;
       final j = jsonDecode(await _configFile.readAsString()) as Map<String, dynamic>;
-      // Before projects existed, folders were what `projects` meant. Reading
-      // the old key keeps a config written by yesterday's build from opening
-      // as an empty sidebar.
-      final legacy = j['folders'] == null;
-      for (final p in ((legacy ? j['projects'] : j['folders']) as List? ?? const [])) {
-        folders.add(Folder.fromJson(p as Map<String, dynamic>));
-      }
-      if (!legacy) {
-        for (final p in (j['projects'] as List? ?? const [])) {
-          projects.add(Project.fromJson(p as Map<String, dynamic>));
-        }
-      }
-      for (final w in (j['workspaces'] as List? ?? const [])) {
-        if (Workspace.fromJson(w) case final workspace?) workspaces.add(workspace);
-      }
-      reconcileWorkspaces();
+      readSidebar(j);
       for (final g in (j['groups'] as List? ?? const [])) {
         if (PaneGroup.fromJson(g) case final group?) groups.add(group);
       }
@@ -891,7 +953,7 @@ class AppStore extends ChangeNotifier {
     final cwd = pane['cwd'] as String?;
     if (folder == null || cwd == null || !Directory(cwd).existsSync()) return null;
     final label = pane['label'] as String?;
-    final project = projectById(pane['projectId'] as String?);
+    final featureOrHotfix = featureOrHotfixById(featureOrHotfixIdIn(pane));
     final MxTab tab;
     if (pane['kind'] == 'reader') {
       // Um leitor volta como o documento que era: um arquivo se relê do
@@ -902,7 +964,7 @@ class AppStore extends ChangeNotifier {
         (pane['doc'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
       );
       if (doc == null) return null;
-      tab = _newReader(doc, folder: folder, cwd: cwd, project: project);
+      tab = _newReader(doc, folder: folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
     } else if (pane['kind'] == 'browser') {
       // O navegador embutido saiu do app. Um config gravado enquanto ele
       // existia ainda traz painéis desses: eles não voltam, e a linha some do
@@ -915,7 +977,7 @@ class AppStore extends ChangeNotifier {
         (pane['setup'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{},
       );
       if (setup == null || !Directory(setup.root).existsSync()) return null;
-      tab = _newSetup(setup, folder: folder, cwd: cwd, project: project);
+      tab = _newSetup(setup, folder: folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
     } else if (pane['kind'] == 'claude') {
       final resumeId = pane['sessionId'] as String?;
       // Hibernada ontem, hibernada hoje -- ver [MxTab.hibernated]. Sem id não
@@ -925,7 +987,7 @@ class AppStore extends ChangeNotifier {
         folder,
         cwd: cwd,
         label: label,
-        project: project,
+        featureOrHotfix: featureOrHotfix,
         resumeId: resumeId,
         start: !asleep,
       );
@@ -937,7 +999,7 @@ class AppStore extends ChangeNotifier {
       tab = openShell(
         folder,
         cwd: cwd,
-        project: project,
+        featureOrHotfix: featureOrHotfix,
         launcher: launcherById(pane['launcher'] as String?),
       );
     }
@@ -1004,7 +1066,8 @@ class AppStore extends ChangeNotifier {
           // Ao lado das pastas porque é delas que ele fala: a seção é um jeito
           // de desenhar um punhado delas junto. Ver [Workspace].
           if (workspaces.isNotEmpty) 'workspaces': workspaces.map((w) => w.toJson()).toList(),
-          'projects': projects.map((p) => p.toJson()).toList(),
+          'rootOrder': [for (final r in sidebarRows) rowKey(r)],
+          'featuresOrHotfixes': featuresOrHotfixes.map((p) => p.toJson()).toList(),
           // Ao lado do layout e escritos com o mesmo json que ele: um grupo é
           // um layout guardado com nome. Ver [PaneGroup].
           if (groups.isNotEmpty) 'groups': groups.map((g) => g.toJson()).toList(),
@@ -1401,7 +1464,8 @@ class AppStore extends ChangeNotifier {
   /// Um `.code-workspace` do VS Code, aberto como o que ele é aqui: as pastas
   /// dele, todas de uma vez.
   ///
-  /// Nada de novo fica no config além das pastas -- ver [CodeWorkspace]. O
+  /// No config ficam as pastas e o [Workspace] que as lista, com o arquivo
+  /// guardado como de onde ele veio -- ver [CodeWorkspace]. O
   /// arquivo é um jeito de adicionar pasta, e o que ele evita é justamente o
   /// que ele parece pouco: adicionar uma a uma, no dedo, uma lista que já
   /// existe escrita em algum lugar.
@@ -1430,10 +1494,6 @@ class AppStore extends ChangeNotifier {
         missing.add(entry.path);
         continue;
       }
-      // Só quando não tem dono: uma pasta que já veio de outro workspace
-      // continua daquele. O arquivo mais recente não é mais verdadeiro que o
-      // primeiro, e trocar por baixo mudaria o que o "abrir no vscode" dela faz.
-      folder.workspace ??= ws.path;
       if (!outcome.created) {
         already.add(folder);
         continue;
@@ -1444,12 +1504,20 @@ class AppStore extends ChangeNotifier {
       if (entry.name != null && folder.root == entry.path) folder.name = entry.name!;
       added.add(folder);
     }
-    // A seção só existe se alguma pasta de fato aponta pra ela: um arquivo
-    // cujas pastas todas sumiram do disco -- ou que só listava pastas que já
-    // eram de outro workspace -- não vira um cabeçalho vazio na lateral.
-    final mine = folders.any((f) => f.workspace == ws.path);
-    if (mine && !workspaces.any((w) => w.path == ws.path)) {
-      workspaces.add(Workspace(path: ws.path, name: ws.name));
+    // As pastas que o arquivo lista e que existem, novas ou não. Com o
+    // espelho, uma que já está em outro workspace passa a estar nos dois.
+    final adopted = [...added, ...already];
+    if (adopted.isNotEmpty) {
+      var w = workspaces.firstWhereOrNull((w) => w.codeWorkspacePath == ws.path);
+      if (w == null) {
+        _pinRootOrder();
+        w = Workspace(id: newWorkspaceId(), name: ws.name, codeWorkspacePath: ws.path);
+        workspaces.add(w);
+        rootOrder.add(rowKey(w));
+      }
+      for (final f in adopted) {
+        if (!w.folderRoots.contains(f.root)) w.folderRoots.add(f.root);
+      }
     }
     _save();
     if (added.isNotEmpty) await refreshGit();
@@ -1480,8 +1548,12 @@ class AppStore extends ChangeNotifier {
 
   Future<void> removeFolder(Folder p) async {
     folders.remove(p);
-    reconcileWorkspaces();
-    projects.removeWhere((pr) => pr.folderRoot == p.root);
+    for (final w in workspaces) {
+      w.folderRoots.remove(p.root);
+      w.collapsedFolders.remove(p.root);
+    }
+    rootOrder.remove(rowKey(p));
+    featuresOrHotfixes.removeWhere((pr) => pr.folderRoot == p.root);
     for (final t in tabs.where((t) => t.folderRoot == p.root).toList()) {
       closeTab(t);
     }
@@ -1491,115 +1563,185 @@ class AppStore extends ChangeNotifier {
 
   // --- workspaces ---------------------------------------------------------
 
-  /// As pastas de um workspace, na ordem em que a lateral as desenharia.
-  List<Folder> foldersOf(Workspace w) => folders.where((f) => f.workspace == w.path).toList();
+  /// As pastas de um workspace, na ordem em que ele as desenha. Um root que
+  /// não é mais pasta da lateral não aparece.
+  List<Folder> foldersOf(Workspace w) => [
+    for (final root in w.folderRoots)
+      if (folders.firstWhereOrNull((f) => f.root == root) case final f?) f,
+  ];
 
-  /// O workspace de uma pasta, se ela tem um.
-  Workspace? workspaceOf(Folder f) =>
-      f.workspace == null ? null : workspaces.firstWhereOrNull((w) => w.path == f.workspace);
+  /// Os workspaces em que a pasta está, na ordem da lista de workspaces.
+  List<Workspace> workspacesOf(Folder f) =>
+      workspaces.where((w) => w.folderRoots.contains(f.root)).toList();
 
-  /// O que a lateral desenha, de cima pra baixo: um [Workspace] ou uma
-  /// [Folder] solta, na ordem de [folders].
+  /// A pasta que não está em workspace nenhum: é ela que a raiz desenha.
+  bool standsAlone(Folder f) => !workspaces.any((w) => w.folderRoots.contains(f.root));
+
+  Workspace? workspaceById(String? id) =>
+      id == null ? null : workspaces.firstWhereOrNull((w) => w.id == id);
+
+  /// A chave de uma linha da raiz no [rootOrder].
+  String rowKey(SidebarRow row) =>
+      row is Workspace ? 'workspace:${row.id}' : 'folder:${(row as Folder).root}';
+
+  SidebarRow? _rowOf(String key) {
+    if (key.startsWith('workspace:')) return workspaceById(key.substring('workspace:'.length));
+    if (key.startsWith('folder:')) {
+      final f = folders.firstWhereOrNull((f) => f.root == key.substring('folder:'.length));
+      return f != null && standsAlone(f) ? f : null;
+    }
+    return null;
+  }
+
+  /// O que a raiz da lateral desenha, de cima pra baixo: workspaces e pastas
+  /// soltas.
   ///
-  /// Um workspace entra no lugar da *primeira* pasta dele e leva as outras
-  /// junto -- é o que faz as sete pastas de um cliente aparecerem em bloco sem
-  /// reordenar nada por baixo. A lista de pastas continua sendo a ordem
-  /// verdadeira; isto é só como ela é lida.
+  /// Primeiro o que o [rootOrder] conhece, na ordem dele. Depois o que ele
+  /// ainda não conhece -- tudo, num config de antes dele; ou a pasta que
+  /// acabou de entrar -- na conta antiga: a seção no lugar da primeira pasta
+  /// dela. Uma chave que não aponta mais pra nada é pulada.
   List<SidebarRow> get sidebarRows {
     final rows = <SidebarRow>[];
     final seen = <String>{};
+    void add(SidebarRow r) {
+      if (seen.add(rowKey(r))) rows.add(r);
+    }
+
+    for (final key in rootOrder) {
+      if (_rowOf(key) case final row?) add(row);
+    }
     for (final f in folders) {
-      final w = workspaceOf(f);
-      if (w == null) {
-        rows.add(f);
-      } else if (seen.add(w.path)) {
-        rows.add(w);
+      final ws = workspacesOf(f);
+      if (ws.isEmpty) {
+        add(f);
+      } else {
+        ws.forEach(add);
       }
     }
+    workspaces.forEach(add);
     return rows;
   }
 
-  /// As pastas de uma linha da lateral: uma seção leva as dela, uma pasta
-  /// solta leva só a si. Juntando as de [sidebarRows] na ordem sai [folders]
-  /// de volta, que é o que faz [moveRow] poder reescrever a lista inteira.
-  List<Folder> foldersOfRow(SidebarRow row) => row is Workspace ? foldersOf(row) : [row as Folder];
-
-  /// A faixa em que uma linha se move: a raiz da lateral, ou o miolo de uma
-  /// seção.
-  ///
-  /// Uma pasta carimbada só se reordena entre as pastas do mesmo workspace --
-  /// arrastá-la pra fora seria tirá-la do workspace, que é outra operação
-  /// (o menu dela tem), e não o que quem estava arrumando a lista pediu. É a
-  /// mesma regra que segura um painel dentro da pasta dele em [moveTab].
-  String? _laneOf(SidebarRow row) => row is Folder ? row.workspace : null;
-
-  /// Se [row] pode ir pro lugar de [target]. Ver [_laneOf].
-  bool canMoveRow(SidebarRow row, SidebarRow target) =>
-      !identical(row, target) && _laneOf(row) == _laneOf(target);
-
-  /// Põe [row] na vaga de [target] na lateral, arrastando.
-  ///
-  /// A ordem das pastas é a ordem de [folders], e era a ordem em que foram
-  /// adicionadas: a pasta aberta agora caía em último e ficava lá. Isto é o
-  /// que deixa arrumá-la.
-  ///
-  /// Uma seção viaja inteira -- é uma linha só na tela, e as sete pastas de um
-  /// cliente que se separassem no caminho não seriam mais um bloco. Por isso a
-  /// conta é feita em blocos de pasta, e não em índices de [folders]: mover
-  /// uma linha é mover o bloco dela pra vaga do bloco de baixo ou de cima.
-  ///
-  /// A vaga é a mesma de [moveTab], pelo mesmo motivo: o que veio de cima
-  /// empurra o alvo pra cima e para embaixo dele; o que veio de baixo para em
-  /// cima. Nos dois casos é a linha em que se soltou.
-  void moveRow(SidebarRow row, SidebarRow target) {
-    if (!canMoveRow(row, target)) return;
-    final rows = sidebarRows;
-    final blocks = [for (final r in rows) foldersOfRow(r)];
-    // Dentro de uma seção a conta é entre as pastas dela; na raiz, entre os
-    // blocos. As duas listas são a mesma mexida -- ver [_slide].
-    if (row is Folder && row.workspace != null) {
-      final block = blocks.firstWhereOrNull((b) => b.contains(row));
-      if (block == null) return;
-      if (!_slide(block, block.indexOf(row), block.indexOf(target as Folder))) return;
-    } else {
-      if (!_slide(blocks, rows.indexOf(row), rows.indexOf(target))) return;
-    }
-    // Reescrita inteira, e não uma remoção e uma inserção: assim a lista volta
-    // com as pastas de cada seção juntas, que é como a lateral já as lê.
-    folders
+  /// Grava no [rootOrder] a ordem que a lateral está desenhando agora. Toda
+  /// mexida na raiz começa por aqui: é ela que transforma a conta derivada
+  /// num config que já diz a ordem.
+  void _pinRootOrder() {
+    final keys = [for (final r in sidebarRows) rowKey(r)];
+    rootOrder
       ..clear()
-      ..addAll(blocks.expand((b) => b));
+      ..addAll(keys);
+  }
+
+  Workspace createWorkspace(
+    String name, {
+    List<Folder> folders = const [],
+    String? codeWorkspacePath,
+  }) {
+    // Como o renomear: um workspace sem nome é um cabeçalho sem texto. Quem
+    // pergunta o nome (o diálogo) já barra antes; isto é a rede de baixo.
+    final label = name.trim();
+    if (label.isEmpty) throw ArgumentError.value(name, 'name', 'não pode ser vazio');
+    _pinRootOrder();
+    final w = Workspace(
+      id: newWorkspaceId(),
+      name: label,
+      codeWorkspacePath: codeWorkspacePath,
+    );
+    workspaces.add(w);
+    rootOrder.add(rowKey(w));
+    for (final f in folders) {
+      if (!w.folderRoots.contains(f.root)) w.folderRoots.add(f.root);
+    }
+    _save();
+    notifyListeners();
+    return w;
+  }
+
+  /// Põe [f] em [w], na vaga de [before] quando ela é dada, ou no fim.
+  void addToWorkspace(Folder f, Workspace w, {Folder? before}) {
+    if (w.folderRoots.contains(f.root)) return;
+    _pinRootOrder();
+    final at = before == null ? -1 : w.folderRoots.indexOf(before.root);
+    at < 0 ? w.folderRoots.add(f.root) : w.folderRoots.insert(at, f.root);
     _save();
     notifyListeners();
   }
 
-  /// Tira o item de [from] e o devolve na vaga de [to]. Falso quando não há o
-  /// que mexer. Ver [moveTab], que é a mesma conta na lista de painéis.
-  bool _slide<T>(List<T> list, int from, int to) {
-    if (from < 0 || to < 0 || from == to) return false;
-    list.insert(to, list.removeAt(from));
-    return true;
+  /// Tira [f] de [w]. Se ela não estiver em mais nenhum, volta pra raiz: na
+  /// vaga de [at], quando dada, ou logo depois do workspace de onde saiu.
+  void removeFromWorkspace(Folder f, Workspace w, {SidebarRow? at}) {
+    if (!w.folderRoots.contains(f.root)) return;
+    _pinRootOrder();
+    w.folderRoots.remove(f.root);
+    w.collapsedFolders.remove(f.root);
+    if (standsAlone(f)) {
+      final target = at == null ? -1 : rootOrder.indexOf(rowKey(at));
+      final after = rootOrder.indexOf(rowKey(w)) + 1;
+      rootOrder.insert(target >= 0 ? target : after, rowKey(f));
+    }
+    _save();
+    notifyListeners();
   }
 
-  /// Fecha um workspace: as pastas dele saem da lateral, e a seção sai com
-  /// elas.
-  ///
-  /// É a volta exata do import, e o import só adicionou pastas -- nada aqui
-  /// toca o disco. O `.code-workspace` continua onde estava, os repos também,
-  /// e reabrir é o mesmo "adicionar pasta" de antes.
-  ///
-  /// Fechar é o verbo do VS Code, e é o certo: uma pasta *removida* uma a uma
-  /// pelo menu dela é a mesma operação, mas ninguém remove sete pastas
-  /// querendo remover sete pastas -- quer parar de trabalhar naquele cliente.
-  /// Os painéis das pastas fecham junto, como fecham em [removeFolder]; quem
-  /// confirma sabe quantos são, porque o diálogo conta antes.
+  void renameWorkspace(Workspace w, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == w.name) return;
+    w.name = trimmed;
+    _save();
+    notifyListeners();
+  }
+
+  /// A cor do workspace, ou null pra tirar. Ver [Workspace.tint].
+  void setWorkspaceTint(Workspace w, MxTint? tint) {
+    w.tint = tint;
+    _save();
+    notifyListeners();
+  }
+
+  /// Associa um `.code-workspace`, ou desassocia com null. Não lê o arquivo:
+  /// ele diz o que o "abrir no vscode" abre, e não quais pastas entram.
+  void linkCodeWorkspace(Workspace w, String? path) {
+    final clean = path?.trim();
+    w.codeWorkspacePath = (clean == null || clean.isEmpty) ? null : expandHome(clean);
+    _save();
+    notifyListeners();
+  }
+
+  /// Desfaz o workspace: as pastas que só estavam nele voltam pra raiz, no
+  /// lugar da seção, e nenhuma sessão fecha.
+  void dissolveWorkspace(Workspace w) {
+    _pinRootOrder();
+    final at = rootOrder.indexOf(rowKey(w));
+    rootOrder.remove(rowKey(w));
+    workspaces.remove(w);
+    final freed = [
+      for (final f in foldersOf(w))
+        if (standsAlone(f)) rowKey(f),
+    ];
+    rootOrder.insertAll(at < 0 ? rootOrder.length : at, freed);
+    _save();
+    notifyListeners();
+  }
+
+  /// As pastas que saem da lateral ao fechar [w]: as que só estão nele. A
+  /// espelhada em outro workspace continua lá, com as sessões dela.
+  List<Folder> closingWith(Workspace w) =>
+      foldersOf(w).where((f) => workspacesOf(f).length == 1).toList();
+
+  /// Fecha um workspace: as pastas só dele saem da lateral com as sessões, e a
+  /// seção sai junto. Nada toca o disco -- nem os repos, nem o
+  /// `.code-workspace`.
   Future<void> closeWorkspace(Workspace w) async {
     final name = w.name;
-    final going = foldersOf(w);
+    final going = closingWith(w);
     for (final f in going) {
       await removeFolder(f);
     }
-    // A seção já saiu junto com a última pasta -- ver [reconcileWorkspaces].
+    _pinRootOrder();
+    rootOrder.remove(rowKey(w));
+    workspaces.remove(w);
+    _save();
+    notifyListeners();
     showBanner(
       going.length == 1
           ? 'workspace "$name" fechado — 1 pasta saiu da lateral'
@@ -1613,27 +1755,103 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Acerta as duas metades da ligação entre pasta e seção: toda pasta
-  /// carimbada tem uma seção, e toda seção tem pelo menos uma pasta.
+  /// Se a pasta está dobrada onde está sendo desenhada: dentro de [within], ou
+  /// solta na raiz.
+  bool isFolderCollapsed(Folder f, {Workspace? within}) =>
+      within == null ? f.collapsed : within.collapsedFolders.contains(f.root);
+
+  void toggleFolderCollapsed(Folder f, {Workspace? within}) {
+    if (within == null) return toggleCollapsed(f);
+    within.collapsedFolders.contains(f.root)
+        ? within.collapsedFolders.remove(f.root)
+        : within.collapsedFolders.add(f.root);
+    _save();
+    notifyListeners();
+  }
+
+  /// Põe [row] na vaga de [target], na raiz.
   ///
-  /// A primeira metade é migração. Uma pasta carimbada por uma build anterior
-  /// à seção -- ou por um config que perdeu a lista -- não tem onde se
-  /// pendurar, e a seção nasce dela com o nome do arquivo; sem isso, quem
-  /// importou um workspace ontem teria que importar de novo pra ver o bloco.
-  ///
-  /// A segunda é limpeza: uma seção vazia não é uma seção, é um cabeçalho
-  /// sobre coisa nenhuma, que nem dobrar dobraria.
-  ///
-  /// Idempotente de propósito -- roda ao ler o config e a cada pasta removida,
-  /// que são os dois momentos em que a ligação pode ter ficado torta.
-  @visibleForTesting
-  void reconcileWorkspaces() {
-    for (final f in folders) {
-      final path = f.workspace;
-      if (path == null || workspaces.any((w) => w.path == path)) continue;
-      workspaces.add(Workspace(path: path, name: CodeWorkspace.nameOf(path)));
+  /// A vaga é a mesma de [moveTab]: o que veio de cima empurra o alvo pra cima
+  /// e para embaixo dele; o que veio de baixo para em cima. Nos dois casos é a
+  /// linha em que se soltou.
+  void moveRootRow(SidebarRow row, SidebarRow target) {
+    _pinRootOrder();
+    if (!_slide(rootOrder, rootOrder.indexOf(rowKey(row)), rootOrder.indexOf(rowKey(target)))) {
+      return;
     }
-    workspaces.removeWhere((w) => !folders.any((f) => f.workspace == w.path));
+    _save();
+    notifyListeners();
+  }
+
+  /// Reordena [f] entre as pastas de [w], na vaga de [target].
+  void moveInWorkspace(Workspace w, Folder f, Folder target) {
+    if (!_slide(w.folderRoots, w.folderRoots.indexOf(f.root), w.folderRoots.indexOf(target.root))) {
+      return;
+    }
+    _save();
+    notifyListeners();
+  }
+
+  /// Leva [f] pra [to], saindo de [from] quando ele é dado. Se a pasta já
+  /// estava em [to] (espelhada), só sai de [from].
+  void moveFolder(Folder f, {Workspace? from, required Workspace to, Folder? before}) {
+    addToWorkspace(f, to, before: before);
+    if (from != null && from != to) removeFromWorkspace(f, from);
+  }
+
+  /// Tira o item de [from] e o devolve na vaga de [to]. Falso quando não há o
+  /// que mexer. Ver [moveTab], que é a mesma conta na lista de painéis.
+  bool _slide<T>(List<T> list, int from, int to) {
+    if (from < 0 || to < 0 || from == to) return false;
+    list.insert(to, list.removeAt(from));
+    return true;
+  }
+
+  /// Se soltar [from] sobre [onto] faz alguma coisa. [into] é soltar no meio
+  /// do cabeçalho de um workspace -- entrar nele --, e não na borda de uma
+  /// linha, que é reordenar.
+  ///
+  /// A regra é uma só: a linha em que se soltou diz em que faixa a linha
+  /// arrastada vai morar. Solta numa linha da raiz, mora na raiz; solta numa
+  /// pasta de dentro de um workspace, mora naquele workspace. Uma seção só
+  /// mora na raiz.
+  bool canDrop(RowPlace from, RowPlace onto, {bool into = false}) {
+    if (into) {
+      return from.row is Folder && onto.row is Workspace && from.within != onto.row;
+    }
+    if (identical(from.row, onto.row) && from.within == onto.within) return false;
+    if (from.row is Workspace) return onto.within == null;
+    return true;
+  }
+
+  /// Faz o que [canDrop] diz que dá pra fazer. Ver lá a regra.
+  void drop(RowPlace from, RowPlace onto, {bool into = false}) {
+    if (!canDrop(from, onto, into: into)) return;
+    final row = from.row;
+    if (into) {
+      moveFolder(row as Folder, from: from.within, to: onto.row as Workspace);
+      return;
+    }
+    if (row is Workspace) {
+      moveRootRow(row, onto.row);
+      return;
+    }
+    final f = row as Folder;
+    final lane = onto.within;
+    if (lane == null) {
+      if (from.within == null) {
+        moveRootRow(f, onto.row);
+      } else {
+        removeFromWorkspace(f, from.within!, at: onto.row);
+      }
+      return;
+    }
+    final target = onto.row as Folder;
+    if (from.within == lane) {
+      moveInWorkspace(lane, f, target);
+    } else {
+      moveFolder(f, from: from.within, to: lane, before: target);
+    }
   }
 
   /// Se a busca achou alguma coisa nesta seção -- numa sessão de qualquer
@@ -1686,7 +1904,7 @@ class AppStore extends ChangeNotifier {
   /// As pastas e os projetos marcados no menu de filtros, pela identidade que
   /// sobrevive a um rename: o root e o id.
   final Set<String> filterRoots = {};
-  final Set<String> filterProjects = {};
+  final Set<String> filterFeaturesOrHotfixes = {};
   final Set<MxFilter> filterFlags = {};
 
   /// Os termos de [query], separados: "google perm" acha "permissão do google"
@@ -1696,11 +1914,11 @@ class AppStore extends ChangeNotifier {
   bool get filtering =>
       _terms.isNotEmpty ||
       filterRoots.isNotEmpty ||
-      filterProjects.isNotEmpty ||
+      filterFeaturesOrHotfixes.isNotEmpty ||
       filterFlags.isNotEmpty;
 
   /// Quantas opções estão marcadas, pro ponto no botão de filtro.
-  int get activeFilters => filterRoots.length + filterProjects.length + filterFlags.length;
+  int get activeFilters => filterRoots.length + filterFeaturesOrHotfixes.length + filterFlags.length;
 
   void setQuery(String q) {
     if (q == query) return;
@@ -1719,8 +1937,8 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleFilterProject(Project p) {
-    filterProjects.contains(p.id) ? filterProjects.remove(p.id) : filterProjects.add(p.id);
+  void toggleFilterFeatureOrHotfix(FeatureOrHotfix p) {
+    filterFeaturesOrHotfixes.contains(p.id) ? filterFeaturesOrHotfixes.remove(p.id) : filterFeaturesOrHotfixes.add(p.id);
     notifyListeners();
   }
 
@@ -1732,7 +1950,7 @@ class AppStore extends ChangeNotifier {
     query = '';
     _terms = [];
     filterRoots.clear();
-    filterProjects.clear();
+    filterFeaturesOrHotfixes.clear();
     filterFlags.clear();
     notifyListeners();
   }
@@ -1744,7 +1962,7 @@ class AppStore extends ChangeNotifier {
     t.title,
     t.customLabel ?? '',
     t.folder.name,
-    projectOf(t)?.name ?? '',
+    featureOrHotfixOf(t)?.name ?? '',
     t.branch,
     t.cwd,
     t.agentName ?? '',
@@ -1760,10 +1978,10 @@ class AppStore extends ChangeNotifier {
     }
     // Pasta e projeto são o mesmo grupo — o "onde" — e somam entre si: marcar
     // um repo e um projeto de outro repo mostra os dois, não nada.
-    if (filterRoots.isNotEmpty || filterProjects.isNotEmpty) {
+    if (filterRoots.isNotEmpty || filterFeaturesOrHotfixes.isNotEmpty) {
       final scoped =
           filterRoots.contains(t.folderRoot) ||
-          (t.projectId != null && filterProjects.contains(t.projectId));
+          (t.featureOrHotfixId != null && filterFeaturesOrHotfixes.contains(t.featureOrHotfixId));
       if (!scoped) return false;
     }
     for (final group in MxFilterGroup.values) {
@@ -1785,63 +2003,78 @@ class AppStore extends ChangeNotifier {
 
   // --- projects -----------------------------------------------------------
 
-  List<Project> projectsOf(Folder f) => projects.where((p) => p.folderRoot == f.root).toList();
+  List<FeatureOrHotfix> featuresOrHotfixesOf(Folder f) => featuresOrHotfixes.where((p) => p.folderRoot == f.root).toList();
 
-  Project? projectById(String? id) =>
-      id == null ? null : projects.firstWhereOrNull((p) => p.id == id);
+  FeatureOrHotfix? featureOrHotfixById(String? id) =>
+      id == null ? null : featuresOrHotfixes.firstWhereOrNull((p) => p.id == id);
 
-  Project? projectOf(MxTab tab) => projectById(tab.projectId);
+  FeatureOrHotfix? featureOrHotfixOf(MxTab tab) => featureOrHotfixById(tab.featureOrHotfixId);
 
   /// The project a new panel joins when the caller did not name one: whichever
   /// the panel you are looking at is in. Opening a third session while you are
   /// inside "permissão do google" means a third session on that job.
-  Project? get focusedProject {
+  FeatureOrHotfix? get focusedFeatureOrHotfix {
     final tab = focusedTab;
-    return tab == null ? null : projectOf(tab);
+    return tab == null ? null : featureOrHotfixOf(tab);
   }
 
-  Project addProject(Folder f, String name, {String brief = ''}) {
-    final project = Project(
+  FeatureOrHotfix addFeatureOrHotfix(
+    Folder f,
+    String name, {
+    String brief = '',
+    FeatureOrHotfixKind kind = FeatureOrHotfixKind.feature,
+  }) {
+    final featureOrHotfix = FeatureOrHotfix(
       // Not the tab counter: this one outlives the window, and `tab3` would
       // name a different project every time the app restarts.
       id: 'pj${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
       folderRoot: f.root,
       name: name,
       brief: brief,
+      kind: kind,
     );
-    projects.add(project);
+    featuresOrHotfixes.add(featureOrHotfix);
     _save();
     notifyListeners();
-    return project;
+    return featureOrHotfix;
   }
 
-  void editProject(Project project, {String? name, String? brief}) {
-    if (name != null && name.trim().isNotEmpty) project.name = name.trim();
-    if (brief != null) project.brief = brief;
+  void editFeatureOrHotfix(FeatureOrHotfix featureOrHotfix, {String? name, String? brief}) {
+    if (name != null && name.trim().isNotEmpty) featureOrHotfix.name = name.trim();
+    if (brief != null) featureOrHotfix.brief = brief;
     _save();
     notifyListeners();
   }
 
   /// A cor deste projeto, ou null pra tirar a que ele tinha -- e com ela a
-  /// dos painéis que não escolheram a sua. Ver [Project.tint] e [tintOf].
+  /// dos painéis que não escolheram a sua. Ver [FeatureOrHotfix.tint] e [tintOf].
   ///
-  /// Fora do [editProject] de propósito: aquele tem os campos que se editam
+  /// Fora do [editFeatureOrHotfix] de propósito: aquele tem os campos que se editam
   /// num diálogo de texto, e este é uma escolha de menu que vale na hora.
-  void setProjectTint(Project project, MxTint? tint) {
-    project.tint = tint;
+  void setFeatureOrHotfixTint(FeatureOrHotfix featureOrHotfix, MxTint? tint) {
+    featureOrHotfix.tint = tint;
     _save();
     notifyListeners();
   }
 
-  void toggleProjectCollapsed(Project project) {
-    project.collapsed = !project.collapsed;
+  /// Troca a natureza depois de criada: o "login quebrado" que parecia
+  /// feature e era hotfix. Nada mais muda -- ver [FeatureOrHotfixKind].
+  void setFeatureOrHotfixKind(FeatureOrHotfix featureOrHotfix, FeatureOrHotfixKind kind) {
+    if (featureOrHotfix.kind == kind) return;
+    featureOrHotfix.kind = kind;
+    _save();
+    notifyListeners();
+  }
+
+  void toggleFeatureOrHotfixCollapsed(FeatureOrHotfix featureOrHotfix) {
+    featureOrHotfix.collapsed = !featureOrHotfix.collapsed;
     _save();
     notifyListeners();
   }
 
   /// Finish a project: the job is done, so its sessions are over too.
   ///
-  /// The one difference from [removeProject] is the only one that matters --
+  /// The one difference from [removeFeatureOrHotfix] is the only one that matters --
   /// there the panels stay open because the work goes on without the label;
   /// here they close, because saying a project is done and leaving four
   /// sessions of it running would be saying two different things at once.
@@ -1849,12 +2082,12 @@ class AppStore extends ChangeNotifier {
   /// briefing worth keeping is a paragraph the caller copies out first.
   ///
   /// Returns how many panels went with it, so the caller can say so.
-  int completeProject(Project project) {
-    final closing = tabsIn(project);
+  int completeFeatureOrHotfix(FeatureOrHotfix featureOrHotfix) {
+    final closing = tabsIn(featureOrHotfix);
     for (final t in closing) {
       closeTab(t);
     }
-    projects.remove(project);
+    featuresOrHotfixes.remove(featureOrHotfix);
     _save();
     notifyListeners();
     return closing.length;
@@ -1862,34 +2095,34 @@ class AppStore extends ChangeNotifier {
 
   /// Dissolve a project. Its panels are set loose in the folder, not closed --
   /// dropping the label you put on a job is not deciding the job is over.
-  void removeProject(Project project) {
-    projects.remove(project);
-    for (final t in tabs.where((t) => t.projectId == project.id)) {
-      t.projectId = null;
+  void removeFeatureOrHotfix(FeatureOrHotfix featureOrHotfix) {
+    featuresOrHotfixes.remove(featureOrHotfix);
+    for (final t in tabs.where((t) => t.featureOrHotfixId == featureOrHotfix.id)) {
+      t.featureOrHotfixId = null;
     }
     _save();
     notifyListeners();
   }
 
-  /// Move [tab] into [project], or out of every project when it is null.
+  /// Move [tab] into [featureOrHotfix], or out of every project when it is null.
   ///
   /// A project belongs to one folder, so a panel running somewhere else
   /// cannot join it: the brief would be describing a checkout that session
   /// cannot see.
-  void assign(MxTab tab, Project? project) {
-    if (project != null && project.folderRoot != tab.folderRoot) return;
-    if (tab.projectId == project?.id) return;
-    tab.projectId = project?.id;
+  void assign(MxTab tab, FeatureOrHotfix? featureOrHotfix) {
+    if (featureOrHotfix != null && featureOrHotfix.folderRoot != tab.folderRoot) return;
+    if (tab.featureOrHotfixId == featureOrHotfix?.id) return;
+    tab.featureOrHotfixId = featureOrHotfix?.id;
     _save();
     notifyListeners();
   }
 
-  List<MxTab> tabsIn(Project project) => tabs.where((t) => t.projectId == project.id).toList();
+  List<MxTab> tabsIn(FeatureOrHotfix featureOrHotfix) => tabs.where((t) => t.featureOrHotfixId == featureOrHotfix.id).toList();
 
   /// A session marked done is counted nowhere: the mark exists to stop a
   /// finished panel from spending the badge that means "somebody go look".
-  int needingHumanIn(Project project) =>
-      tabsIn(project).where((t) => !t.done && t.status.needsHuman).length;
+  int needingHumanIn(FeatureOrHotfix featureOrHotfix) =>
+      tabsIn(featureOrHotfix).where((t) => !t.done && t.status.needsHuman).length;
 
   // --- tabs ---------------------------------------------------------------
 
@@ -1897,7 +2130,7 @@ class AppStore extends ChangeNotifier {
     Folder f, {
     String? cwd,
     String? command,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     Launcher? launcher,
     bool place = true,
   }) {
@@ -1909,7 +2142,7 @@ class AppStore extends ChangeNotifier {
       branch: '',
       launcher: launcher,
     );
-    if (project != null && project.folderRoot == f.root) tab.projectId = project.id;
+    if (featureOrHotfix != null && featureOrHotfix.folderRoot == f.root) tab.featureOrHotfixId = featureOrHotfix.id;
     _register(tab, place: place);
     // O comando do programa, quando quem chamou não trouxe um: é o que faz
     // "abrir o btop" abrir o btop, e não um prompt onde você digitaria btop.
@@ -1927,8 +2160,8 @@ class AppStore extends ChangeNotifier {
   /// O mesmo caminho de [openShell] -- porque é isso que ele é. O que o
   /// programa acrescenta é o de fora do pty: o nome no cabeçalho, o desenho na
   /// lateral, e o painel voltando amanhã rodando a mesma coisa.
-  MxTab openLauncher(Launcher launcher, Folder f, {String? cwd, Project? project}) =>
-      openShell(f, cwd: cwd, project: project, launcher: launcher);
+  MxTab openLauncher(Launcher launcher, Folder f, {String? cwd, FeatureOrHotfix? featureOrHotfix}) =>
+      openShell(f, cwd: cwd, featureOrHotfix: featureOrHotfix, launcher: launcher);
 
   /// Launch `claude` in [cwd], named, with our hook listeners injected.
   MxTab openClaude(
@@ -1936,7 +2169,7 @@ class AppStore extends ChangeNotifier {
     required String cwd,
     String? label,
     String? resumeId,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
   }) {
@@ -1949,7 +2182,7 @@ class AppStore extends ChangeNotifier {
       customLabel: label,
     );
     tab.sessionId = resumeId;
-    if (project != null && project.folderRoot == f.root) tab.projectId = project.id;
+    if (featureOrHotfix != null && featureOrHotfix.folderRoot == f.root) tab.featureOrHotfixId = featureOrHotfix.id;
     _register(tab);
 
     final name = (label == null || label.isEmpty) ? tab.cwd.split('/').last : label;
@@ -1979,7 +2212,7 @@ class AppStore extends ChangeNotifier {
     // The project's standing context, when the panel is in one. In the system
     // prompt rather than as a first message: it has to still be true on turn
     // forty, and a first message scrolls out of the window long before that.
-    final joined = projectOf(tab);
+    final joined = featureOrHotfixOf(tab);
     final brief = joined?.brief.trim() ?? '';
     final opening = prompt?.trim() ?? '';
     final parts = [
@@ -2088,7 +2321,7 @@ class AppStore extends ChangeNotifier {
   /// As três recusas são as de [ChatStanding], e a linha do histórico já as
   /// mostrava antes do clique -- o aviso aqui é pra quem clicou de qualquer
   /// jeito, ou pra quando a sessão subiu entre a leitura da lista e o clique.
-  MxTab? resumeChat(ChatEntry chat, {Folder? folder, Project? project}) {
+  MxTab? resumeChat(ChatEntry chat, {Folder? folder, FeatureOrHotfix? featureOrHotfix}) {
     switch (standingOf(chat)) {
       case ChatStanding.onScreen:
         // Não é pra abrir de novo: é pra olhar. Uma segunda sessão no mesmo id
@@ -2127,7 +2360,7 @@ class AppStore extends ChangeNotifier {
       // numa lista de quarenta foi *aquela* conversa.
       label: chat.label,
       resumeId: chat.sessionId,
-      project: project,
+      featureOrHotfix: featureOrHotfix,
     );
   }
 
@@ -2148,7 +2381,7 @@ class AppStore extends ChangeNotifier {
   /// `.md` aberto pelo menu de uma pasta apareceria na lateral debaixo de
   /// outra. [cwd] é a pasta exata quando o lugar não é a raiz dela -- o
   /// checkout de uma worktree --, e sem ele é a raiz.
-  MxTab showDoc(MxDoc doc, {MxTab? from, Folder? folder, String? cwd, Project? project}) {
+  MxTab showDoc(MxDoc doc, {MxTab? from, Folder? folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final source = from ?? focusedTab;
     // O que está na tela primeiro; depois um que tenha saído dela -- um leitor
     // que alguém tirou do painel continua sendo *o* leitor, e abrir o próximo
@@ -2174,7 +2407,7 @@ class AppStore extends ChangeNotifier {
       doc,
       folder: folder ?? source?.folder ?? focusedFolder,
       cwd: place ? cwd : source?.cwd,
-      project: place ? project : (source == null ? null : projectOf(source)),
+      featureOrHotfix: place ? featureOrHotfix : (source == null ? null : featureOrHotfixOf(source)),
     );
     _placeBeside(tab, source);
     _save();
@@ -2224,7 +2457,7 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Um `.md` do disco. O painel relê sozinho enquanto estiver aberto.
-  MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, Project? project}) {
+  MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     if (!File(path).existsSync()) {
       showBanner('esse arquivo não está mais lá: $path', sticky: true);
       return null;
@@ -2234,7 +2467,7 @@ class AppStore extends ChangeNotifier {
       from: from,
       folder: folder,
       cwd: cwd,
-      project: project,
+      featureOrHotfix: featureOrHotfix,
     );
   }
 
@@ -2293,13 +2526,13 @@ class AppStore extends ChangeNotifier {
   /// sessão em que você clicou, que quase nunca é a do arquivo que se quer
   /// ler. Sem lugar dito -- pelo atalho de teclado -- ainda é o painel em foco
   /// quem diz onde procurar, porque ali não há outro lugar a que se referir.
-  Future<void> openMarkdown({Folder? folder, String? cwd, Project? project}) async {
+  Future<void> openMarkdown({Folder? folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) async {
     final tab = folder == null ? focusedTab : null;
     final picked = await Notifier.chooseMarkdown(
       startIn: cwd ?? folder?.root ?? tab?.cwd ?? focusedFolder.root,
     );
     if (picked == null) return;
-    showFile(picked, from: tab, folder: folder, cwd: cwd, project: project);
+    showFile(picked, from: tab, folder: folder, cwd: cwd, featureOrHotfix: featureOrHotfix);
   }
 
   /// O documento que o leitor está mostrando agora, se há um leitor na tela.
@@ -2312,7 +2545,7 @@ class AppStore extends ChangeNotifier {
   /// Se o markdown deste caminho vale um leitor em vez do Quick Look.
   static bool readable(String path) => isMarkdownPath(path);
 
-  MxTab _newReader(MxDoc doc, {required Folder folder, String? cwd, Project? project}) {
+  MxTab _newReader(MxDoc doc, {required Folder folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final tab = MxTab(
       id: 'tab${_seq++}',
       folder: folder,
@@ -2321,7 +2554,7 @@ class AppStore extends ChangeNotifier {
       branch: '',
       doc: doc,
     );
-    if (project != null && project.folderRoot == folder.root) tab.projectId = project.id;
+    if (featureOrHotfix != null && featureOrHotfix.folderRoot == folder.root) tab.featureOrHotfixId = featureOrHotfix.id;
     // Não passa pelo [_register]: não há processo pra subir nem saída de
     // processo pra escutar, e a colocação na tela é outra (ao lado, não em
     // cima).
@@ -2329,7 +2562,7 @@ class AppStore extends ChangeNotifier {
     return tab;
   }
 
-  MxTab _newSetup(MxSetup setup, {required Folder folder, String? cwd, Project? project}) {
+  MxTab _newSetup(MxSetup setup, {required Folder folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final tab = MxTab(
       id: 'tab${_seq++}',
       folder: folder,
@@ -2338,7 +2571,7 @@ class AppStore extends ChangeNotifier {
       branch: '',
       setup: setup,
     );
-    if (project != null && project.folderRoot == folder.root) tab.projectId = project.id;
+    if (featureOrHotfix != null && featureOrHotfix.folderRoot == folder.root) tab.featureOrHotfixId = featureOrHotfix.id;
     // Fora do [_register] pelo mesmo motivo do leitor: não há processo pra
     // subir nem saída de processo pra escutar.
     tabs.add(tab);
@@ -2358,7 +2591,7 @@ class AppStore extends ChangeNotifier {
   /// [cwd] é a raiz quando ela não é a da pasta -- o checkout de uma
   /// worktree, que tem o `CLAUDE.md` versionado igual e um `settings.local`
   /// só dele.
-  MxTab showSetup({required Folder folder, String? cwd, Project? project}) {
+  MxTab showSetup({required Folder folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final root = cwd ?? folder.root;
     final open = tabs.firstWhereOrNull((t) => t.isSetup && t.setup!.root == root);
     if (open != null) {
@@ -2372,7 +2605,7 @@ class AppStore extends ChangeNotifier {
       MxSetup(root: root),
       folder: folder,
       cwd: cwd,
-      project: project,
+      featureOrHotfix: featureOrHotfix,
     );
     // Ao lado do que está em foco: quem abre a configuração de uma pasta
     // quer olhar pra ela junto da sessão que está rodando ali.
@@ -2520,7 +2753,7 @@ class AppStore extends ChangeNotifier {
           folder,
           cwd: cwd,
           command: expandCommand(command.run!, values, quote: true),
-          project: tab == null ? null : projectOf(tab),
+          featureOrHotfix: tab == null ? null : featureOrHotfixOf(tab),
         );
       case CommandTarget.background:
         final r = await Sh.run(expandCommand(command.run!, values, quote: true), cwd: cwd);
@@ -2605,7 +2838,7 @@ class AppStore extends ChangeNotifier {
     required String dirPattern,
     String? baseRef,
     String? setupCommand,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
   }) async {
     final base = baseRef ?? await Git.defaultRemoteRef(p.root) ?? 'origin/master';
     final branch = branchPattern.replaceAll('{id}', taskId);
@@ -2621,12 +2854,12 @@ class AppStore extends ChangeNotifier {
     if (!outcome.ok) return null;
 
     if (setupCommand != null && setupCommand.trim().isNotEmpty) {
-      final shell = openShell(p, cwd: outcome.path, command: setupCommand.trim(), project: project);
+      final shell = openShell(p, cwd: outcome.path, command: setupCommand.trim(), featureOrHotfix: featureOrHotfix);
       shell.customLabel = '$taskId setup';
     }
 
     await refreshGit();
-    return openClaude(p, cwd: outcome.path, label: taskId, project: project);
+    return openClaude(p, cwd: outcome.path, label: taskId, featureOrHotfix: featureOrHotfix);
   }
 
   // --- worktrees ----------------------------------------------------------
@@ -2641,7 +2874,8 @@ class AppStore extends ChangeNotifier {
   /// Só o caminho: havia um `openFolderInEditor` que, dada uma pasta importada
   /// de um workspace, abria o arranjo inteiro em vez do terço dela. Ele tinha
   /// uma porta só -- a linha 'abrir no vscode' do menu da pasta --, e a linha
-  /// saiu do menu. Ver [Folder.workspace], que é o que sobrou do assunto.
+  /// saiu do menu. Ver [Workspace.codeWorkspacePath], que é o que sobrou do
+  /// assunto.
   Future<void> openInEditor(String path) async {
     if (!Directory(path).existsSync() && !File(path).existsSync()) {
       showBanner(
@@ -2992,7 +3226,7 @@ class AppStore extends ChangeNotifier {
     tabs.insert(to, tab);
     // Dropped among another project's panels, it joins that project: the list
     // it landed in is the answer to which job it is part of.
-    tab.projectId = target.projectId;
+    tab.featureOrHotfixId = target.featureOrHotfixId;
     _save();
     notifyListeners();
   }
@@ -3030,7 +3264,7 @@ class AppStore extends ChangeNotifier {
     final at = groups.indexWhere((g) => g.name.toLowerCase() == title.toLowerCase());
     final group = PaneGroup(
       // Numa atualização, o id do grupo que estava ali: é o mesmo grupo, com
-      // outro arranjo dentro. Ver [addProject] pro formato.
+      // outro arranjo dentro. Ver [addFeatureOrHotfix] pro formato.
       id: at < 0 ? 'gp${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}' : groups[at].id,
       name: title,
       panes: [for (final t in open) t.recipe],
@@ -3297,7 +3531,18 @@ class AppStore extends ChangeNotifier {
   /// Separada do [tintOf] porque a diferença entre escolhida e deduzida vale
   /// desenho: o que foi pedido é dito alto (ver `_TabRow`), o que a janela
   /// deduziu é dito baixo.
-  MxTint? chosenTintOf(MxTab tab) => projectOf(tab)?.tint ?? tab.tint ?? tab.folder.tint;
+  MxTint? chosenTintOf(MxTab tab) =>
+      featureOrHotfixOf(tab)?.tint ??
+      tab.tint ??
+      tab.folder.tint ??
+      // O fundo do fundo: a cor do primeiro workspace da pasta, na ordem da
+      // lateral. Um painel existe uma vez só, então de dois workspaces
+      // espelhando a pasta ele precisa escolher um -- e o de cima é o que se
+      // vê primeiro.
+      sidebarRows
+          .whereType<Workspace>()
+          .firstWhereOrNull((w) => w.folderRoots.contains(tab.folderRoot))
+          ?.tint;
 
   /// A cor com que este painel se lava, quando tem uma -- o cartão dele, o
   /// cabeçalho e a linha dele na lateral.
@@ -3940,13 +4185,13 @@ class AppStore extends ChangeNotifier {
     required List<FollowUp> steps,
     String? cwd,
     String? label,
-    Project? project,
+    FeatureOrHotfix? featureOrHotfix,
   }) {
     final tab = openClaude(
       folder,
       cwd: cwd ?? folder.root,
       label: label,
-      project: project,
+      featureOrHotfix: featureOrHotfix,
       prompt: prompt,
     );
     queue(tab, steps);
@@ -4081,7 +4326,7 @@ class AppStore extends ChangeNotifier {
   @visibleForTesting
   Future<void> runFollowUp(FollowUp step, {required MxTab from, bool late = false}) async {
     if (!tabs.contains(from)) return;
-    final project = projectOf(from);
+    final featureOrHotfix = featureOrHotfixOf(from);
     if (late) {
       showBanner(
         '${from.title}: os agentes dela não avisaram que terminaram — '
@@ -4101,14 +4346,14 @@ class AppStore extends ChangeNotifier {
           from.folder,
           cwd: from.cwd,
           label: '${from.title} ▸ depois',
-          project: project,
+          featureOrHotfix: featureOrHotfix,
           prompt: step.text,
         );
         _descend(tab, from);
         showBanner('${from.title} terminou — abri ${tab.title} em seguida');
 
       case FollowUpKind.command:
-        final shell = openShell(from.folder, cwd: from.cwd, command: step.text, project: project);
+        final shell = openShell(from.folder, cwd: from.cwd, command: step.text, featureOrHotfix: featureOrHotfix);
         // O comando, e não "X ▸ depois": dois passos de comando do mesmo fluxo
         // viravam duas linhas com o nome idêntico, e de onde elas vieram agora
         // quem diz é a lateral, que as pendura embaixo de quem as abriu.

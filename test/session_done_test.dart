@@ -12,7 +12,7 @@ import 'package:maestria/ui/sidebar.dart';
   return (store, folder);
 }
 
-MxTab panel(AppStore store, Folder folder, String name, {Project? project}) {
+MxTab panel(AppStore store, Folder folder, String name, {FeatureOrHotfix? featureOrHotfix}) {
   final tab = MxTab(
     id: name,
     folder: folder,
@@ -21,7 +21,7 @@ MxTab panel(AppStore store, Folder folder, String name, {Project? project}) {
     branch: '',
     customLabel: name,
   );
-  tab.projectId = project?.id;
+  tab.featureOrHotfixId = featureOrHotfix?.id;
   store.tabs.add(tab);
   return tab;
 }
@@ -80,16 +80,16 @@ void main() {
 
     test('stops asking for a human, in the folder and in the project', () {
       final (store, folder) = storeWithFolder();
-      final project = store.addProject(folder, 'permissão do google');
-      final tab = panel(store, folder, 'essa funcionou', project: project);
+      final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
+      final tab = panel(store, folder, 'essa funcionou', featureOrHotfix: featureOrHotfix);
       tab.hooks.status = ClaudeStatus.waitingPermission;
 
       expect(store.needingHuman(folder), 1);
-      expect(store.needingHumanIn(project), 1);
+      expect(store.needingHumanIn(featureOrHotfix), 1);
 
       store.setDone(tab, true);
       expect(store.needingHuman(folder), 0);
-      expect(store.needingHumanIn(project), 0);
+      expect(store.needingHumanIn(featureOrHotfix), 0);
       store.dispose();
     });
 

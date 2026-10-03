@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import '../services/notify.dart';
 import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
@@ -15,6 +16,8 @@ import 'panes.dart';
 import 'plugin_pane.dart';
 import 'settings.dart';
 import 'terminal_pane.dart';
+
+part 'sidebar_workspaces.dart';
 
 /// Folders, each with its panels underneath. The shape of the whole app.
 class Sidebar extends StatelessWidget {
@@ -75,7 +78,7 @@ class Sidebar extends StatelessWidget {
                 for (final row in store.sidebarRows) ...[
                   if (row case final Workspace w)
                     if (!store.filtering || store.hasHitsInWorkspace(w))
-                      _WorkspaceSection(key: ValueKey(w.path), store: store, workspace: w),
+                      _WorkspaceSection(key: ValueKey(w.id), store: store, workspace: w),
                   if (row case final Folder p)
                     if (!store.filtering || store.hasHits(p))
                       _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
@@ -201,13 +204,21 @@ class _Footer extends StatelessWidget {
       child: Row(
         spacing: _StripIcon.gap,
         children: [
-          _StripIcon(
-            // Sem rótulo: `create_new_folder` já é a pasta *e* o +, então a
-            // palavra ao lado era repetição. O tooltip continua dizendo o que
-            // ele adiciona.
-            icon: Icons.create_new_folder_outlined,
-            tooltip: 'adicionar uma pasta ao cockpit',
-            onPressed: () => showAddFolder(context, store),
+          // Um menu ancorado no ícone: pasta, import de .code-workspace ou
+          // workspace novo. O Builder dá o contexto do próprio ícone, que é de
+          // onde sai a âncora.
+          Builder(
+            builder: (context) => _StripIcon(
+              // Sem rótulo: `create_new_folder` já é a pasta *e* o +, então a
+              // palavra ao lado era repetição. O tooltip continua dizendo o que
+              // ele adiciona.
+              icon: Icons.create_new_folder_outlined,
+              tooltip: 'adicionar pasta ou workspace',
+              onPressed: () {
+                final box = context.findRenderObject() as RenderBox;
+                _showFooterAdd(context, store, box.localToGlobal(Offset.zero));
+              },
+            ),
           ),
           // O histórico, inteiro: todas as pastas de uma vez, repartido por
           // pasta -- e este é o único lugar por onde se chega nele. A lista
@@ -408,7 +419,7 @@ class _FilterButton extends StatelessWidget {
     return _MiniButton(
       icon: Icons.filter_list_rounded,
       tooltip: active == 0
-          ? 'filtrar por pasta, projeto ou estado'
+          ? 'filtrar por pasta, feature/hotfix ou estado'
           : '$active ${active == 1 ? 'filtro' : 'filtros'} — clique pra mexer',
       // O ponto é o que diz, com o menu fechado, que a lista na sua frente não
       // é a lista inteira. Sem ele, um filtro esquecido é uma sessão que
@@ -645,122 +656,26 @@ class _StripIcon extends StatelessWidget {
   }
 }
 
-/// As pastas de um workspace do VS Code, juntas e sob uma linha que dobra.
-///
-/// A linha não faz nada além de juntar e dobrar, e é de propósito: o que se
-/// abre, se renomeia e se remove continua sendo a pasta, cada uma com o menu
-/// que ela sempre teve. Ver [Workspace] -- a seção é uma leitura das pastas,
-/// não uma dona delas.
-///
-/// Sem ela, importar um arquivo de sete pastas era despejar sete linhas soltas
-/// na raiz da lateral, sem nada dizendo que elas vieram juntas nem como
-/// escondê-las de uma vez.
-class _WorkspaceSection extends StatelessWidget {
-  const _WorkspaceSection({super.key, required this.store, required this.workspace});
-
-  final AppStore store;
-  final Workspace workspace;
-
-  @override
-  Widget build(BuildContext context) {
-    // Com uma busca em curso, só as pastas que ela achou -- e a seção dobrada
-    // abre, como a pasta e o projeto fazem: o que você escolheu continua
-    // guardado, só não vale enquanto se procura. Ver [_FolderGroup].
-    final folders = store
-        .foldersOf(workspace)
-        .where((f) => !store.filtering || store.hasHits(f))
-        .toList();
-    final collapsed = workspace.collapsed && !store.filtering;
-    // O que a seção esconde quando está fechada, contado em pastas: é a única
-    // coisa que a linha tem pra dizer sobre si, e some quando elas estão à
-    // vista.
-    final count = store.foldersOf(workspace).length;
-    final alerts = folders.fold<int>(0, (a, f) => a + store.needingHuman(f));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Sem [_Hoverable]: a linha não tem botão que apareça sob o ponteiro
-        // -- o que se faz com uma pasta continua no menu dela --, e o realce
-        // de passar por cima é o do próprio InkWell.
-        //
-        // A seção inteira se arrasta por este cabeçalho, com as pastas dela
-        // dentro. Ver [_RowDrag].
-        _RowDrag(
-          store: store,
-          row: workspace,
-          child: InkWell(
-            onTap: () => store.toggleWorkspaceCollapsed(workspace),
-            onSecondaryTapDown: (d) =>
-                showWorkspaceMenu(context, store, workspace, d.globalPosition),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    collapsed ? Icons.chevron_right : Icons.expand_more,
-                    size: 20,
-                    color: Mx.fgDim,
-                  ),
-                  const SizedBox(width: 3),
-                  // Nem o glifo de repo nem o do projeto: um workspace não é um
-                  // checkout e não é um trabalho com nome, e repetir um dos dois
-                  // desenhos aqui faria a linha se passar pelo que ela não é.
-                  Icon(Icons.hexagon_outlined, size: 15, color: Mx.accent),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      workspace.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                    ),
-                  ),
-                  // Fechada, a seção é a única linha que sobra de tudo que está
-                  // lá dentro: o aviso de uma sessão parada esperando por você
-                  // tem que atravessar, ou ele fica escondido junto.
-                  if (collapsed && alerts > 0) _Badge(count: alerts),
-                  Text(
-                    count == 1 ? '1 pasta' : '$count pastas',
-                    style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
-                  ),
-                  _RowButton(
-                    tooltip: 'o que fazer com esse workspace',
-                    icon: Icons.more_horiz,
-                    onTap: (anchor) => showWorkspaceMenu(context, store, workspace, anchor),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (!collapsed)
-          _Nest(
-            children: [
-              for (final f in folders) _FolderGroup(key: ValueKey(f.root), store: store, folder: f),
-              const SizedBox(height: 4),
-            ],
-          ),
-      ],
-    );
-  }
-}
-
 /// A folder and everything under it. Never the loose tray — that is
 /// [_LooseTray], which is not a folder and stopped pretending to be one.
 class _FolderGroup extends StatelessWidget {
-  const _FolderGroup({super.key, required this.store, required this.folder});
+  const _FolderGroup({super.key, required this.store, required this.folder, this.within});
   final AppStore store;
   final Folder folder;
+
+  /// O workspace em que esta aparição está desenhada; null na raiz. A mesma
+  /// pasta aparece uma vez em cada workspace dela.
+  final Workspace? within;
 
   @override
   Widget build(BuildContext context) {
     // Panels that belong to a project are drawn inside it, not twice. Com uma
     // busca em curso é só o que ela achou -- e um projeto sem achado sai junto.
-    final projects = store
-        .projectsOf(folder)
+    final featuresOrHotfixes = store
+        .featuresOrHotfixesOf(folder)
         .where((p) => !store.filtering || store.visible(store.tabsIn(p)).isNotEmpty)
         .toList();
-    final tabs = store.visible(store.tabsOf(folder).where((t) => t.projectId == null));
+    final tabs = store.visible(store.tabsOf(folder).where((t) => t.featureOrHotfixId == null));
     final all = store.worktrees[folder.root] ?? const <WorktreeInfo>[];
     // Only the repo's own worktrees. Claude Code keeps transient ones under
     // ~/.local/state, and offering to do anything to one of those is offering
@@ -776,7 +691,13 @@ class _FolderGroup extends StatelessWidget {
     final alerts = store.needingHuman(folder);
     // Dobrada, uma pasta esconderia o que a busca acabou de achar nela. O que
     // você escolheu continua guardado -- só não vale enquanto se procura.
-    final collapsed = folder.collapsed && !store.filtering;
+    //
+    // A dobra é da aparição, não da pasta: espelhada em dois workspaces, ela
+    // dobra num e continua aberta no outro.
+    final collapsed = store.isFolderCollapsed(folder, within: within) && !store.filtering;
+    // Sem cor própria, a pasta veste a do workspace em que está desenhada --
+    // é o que diz, na linha dela, de que grupo ela é.
+    final tint = folder.tint?.color ?? within?.tint?.color;
     final count = store.filtering
         ? store.visible(store.tabsOf(folder)).length
         : store.tabsOf(folder).length;
@@ -791,14 +712,21 @@ class _FolderGroup extends StatelessWidget {
         // [_RowDrag].
         _RowDrag(
           store: store,
-          row: folder,
+          place: (row: folder, within: within),
           child: _Hoverable(
             builder: (hovered) => InkWell(
-              onTap: () => store.toggleCollapsed(folder),
+              onTap: () => store.toggleFolderCollapsed(folder, within: within),
               // The whole header is the target the worktrees hang off now, not
               // just the ⋯ at the end of it.
               onSecondaryTapDown: (d) =>
-                  showFolderMenu(context, store, folder, worktrees, d.globalPosition),
+                  showFolderMenu(
+                    context,
+                    store,
+                    folder,
+                    worktrees,
+                    d.globalPosition,
+                    within: within,
+                  ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
                 child: Row(
@@ -811,7 +739,7 @@ class _FolderGroup extends StatelessWidget {
                     const SizedBox(width: 3),
                     // Na cor da pasta quando ela tem uma: é o fundo do repo
                     // dito na linha que abre o repo. Ver [MxTint].
-                    RepoGlyph(isRepo: folder.isRepo, color: folder.tint?.color),
+                    RepoGlyph(isRepo: folder.isRepo, color: tint),
                     const SizedBox(width: 9),
                     Expanded(
                       child: Column(
@@ -862,7 +790,7 @@ class _FolderGroup extends StatelessWidget {
                       // the only thing left to aim at: it stays out.
                       shown: hovered || store.tabsOf(folder).isEmpty,
                     ),
-                    _FolderMenu(store: store, folder: folder, worktrees: worktrees),
+                    _FolderMenu(store: store, folder: folder, worktrees: worktrees, within: within),
                   ],
                 ),
               ),
@@ -873,10 +801,10 @@ class _FolderGroup extends StatelessWidget {
           _Nest(
             // Como a do projeto: a trilha diz de que pasta é o que está
             // pendurado nela.
-            color: folder.tint?.color,
+            color: tint,
             children: [
-              for (final p in projects)
-                _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
+              for (final p in featuresOrHotfixes)
+                _FeatureOrHotfixGroup(key: ValueKey(p.id), store: store, folder: folder, featureOrHotfix: p),
               ..._panelRows(store, tabs),
               // The strip of chips used to end the nest; the rail still wants
               // to run a little past the last row rather than stop dead on it.
@@ -885,113 +813,6 @@ class _FolderGroup extends StatelessWidget {
           ),
       ],
     );
-  }
-}
-
-/// Arrasta uma linha de primeiro nível da lateral pra outro lugar da lista.
-///
-/// É [_PanelDrag] um degrau acima, e de propósito: pega-se pelo cabeçalho,
-/// solta-se sobre outra linha, e a linha em que se soltou é a vaga -- a listra
-/// diz de que lado ela vai ficar. A pasta que você acabou de adicionar caía em
-/// último e ficava lá; agora ela sobe pra segunda posição como um painel sobe.
-///
-/// Quem pode ir pra onde é [AppStore.canMoveRow]: uma pasta de workspace se
-/// arruma entre as pastas dele, e a raiz da lateral se arruma entre seções e
-/// pastas soltas. Uma linha que não aceita o que está no ar nunca acende.
-///
-/// O que ele leva junto não é o que o cartão mostra: o cabeçalho voa sozinho,
-/// mas o que se move é a pasta com as sessões dela dentro -- ou a seção com as
-/// sete pastas. Mostrar a ninhada inteira no ar seria um cartão do tamanho da
-/// lateral pra dizer o que o cabeçalho já diz.
-class _RowDrag extends StatefulWidget {
-  const _RowDrag({required this.store, required this.row, required this.child});
-
-  final AppStore store;
-  final SidebarRow row;
-  final Widget child;
-
-  @override
-  State<_RowDrag> createState() => _RowDragState();
-}
-
-class _RowDragState extends State<_RowDrag> {
-  /// A linha pairando sobre esta, quando é uma que esta aceitaria.
-  SidebarRow? _incoming;
-
-  /// De que lado fica a listra. Igual a [_PanelDrag]: o que vem de cima toma a
-  /// vaga desta linha e a empurra pra cima, então para embaixo dela.
-  bool get _fromAbove => _orderOf(_incoming!) < _orderOf(widget.row);
-
-  /// Onde a linha está na lateral, de cima pra baixo. Uma seção vale pela
-  /// primeira pasta dela, que é onde a lateral a desenha -- ver
-  /// [AppStore.sidebarRows].
-  int _orderOf(SidebarRow row) {
-    final block = widget.store.foldersOfRow(row);
-    return block.isEmpty ? -1 : widget.store.folders.indexOf(block.first);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // A largura em que a linha está deitada, pra que a do ar seja a mesma
-    // linha e não o que a camada de cima daria a uma solta.
-    return LayoutBuilder(
-      builder: (context, box) => DragTarget<SidebarRow>(
-        onWillAcceptWithDetails: (d) {
-          // Solta de volta em cima de si. Um arrasto de mouse começa com um
-          // pixel, então isso é um clique cujo ponteiro escorregou -- e ele
-          // vale pelo clique que era pra ser.
-          if (identical(d.data, widget.row)) return true;
-          if (!widget.store.canMoveRow(d.data, widget.row)) return false;
-          setState(() => _incoming = d.data);
-          return true;
-        },
-        onLeave: (_) {
-          if (_incoming != null) setState(() => _incoming = null);
-        },
-        onAcceptWithDetails: (d) {
-          setState(() => _incoming = null);
-          if (identical(d.data, widget.row)) {
-            _toggle();
-          } else {
-            widget.store.moveRow(d.data, widget.row);
-          }
-        },
-        builder: (context, _, _) => Stack(
-          children: [
-            Draggable<SidebarRow>(
-              data: widget.row,
-              feedback: _lifted(widget.child, box.maxWidth),
-              // O buraco que fica: ainda uma linha, pra lista não mudar de
-              // forma enquanto uma delas está no ar.
-              childWhenDragging: Opacity(opacity: 0.3, child: widget.child),
-              child: widget.child,
-            ),
-            if (_incoming != null)
-              Positioned(
-                left: 7,
-                right: 7,
-                top: _fromAbove ? null : 0,
-                bottom: _fromAbove ? 0 : null,
-                child: Container(
-                  height: 2.5,
-                  decoration: BoxDecoration(
-                    color: Mx.accent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// O clique que o arrasto engoliu: dobrar a linha, que é o que o cabeçalho
-  /// faz quando se clica nele.
-  void _toggle() {
-    final row = widget.row;
-    if (row is Folder) widget.store.toggleCollapsed(row);
-    if (row is Workspace) widget.store.toggleWorkspaceCollapsed(row);
   }
 }
 
@@ -1017,11 +838,11 @@ class _LooseTray extends StatelessWidget {
     final folder = store.loose;
     // Ver [_FolderGroup]: painel de projeto se desenha dentro dele e não duas
     // vezes, e projeto sem achado sai da lateral enquanto a busca durar.
-    final projects = store
-        .projectsOf(folder)
+    final featuresOrHotfixes = store
+        .featuresOrHotfixesOf(folder)
         .where((p) => !store.filtering || store.visible(store.tabsIn(p)).isNotEmpty)
         .toList();
-    final tabs = store.visible(store.tabsOf(folder).where((t) => t.projectId == null));
+    final tabs = store.visible(store.tabsOf(folder).where((t) => t.featureOrHotfixId == null));
     final alerts = store.needingHuman(folder);
     // Tudo que está na bandeja, projetos inclusive -- o número na régua conta
     // o lugar, e não a lista de linhas soltas que por acaso vem embaixo dela.
@@ -1075,7 +896,7 @@ class _LooseTray extends StatelessWidget {
                 _AddButton(
                   store: store,
                   folder: folder,
-                  shown: hovered || (tabs.isEmpty && projects.isEmpty),
+                  shown: hovered || (tabs.isEmpty && featuresOrHotfixes.isEmpty),
                 ),
                 _LooseMenu(store: store),
               ],
@@ -1084,8 +905,8 @@ class _LooseTray extends StatelessWidget {
         ),
         // Os projetos primeiro e as linhas soltas depois, como numa pasta: o
         // que tem nome vem antes do que sobrou.
-        for (final p in projects)
-          _ProjectGroup(key: ValueKey(p.id), store: store, folder: folder, project: p),
+        for (final p in featuresOrHotfixes)
+          _FeatureOrHotfixGroup(key: ValueKey(p.id), store: store, folder: folder, featureOrHotfix: p),
         ..._panelRows(store, tabs),
       ],
     );
@@ -1422,10 +1243,11 @@ class _LooseMenu extends StatelessWidget {
           context,
           at: anchor,
           items: [
+            for (final kind in FeatureOrHotfixKind.values)
             mxItem(
-              'newproject',
-              glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-              label: 'novo projeto…',
+              'new:${kind.name}',
+              glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+              label: '${kind.newLabel}…',
             ),
             mxItem(
               'sweep',
@@ -1435,7 +1257,15 @@ class _LooseMenu extends StatelessWidget {
           ],
         );
         if (choice == null || !context.mounted) return;
-        if (choice == 'newproject') await showNewProject(context, store, store.loose);
+        if (choice.startsWith('new:')) {
+          await showNewFeatureOrHotfix(
+            context,
+            store,
+            store.loose,
+            kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+          );
+          return;
+        }
         if (choice == 'sweep') _sweep(store, store.loose);
       },
     );
@@ -1654,38 +1484,38 @@ Future<void> showGroupMenu(
 /// folder one level up, which is the point: the sidebar is now three deep —
 /// where the code is, what it is for, and who is working on it. Na bandeja o
 /// primeiro degrau não existe, e é a mesma linha sem nada por cima.
-class _ProjectGroup extends StatelessWidget {
-  const _ProjectGroup({
+class _FeatureOrHotfixGroup extends StatelessWidget {
+  const _FeatureOrHotfixGroup({
     super.key,
     required this.store,
     required this.folder,
-    required this.project,
+    required this.featureOrHotfix,
   });
 
   final AppStore store;
   final Folder folder;
-  final Project project;
+  final FeatureOrHotfix featureOrHotfix;
 
   @override
   Widget build(BuildContext context) {
-    final tabs = store.visible(store.tabsIn(project));
-    final alerts = store.needingHumanIn(project);
+    final tabs = store.visible(store.tabsIn(featureOrHotfix));
+    final alerts = store.needingHumanIn(featureOrHotfix);
     // Ver [_FolderGroup]: durante a busca, o que está dobrado abre.
-    final collapsed = project.collapsed && !store.filtering;
+    final collapsed = featureOrHotfix.collapsed && !store.filtering;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Dropping a panel on the header is how it joins: the same drag that
         // reorders panels, aimed one row higher.
-        _ProjectDrop(
+        _FeatureOrHotfixDrop(
           store: store,
-          project: project,
+          featureOrHotfix: featureOrHotfix,
           child: _Hoverable(
             builder: (hovered) => InkWell(
-              onTap: () => store.toggleProjectCollapsed(project),
+              onTap: () => store.toggleFeatureOrHotfixCollapsed(featureOrHotfix),
               onSecondaryTapDown: (d) =>
-                  showProjectMenu(context, store, folder, project, d.globalPosition),
+                  showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, d.globalPosition),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(7, 8, 4, 8),
                 child: Row(
@@ -1700,21 +1530,32 @@ class _ProjectGroup extends StatelessWidget {
                     // roxa de sempre até alguém pintá-lo, e a partir daí é
                     // ela que diz de que projeto são os painéis pendurados
                     // aqui embaixo. Ver [MxTint].
-                    Icon(Icons.track_changes, size: 15, color: project.tint?.color ?? Mx.purple),
+                    Icon(featureOrHotfix.kind.icon, size: 15, color: featureOrHotfix.tint?.color ?? Mx.purple),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        project.name,
+                        featureOrHotfix.name,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                       ),
                     ),
+                    // A natureza só se escreve quando não é a de sempre: uma
+                    // lista em que toda linha diz "feature" é uma lista em que
+                    // a palavra não diz nada.
+                    if (featureOrHotfix.kind == FeatureOrHotfixKind.hotfix)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text(
+                          'hotfix',
+                          style: TextStyle(fontSize: 10.5, color: Mx.fgFaint),
+                        ),
+                      ),
                     // The briefing is invisible by nature — it is in a system
                     // prompt you never see scroll by. This is the only place
                     // that says a project has one.
-                    if (project.brief.trim().isNotEmpty)
+                    if (featureOrHotfix.brief.trim().isNotEmpty)
                       Tooltip(
-                        message: project.brief.trim(),
+                        message: featureOrHotfix.brief.trim(),
                         child: Padding(
                           padding: const EdgeInsets.only(right: 5),
                           child: Icon(Icons.sticky_note_2_outlined, size: 13, color: Mx.fgFaint),
@@ -1725,13 +1566,13 @@ class _ProjectGroup extends StatelessWidget {
                     _AddButton(
                       store: store,
                       folder: folder,
-                      project: project,
+                      featureOrHotfix: featureOrHotfix,
                       shown: hovered || tabs.isEmpty,
                     ),
                     _RowButton(
-                      tooltip: 'o que fazer com esse projeto',
+                      tooltip: 'o que fazer com ${featureOrHotfix.kind.thisOne}',
                       icon: Icons.more_horiz,
-                      onTap: (anchor) => showProjectMenu(context, store, folder, project, anchor),
+                      onTap: (anchor) => showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, anchor),
                     ),
                   ],
                 ),
@@ -1747,7 +1588,7 @@ class _ProjectGroup extends StatelessWidget {
             rail: 15,
             // A trilha é o que liga as sessões ao projeto delas; pintada, ela
             // diz de relance onde aquele bloco de cor começa e acaba.
-            color: project.tint?.color,
+            color: featureOrHotfix.tint?.color,
             children: [..._panelRows(store, tabs), const SizedBox(height: 4)],
           ),
       ],
@@ -1760,26 +1601,26 @@ class _ProjectGroup extends StatelessWidget {
 /// Only panels of the same folder light it up — a project's briefing talks
 /// about a checkout, so a session running somewhere else could not be told to
 /// obey it.
-class _ProjectDrop extends StatefulWidget {
-  const _ProjectDrop({required this.store, required this.project, required this.child});
+class _FeatureOrHotfixDrop extends StatefulWidget {
+  const _FeatureOrHotfixDrop({required this.store, required this.featureOrHotfix, required this.child});
 
   final AppStore store;
-  final Project project;
+  final FeatureOrHotfix featureOrHotfix;
   final Widget child;
 
   @override
-  State<_ProjectDrop> createState() => _ProjectDropState();
+  State<_FeatureOrHotfixDrop> createState() => _FeatureOrHotfixDropState();
 }
 
-class _ProjectDropState extends State<_ProjectDrop> {
+class _FeatureOrHotfixDropState extends State<_FeatureOrHotfixDrop> {
   bool _over = false;
 
   @override
   Widget build(BuildContext context) {
     return DragTarget<MxTab>(
       onWillAcceptWithDetails: (d) {
-        if (d.data.folderRoot != widget.project.folderRoot) return false;
-        if (d.data.projectId == widget.project.id) return false;
+        if (d.data.folderRoot != widget.featureOrHotfix.folderRoot) return false;
+        if (d.data.featureOrHotfixId == widget.featureOrHotfix.id) return false;
         setState(() => _over = true);
         return true;
       },
@@ -1788,7 +1629,7 @@ class _ProjectDropState extends State<_ProjectDrop> {
       },
       onAcceptWithDetails: (d) {
         setState(() => _over = false);
-        widget.store.assign(d.data, widget.project);
+        widget.store.assign(d.data, widget.featureOrHotfix);
       },
       builder: (context, _, _) => Container(
         margin: const EdgeInsets.symmetric(horizontal: 7),
@@ -2246,14 +2087,14 @@ class _HoverableState extends State<_Hoverable> {
 /// Hidden or shown, the space is reserved: a control that appears under the
 /// pointer must not shove the rest of the row sideways when it does.
 class _AddButton extends StatelessWidget {
-  const _AddButton({required this.store, required this.folder, this.project, required this.shown});
+  const _AddButton({required this.store, required this.folder, this.featureOrHotfix, required this.shown});
 
   final AppStore store;
   final Folder folder;
 
   /// Set on a project's header: what the menu starts joins that project and
   /// comes up with its briefing.
-  final Project? project;
+  final FeatureOrHotfix? featureOrHotfix;
 
   /// Whether the pointer is on the row this rides on — or the group has
   /// nothing in it, in which case there are no rows to hover over and the +
@@ -2273,13 +2114,13 @@ class _AddButton extends StatelessWidget {
         child: _RowButton(
           // Three different rows can hold one of these, and the tooltip is the
           // only thing that says which of them you are about to add to.
-          tooltip: project != null
-              ? 'abrir algo nesse projeto'
+          tooltip: featureOrHotfix != null
+              ? 'abrir algo ${featureOrHotfix!.kind.inThis}'
               : folder.isLoose
               ? 'abrir algo sem pasta'
               : 'abrir algo nessa pasta',
           icon: Icons.add,
-          onTap: (anchor) => _showAddMenu(context, store, folder, project, anchor),
+          onTap: (anchor) => _showAddMenu(context, store, folder, featureOrHotfix, anchor),
         ),
       ),
     );
@@ -2318,6 +2159,44 @@ class _ClearButton extends StatelessWidget {
   }
 }
 
+/// O que o + do rodapé põe na lateral: uma pasta, as pastas de um
+/// `.code-workspace` ou um workspace novo.
+Future<void> _showFooterAdd(BuildContext context, AppStore store, Offset anchor) async {
+  final choice = await mxMenu<String>(
+    context,
+    at: anchor,
+    items: [
+      mxItem(
+        'folder',
+        glyph: Icon(Icons.create_new_folder_outlined, size: 14, color: Mx.fgDim),
+        label: 'adicionar pasta…',
+      ),
+      mxItem(
+        'import',
+        glyph: Icon(Icons.file_open_outlined, size: 14, color: Mx.fgDim),
+        label: 'importar .code-workspace…',
+      ),
+      mxDivider(),
+      mxItem(
+        'workspace',
+        glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.accent),
+        label: 'novo workspace…',
+      ),
+    ],
+  );
+  if (choice == null || !context.mounted) return;
+  switch (choice) {
+    case 'folder':
+      await showAddFolder(context, store);
+    case 'import':
+      final picked = await Notifier.chooseWorkspace();
+      if (picked.path case final path?) await store.importWorkspace(path);
+      if (!picked.available) store.showBanner('não consegui abrir o seletor de arquivos', sticky: true);
+    case 'workspace':
+      await showNewWorkspace(context, store);
+  }
+}
+
 /// What the + offers: [openHereItems], plus the one thing only the + has.
 ///
 /// A bandeja dos avulsos oferece projeto como qualquer pasta. Ela não é uma
@@ -2329,7 +2208,7 @@ Future<void> _showAddMenu(
   BuildContext context,
   AppStore store,
   Folder folder,
-  Project? project,
+  FeatureOrHotfix? featureOrHotfix,
   Offset anchor,
 ) async {
   final choice = await mxMenu<String>(
@@ -2339,71 +2218,56 @@ Future<void> _showAddMenu(
       ...openHereItems(store),
       // Depois do risco porque não é abrir um painel: é dar nome ao trabalho
       // que os painéis vão fazer.
-      if (project == null) ...[
+      if (featureOrHotfix == null) ...[
         mxDivider(),
+        for (final kind in FeatureOrHotfixKind.values)
         mxItem(
-          'projeto',
-          glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-          label: 'projeto…',
+          'new:${kind.name}',
+          glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+          label: '${kind.label}…',
         ),
       ],
     ],
   );
   if (choice == null || !context.mounted) return;
 
-  if (choice == 'projeto') {
-    await showNewProject(context, store, folder);
+  if (choice.startsWith('new:')) {
+    await showNewFeatureOrHotfix(
+      context,
+      store,
+      folder,
+      kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+    );
     return;
   }
-  await openHereChoice(context, store, choice, folder: folder, project: project);
+  await openHereChoice(context, store, choice, folder: folder, featureOrHotfix: featureOrHotfix);
 }
 
 /// The ⋯ on a repo header. One definition, two ways in: this and the header's
 /// right-click both open [showFolderMenu], anchored where you clicked.
 class _FolderMenu extends StatelessWidget {
-  const _FolderMenu({required this.store, required this.folder, required this.worktrees});
+  const _FolderMenu({
+    required this.store,
+    required this.folder,
+    required this.worktrees,
+    this.within,
+  });
   final AppStore store;
   final Folder folder;
   final List<WorktreeInfo> worktrees;
+
+  /// Ver [_FolderGroup.within].
+  final Workspace? within;
 
   @override
   Widget build(BuildContext context) {
     return _RowButton(
       tooltip: 'o que fazer com essa pasta',
       icon: Icons.more_horiz,
-      onTap: (anchor) => showFolderMenu(context, store, folder, worktrees, anchor),
+      onTap: (anchor) =>
+          showFolderMenu(context, store, folder, worktrees, anchor, within: within),
     );
   }
-}
-
-/// O que dá pra fazer com a seção de um workspace. Uma linha, e é a que faltava
-/// pra ele ter volta: importar põe as pastas, isto tira.
-///
-/// Só ela porque a seção não é dona de nada -- abrir, renomear e remover
-/// continuam sendo da pasta, cada uma com o menu que sempre teve. Ver
-/// [Workspace].
-Future<void> showWorkspaceMenu(
-  BuildContext context,
-  AppStore store,
-  Workspace workspace,
-  Offset anchor,
-) async {
-  final choice = await mxMenu<String>(
-    context,
-    at: anchor,
-    items: [
-      // As reticências prometem a pergunta que vem: fechar leva as pastas e as
-      // sessões delas, e isso não acontece num clique só.
-      mxItem(
-        'close',
-        glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.fgDim),
-        label: 'fechar workspace…',
-        color: Mx.red,
-      ),
-    ],
-  );
-  if (choice != 'close' || !context.mounted) return;
-  await confirmCloseWorkspace(context, store, workspace);
 }
 
 /// Everything you can do to a folder — abrir algo nela inclusive — e a porta
@@ -2426,8 +2290,11 @@ Future<void> showFolderMenu(
   AppStore store,
   Folder folder,
   List<WorktreeInfo> worktrees,
-  Offset anchor,
-) async {
+  Offset anchor, {
+  // O workspace da aparição em que o menu abriu; null na raiz. Quem o usa são
+  // os itens de workspace do menu.
+  Workspace? within,
+}) async {
   final ghosts = worktrees.where((w) => w.prunable).length;
   // Every repo has a main checkout, so a repo with nothing else has a list of
   // one thing -- the folder you just right-clicked. The line only appears once
@@ -2477,10 +2344,11 @@ Future<void> showFolderMenu(
       // `refreshGit` já roda de dez em dez segundos sozinho (ver
       // [AppStore.start]) -- uma linha de menu pra pedir o que acontece de
       // graça é uma linha que só ensina a duvidar dela.
+      for (final kind in FeatureOrHotfixKind.values)
       mxItem(
-        'newproject',
-        glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-        label: 'novo projeto…',
+        'new:${kind.name}',
+        glyph: Icon(kind.icon, size: 14, color: Mx.purple),
+        label: '${kind.newLabel}…',
       ),
       mxItem(
         'rename',
@@ -2492,6 +2360,36 @@ Future<void> showFolderMenu(
       // pintou e que não é de projeto pintado. Ver [tintItem] e
       // [AppStore.chosenTintOf].
       tintItem(folder.tint),
+      // Em que workspaces a pasta está: marcar e desmarcar é como ela fica em
+      // vários -- o repo de infra de dois produtos.
+      MxSubmenuItem(
+        label: 'adicionar a workspace',
+        glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.fgDim),
+        items: () => [
+          for (final w in store.workspaces)
+            MxSubItem(
+              value: 'ws:${w.id}',
+              label: w.name,
+              glyph: Icon(
+                w.folderRoots.contains(folder.root) ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 13,
+                color: Mx.fgDim,
+              ),
+            ),
+          MxSubItem(
+            value: 'ws:new',
+            label: 'novo workspace…',
+            glyph: Icon(Icons.add, size: 13, color: Mx.fgDim),
+            divided: store.workspaces.isNotEmpty,
+          ),
+        ],
+      ),
+      if (within != null)
+        mxItem(
+          'leave',
+          glyph: Icon(Icons.logout, size: 14, color: Mx.fgDim),
+          label: 'tirar deste workspace',
+        ),
       mxDivider(),
       // E o que tira coisas da lateral.
       mxItem(
@@ -2513,13 +2411,21 @@ Future<void> showFolderMenu(
   if (await openHereChoice(context, store, choice, folder: folder)) return;
   if (!context.mounted) return;
 
+  if (choice.startsWith('new:')) {
+    await showNewFeatureOrHotfix(
+      context,
+      store,
+      folder,
+      kind: FeatureOrHotfixKind.byName(choice.substring(4)),
+    );
+    return;
+  }
+
   switch (choice) {
     case 'setup':
       store.showSetup(folder: folder);
     case 'worktrees':
       await showWorktreesMenu(context, store, folder, worktrees, anchor);
-    case 'newproject':
-      await showNewProject(context, store, folder);
     case 'rename':
       final name = await promptText(
         context,
@@ -2530,6 +2436,16 @@ Future<void> showFolderMenu(
       if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
     case final pick when isTintChoice(pick):
       store.setFolderTint(folder, tintPicked(pick));
+    case 'ws:new':
+      await showNewWorkspace(context, store, preselect: folder);
+    case final pick when pick.startsWith('ws:'):
+      if (store.workspaceById(pick.substring(3)) case final w?) {
+        w.folderRoots.contains(folder.root)
+            ? store.removeFromWorkspace(folder, w)
+            : store.addToWorkspace(folder, w);
+      }
+    case 'leave':
+      store.removeFromWorkspace(folder, within!);
     case 'sweep':
       store.closeSettled(folder);
     case 'remove':

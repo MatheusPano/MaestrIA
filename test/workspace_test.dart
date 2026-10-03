@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -7,11 +8,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/services/workspace.dart';
+import 'package:maestria/theme.dart';
 import 'package:maestria/ui/dialogs.dart';
 import 'package:maestria/ui/sidebar.dart';
 
 CodeWorkspace? parse(String source, {String path = '/repos/cefis.code-workspace'}) =>
     CodeWorkspace.parse(source, path: path);
+
+/// O config que o store acabou de gravar. O save é debounced, então a leitura
+/// espera o arquivo aparecer.
+Future<Map<String, dynamic>> savedConfig(AppStore store) async {
+  final file = File(store.configPath);
+  for (var i = 0; i < 60 && !file.existsSync(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  return jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+}
 
 void main() {
   final home = Platform.environment['HOME'] ?? '';
@@ -154,7 +166,8 @@ void main() {
       expect(result, isNotNull);
       expect(result!.added.length, 2);
       expect(store.folders.map((f) => f.root), containsAll(made));
-      expect(store.folders.every((f) => f.workspace == path), isTrue);
+      expect(store.foldersOf(store.workspaces.single).map((f) => f.root), made);
+      expect(store.workspaces.single.codeWorkspacePath, path);
       expect(store.banner, 'workspace "cefis": 2 pastas adicionadas');
     });
 
@@ -214,10 +227,8 @@ void main() {
       expect(store.banner, 'workspace "cefis": 2 já estavam aqui');
     });
 
-    // Uma pasta que já veio de outro arquivo continua daquele: o workspace
-    // mais recente não é mais verdadeiro que o primeiro, e trocar por baixo
-    // mudaria o que o "abrir no vscode" dela faz.
-    test('o segundo workspace não rouba a pasta do primeiro', () async {
+    // Com o espelho, a pasta que os dois arquivos listam fica nos dois.
+    test('a pasta que dois arquivos listam fica nos dois workspaces', () async {
       final (path, made) = await onDisk(['api']);
       final outro = File('${File(path).parent.path}/outro.code-workspace')
         ..writeAsStringSync('{"folders": [{"path": "${made.single}"}]}');
@@ -227,7 +238,9 @@ void main() {
       await store.importWorkspace(path);
       await store.importWorkspace(outro.path);
 
-      expect(store.folders.single.workspace, path);
+      expect(store.folders.length, 1);
+      expect(store.workspaces.length, 2);
+      expect(store.workspacesOf(store.folders.single).length, 2);
     });
 
     test('arquivo que não está lá e workspace sem pasta viram tarja', () async {
@@ -367,7 +380,7 @@ void main() {
 
       await store.importWorkspace(path);
 
-      expect(store.workspaces.single.path, path);
+      expect(store.workspaces.single.codeWorkspacePath, path);
       expect(store.workspaces.single.name, 'cefis');
       expect(store.foldersOf(store.workspaces.single).length, 2);
     });
@@ -384,25 +397,44 @@ void main() {
       expect(store.workspaces, isEmpty);
     });
 
-    test('o carimbo sobrevive à ida e volta do config', () {
-      final folder = Folder(root: '/repo', name: 'api', workspace: '/repos/x.code-workspace');
-      final back = Folder.fromJson(folder.toJson());
-      expect(back.workspace, '/repos/x.code-workspace');
-      // E a pasta de sempre continua sem campo nenhum a mais no arquivo.
-      expect(Folder(root: '/repo', name: 'api').toJson().containsKey('workspace'), isFalse);
+    test('o workspace sobrevive à ida e volta do config', () {
+      final ws = Workspace(
+        id: 'ws1',
+        name: 'atrium',
+        collapsed: true,
+        codeWorkspacePath: '/repos/atrium.code-workspace',
+        folderRoots: ['/repos/a', '/repos/b'],
+        collapsedFolders: {'/repos/b'},
+      )..tint = MxTint.cyan;
+      final back = Workspace.fromJson(ws.toJson())!;
+
+      expect(back.id, 'ws1');
+      expect(back.name, 'atrium');
+      expect(back.collapsed, isTrue);
+      expect(back.codeWorkspacePath, '/repos/atrium.code-workspace');
+      expect(back.folderRoots, ['/repos/a', '/repos/b']);
+      expect(back.collapsedFolders, {'/repos/b'});
+      expect(back.tint, MxTint.cyan);
+      // Sem arquivo é o caso comum agora, e o que não existe não vai pro json.
+      final plain = Workspace(id: 'ws2', name: 'uplii').toJson();
+      expect(plain.containsKey('codeWorkspacePath'), isFalse);
+      expect(plain.containsKey('collapsed'), isFalse);
+      // E o registro que não desenharia nada não volta.
+      expect(Workspace.fromJson({'id': 'x'}), isNull);
+      expect(Workspace.fromJson('nada'), isNull);
     });
 
-    test('e a seção também, dobrada como estava', () {
-      final ws = Workspace(path: '/repos/x.code-workspace', name: 'cefis', collapsed: true);
-      final back = Workspace.fromJson(ws.toJson())!;
-      expect(back.path, '/repos/x.code-workspace');
-      expect(back.name, 'cefis');
+    test('o workspace da 2.4.0 ganha id e guarda o arquivo de onde veio', () {
+      final back = Workspace.fromJson({
+        'path': '/repos/atrium.code-workspace',
+        'name': 'atrium',
+        'collapsed': true,
+      })!;
+
+      expect(back.id, isNotEmpty);
+      expect(back.codeWorkspacePath, '/repos/atrium.code-workspace');
       expect(back.collapsed, isTrue);
-      // Aberta é o normal, e o normal não ocupa espaço no arquivo.
-      expect(Workspace(path: '/x', name: 'x').toJson().containsKey('collapsed'), isFalse);
-      // E o registro que não desenharia nada não volta.
-      expect(Workspace.fromJson({'path': '/x'}), isNull);
-      expect(Workspace.fromJson('nada'), isNull);
+      expect(back.folderRoots, isEmpty);
     });
   });
 
@@ -410,13 +442,19 @@ void main() {
     /// Duas pastas de um workspace, uma solta no meio e uma depois.
     AppStore storeWith() {
       final store = AppStore();
-      const ws = '/repos/cefis.code-workspace';
       store.folders.addAll([
-        Folder(root: '/repo/api', name: 'api', workspace: ws)..isRepo = true,
+        Folder(root: '/repo/api', name: 'api')..isRepo = true,
         Folder(root: '/repo/solta', name: 'solta')..isRepo = true,
-        Folder(root: '/repo/web', name: 'web', workspace: ws)..isRepo = true,
+        Folder(root: '/repo/web', name: 'web')..isRepo = true,
       ]);
-      store.workspaces.add(Workspace(path: ws, name: 'cefis'));
+      store.workspaces.add(
+        Workspace(
+          id: 'ws1',
+          name: 'cefis',
+          codeWorkspacePath: '/repos/cefis.code-workspace',
+          folderRoots: ['/repo/api', '/repo/web'],
+        ),
+      );
       return store;
     }
 
@@ -509,40 +547,17 @@ void main() {
       expect(find.text('cefis'), findsNothing);
     });
 
-    test('tirar a última pasta desfaz a seção', () async {
+    // Um workspace criado na mão não some porque ficou vazio: seria perder o
+    // ATRIUM ao tirar o último repo dele.
+    test('tirar a última pasta deixa a seção vazia, e não a desfaz', () async {
       final store = storeWith();
       addTearDown(store.dispose);
 
       await store.removeFolder(store.folders.firstWhere((f) => f.name == 'api'));
-      expect(store.workspaces.length, 1);
-
       await store.removeFolder(store.folders.firstWhere((f) => f.name == 'web'));
-      expect(store.workspaces, isEmpty);
-    });
 
-    // O config de quem importou antes desta seção existir: pastas carimbadas e
-    // nenhuma lista de workspace. Sem isto o bloco só apareceria reimportando.
-    test('a pasta carimbada sem seção ganha uma', () {
-      final store = AppStore();
-      addTearDown(store.dispose);
-      store.folders.add(
-        Folder(root: '/repo/api', name: 'api', workspace: '/repos/cefis.code-workspace'),
-      );
-
-      store.reconcileWorkspaces();
-
-      expect(store.workspaces.single.name, 'cefis');
-      expect(store.workspaces.single.path, '/repos/cefis.code-workspace');
-    });
-
-    test('e a seção sem pasta nenhuma some', () {
-      final store = AppStore();
-      addTearDown(store.dispose);
-      store.workspaces.add(Workspace(path: '/repos/orfa.code-workspace', name: 'orfa'));
-
-      store.reconcileWorkspaces();
-
-      expect(store.workspaces, isEmpty);
+      expect(store.workspaces.single.folderRoots, isEmpty);
+      expect(store.sidebarRows.whereType<Workspace>().single.name, 'cefis');
     });
   });
 
@@ -550,13 +565,19 @@ void main() {
   group('fechar um workspace', () {
     AppStore storeWith() {
       final store = AppStore();
-      const ws = '/repos/cefis.code-workspace';
       store.folders.addAll([
-        Folder(root: '/repo/api', name: 'api', workspace: ws)..isRepo = true,
+        Folder(root: '/repo/api', name: 'api')..isRepo = true,
         Folder(root: '/repo/solta', name: 'solta')..isRepo = true,
-        Folder(root: '/repo/web', name: 'web', workspace: ws)..isRepo = true,
+        Folder(root: '/repo/web', name: 'web')..isRepo = true,
       ]);
-      store.workspaces.add(Workspace(path: ws, name: 'cefis'));
+      store.workspaces.add(
+        Workspace(
+          id: 'ws1',
+          name: 'cefis',
+          codeWorkspacePath: '/repos/cefis.code-workspace',
+          folderRoots: ['/repo/api', '/repo/web'],
+        ),
+      );
       return store;
     }
 
@@ -676,6 +697,295 @@ void main() {
       // teste tem que esperar por ela: um timer de pé quando a árvore morre é
       // erro no `flutter test`.
       await tester.pump(AppStore.bannerLife);
+    });
+  });
+
+  group('migrar o config da 2.4.0', () {
+    Map<String, dynamic> fixture() =>
+        jsonDecode(File('test/fixtures/config-2.4.0.json').readAsStringSync())
+            as Map<String, dynamic>;
+
+    test('as pastas carimbadas entram no workspace do arquivo delas', () {
+      final store = AppStore();
+      addTearDown(store.dispose);
+
+      store.readSidebar(fixture());
+
+      final atrium = store.workspaces.firstWhere((w) => w.name == 'atrium');
+      expect(atrium.codeWorkspacePath, '/repos/atrium.code-workspace');
+      expect(atrium.folderRoots, ['/repos/atrium-backend', '/repos/atrium-frontend']);
+      expect(atrium.collapsed, isTrue);
+    });
+
+    // A 2.4.0 recriava a seção a partir do carimbo quando a lista de
+    // workspaces não a tinha. A migração faz o mesmo, com o nome do arquivo.
+    test('o carimbo sem seção vira um workspace com o nome do arquivo', () {
+      final store = AppStore();
+      addTearDown(store.dispose);
+
+      store.readSidebar(fixture());
+
+      final uplii = store.workspaces.firstWhere((w) => w.name == 'uplii');
+      expect(uplii.codeWorkspacePath, '/repos/uplii.code-workspace');
+      expect(uplii.folderRoots, ['/repos/uplii-ai']);
+    });
+
+    test('a lateral fica na mesma ordem e as features nas mesmas pastas', () {
+      final store = AppStore();
+      addTearDown(store.dispose);
+
+      store.readSidebar(fixture());
+
+      expect(
+        store.sidebarRows.map((r) => r is Workspace ? 'ws:${r.name}' : (r as Folder).name),
+        ['ws:atrium', 'solta', 'ws:uplii'],
+      );
+      expect(store.featuresOrHotfixes.single.folderRoot, '/repos/atrium-backend');
+    });
+
+    test('a pasta carimbada dobrada continua dobrada dentro do workspace', () {
+      final store = AppStore();
+      addTearDown(store.dispose);
+
+      store.readSidebar(fixture());
+
+      // O `collapsed` da 2.4.0 era um só por pasta; dentro de um workspace ele
+      // passa a valer pra aparição naquele workspace.
+      final atrium = store.workspaces.firstWhere((w) => w.name == 'atrium');
+      final front = store.folders.firstWhere((f) => f.name == 'atrium-frontend');
+      expect(store.isFolderCollapsed(front, within: atrium), isTrue);
+    });
+  });
+
+  group('montar workspaces na mão', () {
+    AppStore three() {
+      final store = AppStore();
+      for (final n in ['atrium-api', 'atrium-web', 'infra']) {
+        store.folders.add(Folder(root: '/repos/$n', name: n));
+      }
+      return store;
+    }
+
+    Folder folder(AppStore s, String name) => s.folders.firstWhere((f) => f.name == name);
+
+    test('criar com nome e pastas, sem arquivo nenhum', () {
+      final store = three();
+      addTearDown(store.dispose);
+
+      final w = store.createWorkspace(
+        ' ATRIUM ',
+        folders: [folder(store, 'atrium-api'), folder(store, 'atrium-web')],
+      );
+
+      expect(w.name, 'ATRIUM');
+      expect(w.codeWorkspacePath, isNull);
+      expect(store.foldersOf(w).map((f) => f.name), ['atrium-api', 'atrium-web']);
+      expect(store.standsAlone(folder(store, 'infra')), isTrue);
+      expect(store.standsAlone(folder(store, 'atrium-api')), isFalse);
+    });
+
+    test('a mesma pasta em dois workspaces aparece nos dois', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final atrium = store.createWorkspace('ATRIUM', folders: [folder(store, 'infra')]);
+      final uplii = store.createWorkspace('UPLII');
+
+      store.addToWorkspace(folder(store, 'infra'), uplii);
+
+      expect(store.workspacesOf(folder(store, 'infra')), [atrium, uplii]);
+      expect(store.foldersOf(uplii).single.name, 'infra');
+    });
+
+    test('adicionar duas vezes não repete', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final w = store.createWorkspace('ATRIUM');
+
+      store.addToWorkspace(folder(store, 'infra'), w);
+      store.addToWorkspace(folder(store, 'infra'), w);
+
+      expect(w.folderRoots, ['/repos/infra']);
+    });
+
+    test('entrar antes de uma pasta põe na vaga dela', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final w = store.createWorkspace(
+        'ATRIUM',
+        folders: [folder(store, 'atrium-api'), folder(store, 'atrium-web')],
+      );
+
+      store.addToWorkspace(folder(store, 'infra'), w, before: folder(store, 'atrium-web'));
+
+      expect(store.foldersOf(w).map((f) => f.name), ['atrium-api', 'infra', 'atrium-web']);
+    });
+
+    test('tirar do último workspace devolve a pasta pra raiz, no lugar pedido', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final w = store.createWorkspace('ATRIUM', folders: [folder(store, 'atrium-api')]);
+
+      store.removeFromWorkspace(folder(store, 'atrium-api'), w, at: folder(store, 'infra'));
+
+      expect(store.foldersOf(w), isEmpty);
+      expect(
+        store.sidebarRows.map((r) => r is Workspace ? 'ws:${r.name}' : (r as Folder).name),
+        ['atrium-web', 'atrium-api', 'infra', 'ws:ATRIUM'],
+      );
+    });
+
+    test('tirar de um de dois workspaces não a solta na raiz', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final atrium = store.createWorkspace('ATRIUM', folders: [folder(store, 'infra')]);
+      store.createWorkspace('UPLII', folders: [folder(store, 'infra')]);
+
+      store.removeFromWorkspace(folder(store, 'infra'), atrium);
+
+      expect(store.standsAlone(folder(store, 'infra')), isFalse);
+      expect(store.sidebarRows.whereType<Folder>().map((f) => f.name), ['atrium-api', 'atrium-web']);
+    });
+
+    test('desfazer devolve as pastas pra raiz no lugar da seção, sem fechar nada', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final w = store.createWorkspace(
+        'ATRIUM',
+        folders: [folder(store, 'atrium-api'), folder(store, 'atrium-web')],
+      );
+      store.tabs.add(
+        MxTab(
+          id: 't1',
+          folder: folder(store, 'atrium-api'),
+          kind: TabKind.shell,
+          cwd: '/repos/atrium-api',
+          branch: '',
+        ),
+      );
+
+      store.dissolveWorkspace(w);
+
+      expect(store.workspaces, isEmpty);
+      expect(store.tabs.length, 1);
+      expect(store.sidebarRows.map((r) => (r as Folder).name), ['infra', 'atrium-api', 'atrium-web']);
+    });
+
+    test('fechar leva as pastas só dele e deixa a espelhada no outro', () async {
+      final store = three();
+      addTearDown(store.dispose);
+      final atrium = store.createWorkspace(
+        'ATRIUM',
+        folders: [folder(store, 'atrium-api'), folder(store, 'infra')],
+      );
+      final uplii = store.createWorkspace('UPLII', folders: [folder(store, 'infra')]);
+
+      expect(store.closingWith(atrium).map((f) => f.name), ['atrium-api']);
+      await store.closeWorkspace(atrium);
+
+      expect(store.folders.map((f) => f.name), ['atrium-web', 'infra']);
+      expect(store.workspaces, [uplii]);
+      expect(store.foldersOf(uplii).single.name, 'infra');
+    });
+
+    test('remover a pasta tira ela de todos os workspaces', () async {
+      final store = three();
+      addTearDown(store.dispose);
+      final atrium = store.createWorkspace('ATRIUM', folders: [folder(store, 'infra')]);
+      final uplii = store.createWorkspace('UPLII', folders: [folder(store, 'infra')]);
+
+      await store.removeFolder(folder(store, 'infra'));
+
+      expect(atrium.folderRoots, isEmpty);
+      expect(uplii.folderRoots, isEmpty);
+    });
+
+    test('remover a pasta tira o seu lugar no rootOrder, pra re-adicionar no fim', () async {
+      final store = three();
+      store.dispose();
+
+      // Popula rootOrder criando um workspace
+      store.createWorkspace('W');
+
+      // Remove a pasta
+      await store.removeFolder(folder(store, 'atrium-api'));
+
+      // Re-adiciona a pasta com a mesma raiz
+      store.folders.add(Folder(root: '/repos/atrium-api', name: 'atrium-api'));
+
+      // Verifica que a pasta aparece no fim
+      expect(
+        store.sidebarRows.map((r) => r is Workspace ? 'ws:${r.name}' : (r as Folder).name),
+        ['atrium-web', 'infra', 'ws:W', 'atrium-api'],
+      );
+    });
+
+    test('cada aparição dobra por conta própria', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final infra = folder(store, 'infra');
+      final atrium = store.createWorkspace('ATRIUM', folders: [infra]);
+      final uplii = store.createWorkspace('UPLII', folders: [infra]);
+
+      store.toggleFolderCollapsed(infra, within: atrium);
+
+      expect(store.isFolderCollapsed(infra, within: atrium), isTrue);
+      expect(store.isFolderCollapsed(infra, within: uplii), isFalse);
+      expect(infra.collapsed, isFalse);
+    });
+
+    test('um nome vazio não cria workspace', () {
+      final store = three();
+      addTearDown(store.dispose);
+      expect(() => store.createWorkspace('   '), throwsArgumentError);
+      expect(store.workspaces, isEmpty);
+    });
+
+    test('renomear, pintar e associar um arquivo', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final w = store.createWorkspace('atrium');
+
+      store.renameWorkspace(w, '  ATRIUM ');
+      store.setWorkspaceTint(w, MxTint.red);
+      store.linkCodeWorkspace(w, '/repos/atrium.code-workspace');
+
+      expect(w.name, 'ATRIUM');
+      expect(w.tint, MxTint.red);
+      expect(w.codeWorkspacePath, '/repos/atrium.code-workspace');
+
+      store.linkCodeWorkspace(w, null);
+      expect(w.codeWorkspacePath, isNull);
+    });
+
+    test('o painel sem cor pega a do primeiro workspace da pasta', () {
+      final store = three();
+      addTearDown(store.dispose);
+      final infra = folder(store, 'infra');
+      store.createWorkspace('ATRIUM', folders: [infra]).tint = MxTint.red;
+      store.createWorkspace('UPLII', folders: [infra]).tint = MxTint.cyan;
+      final tab = MxTab(id: 't1', folder: infra, kind: TabKind.shell, cwd: infra.root, branch: '');
+      store.tabs.add(tab);
+
+      expect(store.chosenTintOf(tab), MxTint.red);
+      // E a cor da pasta, quando ela tem uma, vence a do workspace.
+      store.setFolderTint(infra, MxTint.green);
+      expect(store.chosenTintOf(tab), MxTint.green);
+    });
+
+    test('o config grava o workspace novo e a ordem da raiz', () async {
+      final store = three();
+      addTearDown(store.dispose);
+      final file = File(store.configPath);
+      if (file.existsSync()) file.deleteSync();
+
+      store.createWorkspace('ATRIUM', folders: [folder(store, 'atrium-api')]);
+      final saved = await savedConfig(store);
+
+      final ws = (saved['workspaces'] as List).single as Map;
+      expect(ws['name'], 'ATRIUM');
+      expect(ws['folderRoots'], ['/repos/atrium-api']);
+      expect(saved['rootOrder'], ['folder:/repos/atrium-web', 'folder:/repos/infra', 'workspace:${ws['id']}']);
+      expect((saved['folders'] as List).every((f) => !(f as Map).containsKey('workspace')), isTrue);
     });
   });
 }
