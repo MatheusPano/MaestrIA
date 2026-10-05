@@ -79,7 +79,7 @@ class _StripHeader extends StatelessWidget {
           Icon(Icons.inventory_2_outlined, size: 12, color: Mx.fgFaint),
           const SizedBox(width: 7),
           Text(
-            count == 1 ? 'arquivo alterado' : 'arquivos alterados',
+            count == 1 ? 'Arquivo alterado' : 'Arquivos alterados',
             style: TextStyle(fontSize: 11, color: Mx.fgFaint),
           ),
           const Spacer(),
@@ -93,7 +93,7 @@ class _StripHeader extends StatelessWidget {
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: Text('limpar', style: TextStyle(fontSize: 11, color: Mx.fgDim)),
+            child: Text('Limpar', style: TextStyle(fontSize: 11, color: Mx.fgDim)),
           ),
         ],
       ),
@@ -145,7 +145,7 @@ class _FileRowState extends State<_FileRow> {
   /// mostra. Uma planilha continua sendo assunto de outro app.
   Future<void> _open() async {
     if (_gone) {
-      widget.store.showBanner('esse arquivo não está mais lá: ${widget.path}', sticky: true);
+      widget.store.showBanner('Esse arquivo não está mais lá: ${widget.path}', sticky: true);
       return;
     }
     if (AppStore.readable(widget.path)) {
@@ -203,7 +203,7 @@ class _FileRowState extends State<_FileRow> {
               // the row already does the obvious thing when clicked.
               if (_hover && !gone)
                 IconButton(
-                  tooltip: 'mostrar no Finder',
+                  tooltip: 'Mostrar no Finder',
                   iconSize: 13,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(width: 20, height: 20),
@@ -294,8 +294,8 @@ class DocBar extends StatelessWidget {
                   _DocPill(
                     icon: Icons.checklist_rtl,
                     label: tab.hooks.plans.length > 1
-                        ? 'plano ·${tab.hooks.plans.length}'
-                        : 'plano',
+                        ? 'Plano ·${tab.hooks.plans.length}'
+                        : 'Plano',
                     tooltip: plan.headline,
                     // O plano não tem caminho pra comparar: o que identifica o
                     // que está aberto é ser um plano com o mesmo texto.
@@ -417,7 +417,7 @@ class ResultChip extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: Tooltip(
-        message: open ? 'esconder o que mudou' : 'ver o que mudou',
+        message: open ? 'Esconder o que mudou' : 'Ver o que mudou',
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(4),

@@ -231,14 +231,14 @@ class _FlowEditorState extends State<_FlowEditor> {
         Icon(Icons.account_tree_outlined, size: 16, color: Mx.purple),
         const SizedBox(width: 9),
         Text(
-          _fresh ? 'novo fluxo' : 'fluxo',
+          _fresh ? 'Novo fluxo' : 'Fluxo',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Mx.fg),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             _fresh
-                ? 'em $_where'
+                ? 'Em $_where'
                 : '${_steps.length} '
                       '${_steps.length == 1 ? 'passo' : 'passos'} depois de '
                       '"${widget.tab!.title}"',
@@ -268,13 +268,13 @@ class _FlowEditorState extends State<_FlowEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _fresh ? 'abre uma sessão em $_where' : 'quando essa sessão terminar',
+            _fresh ? 'Abre uma sessão em $_where' : 'Quando essa sessão terminar',
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Mx.fg),
           ),
           const SizedBox(height: 3),
           if (_fresh)
             Text(
-              'ela é o primeiro passo: nasce com o prompt abaixo e o resto do '
+              'Ela é o primeiro passo: nasce com o prompt abaixo e o resto do '
               'fluxo já pendurado nela.',
               style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
             )
@@ -286,7 +286,7 @@ class _FlowEditorState extends State<_FlowEditor> {
               controller: _label,
               style: const TextStyle(fontSize: 12.5),
               onChanged: (_) => setState(() {}),
-              decoration: _decoration('como chamar o painel (opcional)'),
+              decoration: _decoration('Como chamar o painel (opcional)'),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -296,7 +296,7 @@ class _FlowEditorState extends State<_FlowEditor> {
               maxLines: 8,
               style: const TextStyle(fontSize: 12.5),
               onChanged: (_) => setState(() {}),
-              decoration: _decoration('o que pedir pra ela — o prompt de abertura'),
+              decoration: _decoration('O que pedir pra ela — o prompt de abertura'),
             ),
           ],
         ],
@@ -360,17 +360,17 @@ class _FlowEditorState extends State<_FlowEditor> {
                 const SizedBox(width: 8),
                 _Tool(
                   icon: Icons.keyboard_arrow_up,
-                  tip: 'subir',
+                  tip: 'Subir',
                   onTap: i == 0 ? null : () => _move(i, i - 1),
                 ),
                 _Tool(
                   icon: Icons.keyboard_arrow_down,
-                  tip: 'descer',
+                  tip: 'Descer',
                   onTap: i == _steps.length - 1 ? null : () => _move(i, i + 1),
                 ),
                 _Tool(
                   icon: Icons.close,
-                  tip: 'tirar do fluxo',
+                  tip: 'Tirar do fluxo',
                   onTap: () => setState(() => _steps.removeAt(i).text.dispose()),
                 ),
               ],
@@ -410,7 +410,7 @@ class _FlowEditorState extends State<_FlowEditor> {
         const SizedBox(width: 6),
         DropdownButton<String>(
           value: chosen,
-          hint: Text('pra qual painel', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+          hint: Text('Pra qual painel', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
           isDense: true,
           underline: const SizedBox.shrink(),
           dropdownColor: Mx.bgActive,
@@ -439,7 +439,7 @@ class _FlowEditorState extends State<_FlowEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _steps.isEmpty ? 'por onde o fluxo começa?' : 'e depois?',
+            _steps.isEmpty ? 'Por onde o fluxo começa?' : 'E depois?',
             style: TextStyle(fontSize: 12, color: Mx.fgDim),
           ),
           const SizedBox(height: 8),
@@ -469,7 +469,7 @@ class _FlowEditorState extends State<_FlowEditor> {
           ),
         ),
         const SizedBox(width: 14),
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
         const SizedBox(width: 4),
         FilledButton(onPressed: _canSave ? _save : null, child: Text(_verb)),
       ],
@@ -479,19 +479,19 @@ class _FlowEditorState extends State<_FlowEditor> {
   /// A regra, escrita onde ela vale. A parte que o usuário não tem como
   /// adivinhar é a do meio: "terminar" aqui não é "ficou ocioso".
   String get _rule => _fresh
-      ? 'a sessão abre com o prompt acima; o passo 1 sai quando ela terminar de '
+      ? 'A sessão abre com o prompt acima; o passo 1 sai quando ela terminar de '
             'verdade — turno encerrado, nenhum agente dela ainda rodando e alguns '
             'segundos de silêncio. A fila não sobrevive a fechar o app.'
-      : 'um passo por vez: sai quando a sessão terminar de verdade — turno '
+      : 'Um passo por vez: sai quando a sessão terminar de verdade — turno '
             'encerrado, nenhum agente dela ainda rodando e alguns segundos de '
             'silêncio. Passo que não devolve o turno pra ela (comando, sessão '
             'nova, passar a bola) já emenda no seguinte. A fila não sobrevive a '
             'fechar o app.';
 
   String get _verb {
-    if (_fresh) return _ready.isEmpty ? 'abrir a sessão' : 'abrir e armar';
-    if (_ready.isEmpty) return 'limpar a fila';
-    return _idleNow ? 'disparar' : 'armar';
+    if (_fresh) return _ready.isEmpty ? 'Abrir a sessão' : 'Abrir e armar';
+    if (_ready.isEmpty) return 'Limpar a fila';
+    return _idleNow ? 'Disparar' : 'Armar';
   }
 
   InputDecoration _decoration(String hint) => InputDecoration(

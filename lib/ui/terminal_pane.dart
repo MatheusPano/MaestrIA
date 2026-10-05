@@ -537,7 +537,7 @@ class _PaneHeader extends StatelessWidget {
                   // [AppStore.relaunch].
                   if (tab.launcher != null && tab.exited)
                     IconButton(
-                      tooltip: 'rodar ${tab.launcher!.command} de novo',
+                      tooltip: 'Rodar ${tab.launcher!.command} de novo',
                       iconSize: 16,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -550,7 +550,7 @@ class _PaneHeader extends StatelessWidget {
                   // [AppStore.wake].
                   if (tab.hibernated)
                     IconButton(
-                      tooltip: 'retomar a conversa',
+                      tooltip: 'Retomar a conversa',
                       iconSize: 16,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -575,8 +575,8 @@ class _PaneHeader extends StatelessWidget {
                   Builder(
                     builder: (ctx) => IconButton(
                       tooltip: tab.done
-                          ? 'concluída — clique pra reabrir'
-                          : 'marcar esta sessão como concluída',
+                          ? 'Concluída — clique pra reabrir'
+                          : 'Marcar esta sessão como concluída',
                       iconSize: 16,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -607,7 +607,7 @@ class _PaneHeader extends StatelessWidget {
                     // A tecla vem do mapa: ela é editável, e um tooltip que
                     // ensinasse ⌘⌫ a quem trocou por outra estaria mentindo.
                     tooltip: [
-                      'tirar do painel — a sessão continua na lateral',
+                      'Tirar do painel — a sessão continua na lateral',
                       if (store.keymap[MxAction.closePane].firstOrNull case final chord?)
                         '${chord.label} encerra a sessão',
                     ].join('\n'),
@@ -661,7 +661,7 @@ class _AgentHandle extends StatelessWidget {
     if (value == null) return;
     Clipboard.setData(ClipboardData(text: value));
     if (wantsId) {
-      store.showBanner('id da sessão copiado: $value');
+      store.showBanner('Id da sessão copiado: $value');
       return;
     }
     // Duas sessões na mesma pasta nascem com o mesmo nome -- é o padrão do
@@ -671,8 +671,8 @@ class _AgentHandle extends StatelessWidget {
     final twins = store.tabs.where((t) => t != tab && !t.exited && t.agentName == value).length;
     store.showBanner(
       twins == 0
-          ? 'nome copiado: $value — outro agente fala com esta sessão por esse nome'
-          : 'nome copiado: $value — cuidado: mais $twins sessão(ões) atendem por esse mesmo nome',
+          ? 'Nome copiado: $value — outro agente fala com esta sessão por esse nome'
+          : 'Nome copiado: $value — cuidado: mais $twins sessão(ões) atendem por esse mesmo nome',
     );
   }
 
@@ -682,8 +682,8 @@ class _AgentHandle extends StatelessWidget {
     final id = tab.sessionId;
     return IconButton(
       tooltip: [
-        if (name != null) 'nome: $name  ·  clique pra copiar',
-        if (id != null) 'sessão: $id  ·  ${MxChord.linux ? 'Ctrl+clique' : '⌥ clique'} pra copiar',
+        if (name != null) 'Nome: $name  ·  clique pra copiar',
+        if (id != null) 'Sessão: $id  ·  ${MxChord.linux ? 'Ctrl+clique' : '⌥ clique'} pra copiar',
       ].join('\n'),
       iconSize: 15,
       padding: EdgeInsets.zero,
@@ -755,7 +755,7 @@ class _DictationMarkState extends State<_DictationMark>
           ? _pulse.drive(Tween(begin: 0.45, end: 1.0))
           : const AlwaysStoppedAnimation(1.0),
       child: _Chip(
-        text: listening ? 'ouvindo…' : 'transcrevendo…',
+        text: listening ? 'Ouvindo…' : 'Transcrevendo…',
         color: color,
         icon: listening ? Icons.mic : Icons.graphic_eq,
       ),
@@ -765,7 +765,7 @@ class _DictationMarkState extends State<_DictationMark>
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.store.toggleDictation,
-        child: Tooltip(message: 'parar e colar o que foi dito', child: mark),
+        child: Tooltip(message: 'Parar e colar o que foi dito', child: mark),
       ),
     );
   }
@@ -831,12 +831,12 @@ class EmptyPane extends StatelessWidget {
       if ((store?.keymap[action] ?? action.defaults) case final chords when chords.isNotEmpty)
         (chords.map((c) => c.label).join('  '), action.label),
     // Fixo, e por isso escrito: são nove teclas, não uma escolha.
-    ('${MxChord.slot(0).label}…9', 'ir pra enésima sessão'),
+    ('${MxChord.slot(0).label}…9', 'Ir pra enésima sessão'),
   ];
 
   String get _headline {
     final live = store?.tabs.where((t) => !t.exited).length ?? 0;
-    if (live == 0) return 'nenhum painel aberto';
+    if (live == 0) return 'Nenhum painel aberto';
     if (live == 1) return '1 sessão rodando na lateral — clique nela pra trazer de volta';
     return '$live sessões rodando na lateral — clique numa pra trazer de volta';
   }
@@ -864,7 +864,7 @@ class EmptyPane extends StatelessWidget {
               SizedBox(
                 width: 330,
                 child: Text(
-                  'arraste uma sessão da lateral pra cá — pela borda de um painel, '
+                  'Arraste uma sessão da lateral pra cá — pela borda de um painel, '
                   'ela divide a tela; pelo meio, toma o lugar dele',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
@@ -930,11 +930,11 @@ class FollowUpMark extends StatelessWidget {
     return Tooltip(
       message: [
         if (held)
-          'esperando $forks ${forks == 1 ? 'agente' : 'agentes'} dela terminarem'
+          'Esperando $forks ${forks == 1 ? 'agente' : 'agentes'} dela terminarem'
         else if (tab.armed)
-          'dispara assim que ela parar'
+          'Dispara assim que ela parar'
         else
-          'dispara quando o turno dela acabar',
+          'Dispara quando o turno dela acabar',
         '',
         for (var i = 0; i < steps.length; i++)
           '${i + 1}. ${steps[i].kind.label}'

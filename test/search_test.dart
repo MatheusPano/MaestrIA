@@ -241,9 +241,9 @@ void main() {
       panel(store, 'permissão do drive');
 
       await pumpSidebar(tester, store);
-      expect(find.text('worktrees'), findsNothing);
+      expect(find.text('Worktrees'), findsNothing);
       await search(tester, 'drive');
-      expect(find.text('worktrees'), findsNothing);
+      expect(find.text('Worktrees'), findsNothing);
       expect(find.text('permissão do drive'), findsOneWidget);
       store.dispose();
     });
@@ -255,9 +255,9 @@ void main() {
       await pumpSidebar(tester, store);
       await search(tester, 'banco');
       expect(find.text('permissão do drive'), findsNothing);
-      expect(find.textContaining('nenhuma sessão'), findsOneWidget);
+      expect(find.textContaining('Nenhuma sessão'), findsOneWidget);
 
-      await tester.tap(find.text('mostrar tudo'));
+      await tester.tap(find.text('Mostrar tudo'));
       await tester.pump(const Duration(milliseconds: 200));
       expect(store.filtering, isFalse);
       expect(find.text('permissão do drive'), findsOneWidget);
@@ -294,7 +294,7 @@ void main() {
       // não pelo tooltip, como sempre foi aqui. (O relatório também morava
       // nesta faixa; hoje ele é um plugin, e sem plugin instalado não há
       // botão dele.)
-      expect(find.byTooltip('adicionar pasta ou workspace'), findsOneWidget);
+      expect(find.byTooltip('Adicionar pasta ou workspace'), findsOneWidget);
       for (final icon in [Icons.create_new_folder_outlined, Icons.history_outlined]) {
         final glyph = find.byIcon(icon);
         expect(glyph, findsOneWidget, reason: '$icon');

@@ -288,7 +288,7 @@ class WorkspaceImport {
       if (missing.isNotEmpty)
         '${missing.length} não ${missing.length == 1 ? 'existe' : 'existem'} no disco',
     ];
-    if (parts.isEmpty) return 'workspace "${workspace.name}": nada pra adicionar';
-    return 'workspace "${workspace.name}": ${parts.join(', ')}';
+    if (parts.isEmpty) return 'Workspace "${workspace.name}": nada pra adicionar';
+    return 'Workspace "${workspace.name}": ${parts.join(', ')}';
   }
 }

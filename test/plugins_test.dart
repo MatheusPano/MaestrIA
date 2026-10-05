@@ -992,7 +992,7 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
-      expect(find.text('instalar plugin'), findsWidgets);
+      expect(find.text('Instalar plugin'), findsWidgets);
       store.dispose();
     });
   });
@@ -1074,7 +1074,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('abrindo Git…'), findsOneWidget, reason: 'antes do primeiro update');
+      expect(find.text('Abrindo Git…'), findsOneWidget, reason: 'antes do primeiro update');
 
       final said = await api.handle(own, 'sidebar.update', {
         'badge': 3,
@@ -1282,7 +1282,7 @@ void main() {
       expect(store.plugins.settingsOf(p)['colors.error'], '#FF0000');
 
       // E volta ao padrão.
-      await tester.tap(find.byTooltip('voltar ao padrão').first);
+      await tester.tap(find.byTooltip('Voltar ao padrão').first);
       await tester.pumpAndSettle();
       expect(store.plugins.settingsOf(p)['colors.app'], '');
       await tester.pumpWidget(const SizedBox());
@@ -1319,7 +1319,7 @@ void main() {
 
     testWidgets('dois cliques fazem um período, em qualquer ordem', (tester) async {
       final picked = await pump(tester, to: DateTime(2026, 9, 23), max: DateTime(2026, 9, 23));
-      expect(find.text('setembro de 2026'), findsOneWidget);
+      expect(find.text('Setembro de 2026'), findsOneWidget);
       await tester.tap(find.text('19'));
       await tester.pump();
       await tester.tap(find.text('15'));
@@ -1342,10 +1342,10 @@ void main() {
       expect(picked, isEmpty);
       await tester.tap(find.byIcon(Icons.chevron_right_rounded));
       await tester.pump();
-      expect(find.text('setembro de 2026'), findsOneWidget);
+      expect(find.text('Setembro de 2026'), findsOneWidget);
       await tester.tap(find.byIcon(Icons.chevron_left_rounded));
       await tester.pump();
-      expect(find.text('agosto de 2026'), findsOneWidget);
+      expect(find.text('Agosto de 2026'), findsOneWidget);
       await tester.tap(find.text('25'));
       expect(picked.single, (DateTime(2026, 8, 25), DateTime(2026, 8, 25)));
     });
@@ -1527,7 +1527,7 @@ void main() {
       expect(again, same(first));
       expect(store.tabs, hasLength(1));
       expect(first.title, 'dois');
-      expect(first.subtitle, 'plugin · Plugin P');
+      expect(first.subtitle, 'Plugin · Plugin P');
       expect(first.isPassive, isTrue);
       expect(first.view!.revision, 1);
       expect(store.updatePluginView(plugin, 'outra', title: 'x'), isFalse);
@@ -1612,9 +1612,9 @@ void main() {
       expect(find.text('Título'), findsOneWidget);
       expect(find.text('ana'), findsOneWidget);
       expect(find.text('verde'), findsOneWidget);
-      expect(find.text('bloco desconhecido: carrossel'), findsOneWidget);
+      expect(find.text('Bloco desconhecido: carrossel'), findsOneWidget);
       // Sem plugin instalado do outro lado, a faixa diz.
-      expect(find.text('o plugin não está mais instalado'), findsOneWidget);
+      expect(find.text('O plugin não está mais instalado'), findsOneWidget);
 
       // O plugin atualiza os blocos sem mexer no campo: o texto digitado fica.
       await tester.enterText(find.widgetWithText(TextField, 'ana'), 'bia');

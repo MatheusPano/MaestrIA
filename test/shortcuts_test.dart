@@ -247,9 +247,9 @@ void main() {
       focusedPanel(store);
 
       await press(tester, LogicalKeyboardKey.f2, platform: 'linux');
-      expect(find.text('renomear painel'), findsOneWidget);
+      expect(find.text('Renomear painel'), findsOneWidget);
 
-      await tester.tap(find.text('cancelar'));
+      await tester.tap(find.text('Cancelar'));
       await closeWindow(tester, store);
     });
   });
@@ -346,13 +346,13 @@ void main() {
       final tab = focusedPanel(store);
 
       await press(tester, LogicalKeyboardKey.keyE, holding: [LogicalKeyboardKey.metaLeft]);
-      expect(find.text('renomear painel'), findsOneWidget);
+      expect(find.text('Renomear painel'), findsOneWidget);
       // Já com o nome de agora dentro: renomear quase sempre é corrigir o que
       // está escrito, não escrever de novo do zero.
       expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, tab.title);
 
       await tester.enterText(find.byType(TextField), 'permissão do google');
-      await tester.tap(find.text('ok'));
+      await tester.tap(find.text('Ok'));
       await tester.pumpAndSettle();
 
       expect(tab.title, 'permissão do google');
@@ -364,7 +364,7 @@ void main() {
 
       await press(tester, LogicalKeyboardKey.keyE, holding: [LogicalKeyboardKey.metaLeft]);
 
-      expect(find.text('renomear painel'), findsNothing);
+      expect(find.text('Renomear painel'), findsNothing);
       expect(store.banner, contains('renomear'));
       await closeWindow(tester, store);
     });
@@ -374,7 +374,7 @@ void main() {
     testWidgets('abre no tema, e o tema é a galeria que era um diálogo', (tester) async {
       final store = await pumpSettings(tester);
 
-      expect(find.text('aparência'), findsOneWidget);
+      expect(find.text('Aparência'), findsOneWidget);
       expect(find.text(MxThemes.nord.label), findsOneWidget);
 
       await closeWindow(tester, store);
@@ -383,13 +383,13 @@ void main() {
     testWidgets('trocar um atalho é clicar na tecla e digitar a nova', (tester) async {
       final store = await pumpSettings(tester);
 
-      await tester.tap(find.text('atalhos'));
+      await tester.tap(find.text('Atalhos'));
       await tester.pumpAndSettle();
       expect(find.text('⌘T'), findsOneWidget);
 
       await tester.tap(find.text('⌘T'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('pressione a combinação'), findsOneWidget);
+      expect(find.textContaining('Pressione a combinação'), findsOneWidget);
 
       await press(
         tester,
@@ -410,7 +410,7 @@ void main() {
     testWidgets('uma tecla que não pode diz por que, e não é gravada', (tester) async {
       final store = await pumpSettings(tester);
 
-      await tester.tap(find.text('atalhos'));
+      await tester.tap(find.text('Atalhos'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('⌘T'));
       await tester.pumpAndSettle();
@@ -421,7 +421,7 @@ void main() {
       expect(store.keymap[MxAction.newClaude], [_cmdT]);
       expect(find.textContaining('sem modificador'), findsOneWidget);
       // Continua gravando: a tecla recusada não desiste da troca por você.
-      expect(find.textContaining('pressione a combinação'), findsOneWidget);
+      expect(find.textContaining('Pressione a combinação'), findsOneWidget);
 
       await closeWindow(tester, store);
     });
@@ -429,7 +429,7 @@ void main() {
     testWidgets('⎋ desiste da gravação sem mexer no mapa', (tester) async {
       final store = await pumpSettings(tester);
 
-      await tester.tap(find.text('atalhos'));
+      await tester.tap(find.text('Atalhos'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('⌘T'));
       await tester.pumpAndSettle();
@@ -438,7 +438,7 @@ void main() {
 
       expect(store.keymap[MxAction.newClaude], [_cmdT]);
       expect(find.text('⌘T'), findsOneWidget);
-      expect(find.textContaining('pressione a combinação'), findsNothing);
+      expect(find.textContaining('Pressione a combinação'), findsNothing);
       // E o diálogo fica de pé: o ⎋ foi da gravação, não da tela.
       expect(find.byType(Dialog), findsOneWidget);
 

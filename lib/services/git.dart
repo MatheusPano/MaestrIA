@@ -105,7 +105,7 @@ class Git {
   }) async {
     final path = '$root/.claude/worktrees/$dirName';
     final exists = await Sh.run('test -d ${Sh.q(path)}');
-    if (exists.ok) return GitOutcome(false, path, 'worktree já existe em $path');
+    if (exists.ok) return GitOutcome(false, path, 'Worktree já existe em $path');
 
     await Sh.run('git fetch origin --quiet', cwd: root);
     final r = await Sh.run(
@@ -113,7 +113,7 @@ class Git {
       cwd: root,
     );
     if (!r.ok) return GitOutcome(false, path, r.stderr.isEmpty ? r.stdout : r.stderr);
-    return GitOutcome(true, path, 'worktree criada em $path (branch $branch)');
+    return GitOutcome(true, path, 'Worktree criada em $path (branch $branch)');
   }
 
   /// What a worktree stands to lose, asked before anything is deleted.
@@ -144,7 +144,7 @@ class Git {
     bool deleteBranch = false,
   }) async {
     if (worktree.isMain) {
-      return GitOutcome(false, worktree.path, 'essa é a checkout principal — ela não se remove');
+      return GitOutcome(false, worktree.path, 'Essa é a checkout principal — ela não se remove');
     }
 
     final r = worktree.prunable
@@ -159,8 +159,8 @@ class Git {
 
     final said = [
       worktree.prunable
-          ? 'registros fantasmas limpos'
-          : 'worktree removida: ${worktree.path.split('/').last}',
+          ? 'Registros fantasmas limpos'
+          : 'Worktree removida: ${worktree.path.split('/').last}',
     ];
     if (deleteBranch && worktree.branch != '(detached)') {
       final b = await Sh.run(
@@ -184,7 +184,7 @@ class Git {
     return GitOutcome(
       true,
       root,
-      cleared == 0 ? 'nenhuma worktree fantasma pra limpar' : '$cleared registro(s) limpo(s)',
+      cleared == 0 ? 'Nenhuma worktree fantasma pra limpar' : '$cleared registro(s) limpo(s)',
     );
   }
 }

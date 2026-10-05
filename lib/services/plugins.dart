@@ -51,11 +51,11 @@ const String mxManifestName = 'maestria-plugin.json';
 enum PluginPermission {
   hooks(
     'hooks',
-    'ver os eventos das sessões do claude — o que você pede, que ferramentas '
+    'ver os eventos das sessões do Claude — o que você pede, que ferramentas '
         'rodam e com quais argumentos',
   ),
   terminalWrite('terminal.write', 'digitar e enviar texto nos seus painéis'),
-  sessionsCreate('sessions.create', 'abrir sessões do claude e terminais'),
+  sessionsCreate('sessions.create', 'abrir sessões do Claude e terminais'),
   notifications('notifications', 'mandar notificações do sistema');
 
   const PluginPermission(this.id, this.label);
@@ -314,7 +314,7 @@ class PluginManifest {
     final api = (j['maestria'] as num?)?.toInt() ?? mxPluginApi;
     if (api > mxPluginApi) {
       throw FormatException(
-        'o plugin pede a versão $api da API e esta maestria só conhece até a $mxPluginApi',
+        'o plugin pede a versão $api da API e esta MaestrIA só conhece até a $mxPluginApi',
       );
     }
 
@@ -489,17 +489,17 @@ class PluginManifest {
 /// Em que pé está um plugin.
 enum PluginState {
   /// O manifesto não leu. Ver [MxPlugin.problem].
-  invalid('com problema'),
-  disabled('desligado'),
+  invalid('Com problema'),
+  disabled('Desligado'),
 
   /// Instalado e ligado, sem processo de pé -- porque não tem, ou porque
   /// nenhum evento dele aconteceu ainda.
-  idle('pronto'),
-  starting('subindo'),
-  running('rodando'),
+  idle('Pronto'),
+  starting('Subindo'),
+  running('Rodando'),
 
   /// O processo saiu sem ser mandado. Ver [MxPlugin.crash].
-  crashed('parou');
+  crashed('Parou');
 
   const PluginState(this.label);
   final String label;
@@ -1301,7 +1301,7 @@ class Plugins extends ChangeNotifier {
   /// instalado aqui -- ver [StagedPlugin].
   Future<StagedPlugin> stage(String source) async {
     final src = expandHome(source.trim()).replaceFirst(RegExp(r'/+$'), '');
-    if (src.isEmpty) throw const PluginInstallError('diga de onde instalar');
+    if (src.isEmpty) throw const PluginInstallError('Diga de onde instalar');
     final base = Directory('$root/.staging');
     await base.create(recursive: true);
     final staging = await base.createTemp('p');
@@ -1323,10 +1323,10 @@ class Plugins extends ChangeNotifier {
       }
       if (!r.ok) {
         final why = r.stderr.split('\n').where((l) => l.trim().isNotEmpty).lastOrNull;
-        throw PluginInstallError(why ?? 'falhou (código ${r.code})');
+        throw PluginInstallError(why ?? 'Falhou (código ${r.code})');
       }
       final dir = _manifestDir(into);
-      if (dir == null) throw const PluginInstallError('não achei um $mxManifestName ali');
+      if (dir == null) throw const PluginInstallError('Não achei um $mxManifestName ali');
       final PluginManifest manifest;
       try {
         manifest = PluginManifest.read(dir);
@@ -1393,7 +1393,7 @@ class Plugins extends ChangeNotifier {
       throw PluginInstallError(e.message);
     }
     if (byId(manifest.id) != null) {
-      throw PluginInstallError('já existe um plugin "${manifest.id}" — remova ele antes');
+      throw PluginInstallError('Já existe um plugin "${manifest.id}" — remova ele antes');
     }
     await Directory(root).create(recursive: true);
     await Link('$root/${manifest.id}').create(Directory(src).absolute.path);

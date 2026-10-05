@@ -416,7 +416,7 @@ class _PluginPaneState extends State<PluginPane> {
         children: [
           if (down)
             _Stopped(
-              why: plugin?.crash ?? 'o plugin não está mais instalado',
+              why: plugin?.crash ?? 'O plugin não está mais instalado',
               onRestart: plugin == null ? null : () => widget.store.plugins.restart(plugin),
             ),
           Expanded(
@@ -453,7 +453,7 @@ class _PluginPaneState extends State<PluginPane> {
             ),
             if (down)
               _Stopped(
-                why: plugin?.crash ?? 'o plugin não está mais instalado',
+                why: plugin?.crash ?? 'O plugin não está mais instalado',
                 onRestart: plugin == null ? null : () => widget.store.plugins.restart(plugin),
               ),
             Expanded(
@@ -463,7 +463,7 @@ class _PluginPaneState extends State<PluginPane> {
                   (_view.blocks.isEmpty
                       ? Center(
                           child: Text(
-                            'nada pra mostrar ainda',
+                            'Nada pra mostrar ainda',
                             style: TextStyle(fontSize: 13, color: Mx.fgFaint),
                           ),
                         )
@@ -611,7 +611,7 @@ class _PluginPaneState extends State<PluginPane> {
       'columns' => _columns(b),
       'terminal' => _terminal(b),
       final other => Text(
-        'bloco desconhecido: ${other ?? '(sem "type")'}',
+        'Bloco desconhecido: ${other ?? '(sem "type")'}',
         style: TextStyle(fontSize: 11.5, fontFamily: Mx.mono, color: Mx.fgFaint),
       ),
     };
@@ -1061,7 +1061,7 @@ class _PluginPaneState extends State<PluginPane> {
     final items = PluginView.blocksFrom(b['items']);
     if (items.isEmpty) {
       return Text(
-        (b['empty'] as String?) ?? 'nada aqui',
+        (b['empty'] as String?) ?? 'Nada aqui',
         style: TextStyle(fontSize: _size - 1, color: Mx.fgFaint),
       );
     }
@@ -1256,7 +1256,7 @@ class _PluginPaneState extends State<PluginPane> {
       console: _view.console(id),
       size: _size,
       tone: _tone,
-      empty: (b['empty'] as String?) ?? 'nada no console ainda',
+      empty: (b['empty'] as String?) ?? 'Nada no console ainda',
       follow: b['follow'] != false,
     );
     if (fill) return box;
@@ -1281,7 +1281,7 @@ class _PluginPaneState extends State<PluginPane> {
       child: tab == null
           ? Center(
               child: Text(
-                (b['empty'] as String?) ?? 'o terminal fechou',
+                (b['empty'] as String?) ?? 'O terminal fechou',
                 style: TextStyle(fontSize: 12, color: Mx.fgFaint),
               ),
             )
@@ -1355,7 +1355,7 @@ class _PluginCalendarState extends State<PluginCalendar> {
     'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', //
     'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
   ];
-  static const _weekdays = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo'];
+  static const _weekdays = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 
   late DateTime _month = _monthOf(widget.to ?? widget.max ?? DateTime.now());
 
@@ -1368,6 +1368,7 @@ class _PluginCalendarState extends State<PluginCalendar> {
       a.year == b.year && a.month == b.month && a.day == b.day;
   static String _two(int n) => n.toString().padLeft(2, '0');
   static String _short(DateTime d) => '${_two(d.day)}/${_two(d.month)}';
+  static String _capitalized(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   @override
   void didUpdateWidget(PluginCalendar old) {
@@ -1414,8 +1415,8 @@ class _PluginCalendarState extends State<PluginCalendar> {
   /// O que está escolhido, dito embaixo do mês.
   String _summary() {
     final f = widget.from, t = widget.to;
-    if (f == null || t == null) return widget.range ? 'escolha o primeiro dia' : 'escolha um dia';
-    if (_anchor != null) return 'começa em ${_short(f)} — clique no último dia';
+    if (f == null || t == null) return widget.range ? 'Escolha o primeiro dia' : 'Escolha um dia';
+    if (_anchor != null) return 'Começa em ${_short(f)} — clique no último dia';
     if (_sameDay(f, t)) {
       return '${_weekdays[f.weekday - 1]}, ${f.day} de ${_months[f.month - 1]}';
     }
@@ -1543,7 +1544,7 @@ class _PluginCalendarState extends State<PluginCalendar> {
           Expanded(
             child: Center(
               child: Text(
-                '${_months[month.month - 1]} de ${month.year}',
+                '${_capitalized(_months[month.month - 1])} de ${month.year}',
                 style: TextStyle(fontSize: 13.5, color: Mx.fg, fontWeight: FontWeight.w600),
               ),
             ),
@@ -2194,7 +2195,7 @@ class _Stopped extends StatelessWidget {
           Expanded(
             child: Text(why, style: TextStyle(fontSize: 12, color: Mx.fg)),
           ),
-          if (onRestart != null) TextButton(onPressed: onRestart, child: const Text('reiniciar')),
+          if (onRestart != null) TextButton(onPressed: onRestart, child: const Text('Reiniciar')),
         ],
       ),
     );
@@ -2255,7 +2256,7 @@ class _Header extends StatelessWidget {
               when plugin.manifest?.settings.isNotEmpty ?? false)
             _faded(
               IconButton(
-                tooltip: 'configurar ${plugin.name}',
+                tooltip: 'Configurar ${plugin.name}',
                 iconSize: 15,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -2274,7 +2275,7 @@ class _Header extends StatelessWidget {
             ),
           _faded(
             IconButton(
-              tooltip: 'fechar esta janela',
+              tooltip: 'Fechar esta janela',
               iconSize: 15,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 26, height: 26),

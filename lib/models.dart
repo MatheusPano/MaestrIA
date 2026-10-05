@@ -20,7 +20,7 @@ class Folder with SidebarRow {
   /// to the config, and git never looks at it — a session you opened just to
   /// ask something is not a checkout. Its [root] is only the folder a panel
   /// starts in when you do not pick one.
-  Folder.loose(this.root) : name = 'avulsos', isLoose = true, collapsed = false;
+  Folder.loose(this.root) : name = 'Avulsos', isLoose = true, collapsed = false;
 
   /// Main checkout path. Also the identity: worktrees resolve back to it.
   final String root;
@@ -68,24 +68,24 @@ class Folder with SidebarRow {
 enum FeatureOrHotfixKind {
   feature(
     label: 'feature',
-    newLabel: 'nova feature',
+    newLabel: 'Nova feature',
     the: 'a feature',
     inThis: 'nessa feature',
     thisOne: 'essa feature',
     ofThis: 'dessa feature',
     ofThe: 'da feature',
-    dissolved: 'feature dissolvida',
+    dissolved: 'Feature dissolvida',
     icon: Icons.track_changes,
   ),
   hotfix(
     label: 'hotfix',
-    newLabel: 'novo hotfix',
+    newLabel: 'Novo hotfix',
     the: 'o hotfix',
     inThis: 'nesse hotfix',
     thisOne: 'esse hotfix',
     ofThis: 'desse hotfix',
     ofThe: 'do hotfix',
-    dissolved: 'hotfix dissolvido',
+    dissolved: 'Hotfix dissolvido',
     icon: Icons.bolt,
   );
 
@@ -430,20 +430,20 @@ enum FollowUpKind {
 
 extension FollowUpKindUi on FollowUpKind {
   String get label => switch (this) {
-    FollowUpKind.keepGoing => 'continuar aqui',
-    FollowUpKind.newSession => 'abrir outra sessão',
-    FollowUpKind.command => 'rodar um comando',
-    FollowUpKind.handoff => 'passar pra outro painel',
+    FollowUpKind.keepGoing => 'Continuar aqui',
+    FollowUpKind.newSession => 'Abrir outra sessão',
+    FollowUpKind.command => 'Rodar um comando',
+    FollowUpKind.handoff => 'Passar pra outro painel',
   };
 
   /// O nome do tamanho de uma ficha. O [label] é uma frase -- serve pra linha
   /// de um menu e pro que a fila diz de si mesma; dentro do editor, onde o
   /// cartão inteiro já explica o passo, o que cabe é o substantivo.
   String get short => switch (this) {
-    FollowUpKind.keepGoing => 'continuar',
-    FollowUpKind.newSession => 'outra sessão',
-    FollowUpKind.command => 'comando',
-    FollowUpKind.handoff => 'passar a bola',
+    FollowUpKind.keepGoing => 'Continuar',
+    FollowUpKind.newSession => 'Outra sessão',
+    FollowUpKind.command => 'Comando',
+    FollowUpKind.handoff => 'Passar a bola',
   };
 
   IconData get icon => switch (this) {
@@ -457,18 +457,18 @@ extension FollowUpKindUi on FollowUpKind {
   /// se parecem demais na lista de nomes, e a diferença entre eles é
   /// justamente *onde* o texto que você digita vai parar.
   String get blurb => switch (this) {
-    FollowUpKind.keepGoing => 'manda o texto de volta pra esta mesma sessão',
-    FollowUpKind.newSession => 'abre uma sessão nova na mesma pasta, já com esse prompt',
-    FollowUpKind.command => 'sobe um terminal rodando a linha abaixo',
-    FollowUpKind.handoff => 'entrega o recado final desta sessão a outro painel',
+    FollowUpKind.keepGoing => 'Manda o texto de volta pra esta mesma sessão',
+    FollowUpKind.newSession => 'Abre uma sessão nova na mesma pasta, já com esse prompt',
+    FollowUpKind.command => 'Sobe um terminal rodando a linha abaixo',
+    FollowUpKind.handoff => 'Entrega o recado final desta sessão a outro painel',
   };
 
   /// O que o campo de texto do passo sugere quando está vazio.
   String get hint => switch (this) {
-    FollowUpKind.keepGoing => 'o que mandar pra ela em seguida',
-    FollowUpKind.newSession => 'o prompt com que a sessão nova abre',
+    FollowUpKind.keepGoing => 'O que mandar pra ela em seguida',
+    FollowUpKind.newSession => 'O prompt com que a sessão nova abre',
     FollowUpKind.command => 'flutter analyze && flutter test',
-    FollowUpKind.handoff => 'o recado que vai junto com a última mensagem dela',
+    FollowUpKind.handoff => 'O recado que vai junto com a última mensagem dela',
   };
 
   /// O passo devolve o turno pra sessão de onde ele saiu?
@@ -601,15 +601,15 @@ enum ClaudeStatus {
 extension ClaudeStatusUi on ClaudeStatus {
   String get label => switch (this) {
     ClaudeStatus.unknown => '—',
-    ClaudeStatus.starting => 'abrindo',
-    ClaudeStatus.ready => 'pronto',
-    ClaudeStatus.working => 'pensando',
-    ClaudeStatus.tool => 'rodando',
-    ClaudeStatus.waitingInput => 'esperando você',
-    ClaudeStatus.waitingAnswer => 'pergunta',
-    ClaudeStatus.waitingPermission => 'permissão',
-    ClaudeStatus.idle => 'ocioso',
-    ClaudeStatus.ended => 'encerrada',
+    ClaudeStatus.starting => 'Abrindo',
+    ClaudeStatus.ready => 'Pronto',
+    ClaudeStatus.working => 'Pensando',
+    ClaudeStatus.tool => 'Rodando',
+    ClaudeStatus.waitingInput => 'Esperando você',
+    ClaudeStatus.waitingAnswer => 'Pergunta',
+    ClaudeStatus.waitingPermission => 'Permissão',
+    ClaudeStatus.idle => 'Ocioso',
+    ClaudeStatus.ended => 'Encerrada',
   };
 
   Color get color => switch (this) {
@@ -723,7 +723,7 @@ class PlanNote {
       final one = line.trim().replaceAll(RegExp(r'^#+\s*'), '');
       if (one.isNotEmpty) return one.length <= 70 ? one : '${one.substring(0, 70)}…';
     }
-    return 'plano sem título';
+    return 'Plano sem título';
   }
 
   Map<String, dynamic> toJson() => {'text': text, 'at': at.toIso8601String()};
@@ -877,12 +877,12 @@ class HookState {
 
   /// The one-line subtitle a panel shows under its title.
   String get subtitle {
-    if (status == ClaudeStatus.waitingPermission) return 'quer aprovação pra $activeTool';
+    if (status == ClaudeStatus.waitingPermission) return 'Quer aprovação pra $activeTool';
     if (status == ClaudeStatus.waitingAnswer) {
       final rest = questions > 1 ? ' (+${questions - 1})' : '';
-      return question == null ? 'te faz uma pergunta' : 'pergunta: $question$rest';
+      return question == null ? 'Te faz uma pergunta' : 'Pergunta: $question$rest';
     }
-    if (status == ClaudeStatus.waitingInput) return lastMessage ?? 'te espera';
+    if (status == ClaudeStatus.waitingInput) return lastMessage ?? 'Te espera';
     if (status == ClaudeStatus.tool && activeTool != null) {
       final secs = toolStartedAt == null
           ? ''
@@ -890,8 +890,8 @@ class HookState {
       final target = lastToolTarget == null ? '' : '(${lastToolTarget!})';
       return '$activeTool$target$secs';
     }
-    if (status == ClaudeStatus.working) return lastPrompt ?? 'trabalhando';
-    if (status == ClaudeStatus.idle) return lastMessage ?? 'pronto';
+    if (status == ClaudeStatus.working) return lastPrompt ?? 'Trabalhando';
+    if (status == ClaudeStatus.idle) return lastMessage ?? 'Pronto';
     return status.label;
   }
 }
@@ -944,16 +944,16 @@ class AgentInfo {
 /// versões do Flutter, e o dia em que ele mudasse os programas de todo mundo
 /// viriam com o desenho errado.
 enum LauncherIcon {
-  terminal('terminal', Icons.terminal),
-  monitor('monitor', Icons.monitor_heart_outlined),
-  chart('gráfico', Icons.bar_chart),
-  git('git', Icons.call_split),
-  server('servidor', Icons.dns_outlined),
-  database('banco', Icons.storage_outlined),
-  rocket('foguete', Icons.rocket_launch_outlined),
-  bug('bug', Icons.bug_report_outlined),
-  edit('editor', Icons.edit_outlined),
-  box('caixa', Icons.inventory_2_outlined);
+  terminal('Terminal', Icons.terminal),
+  monitor('Monitor', Icons.monitor_heart_outlined),
+  chart('Gráfico', Icons.bar_chart),
+  git('Git', Icons.call_split),
+  server('Servidor', Icons.dns_outlined),
+  database('Banco', Icons.storage_outlined),
+  rocket('Foguete', Icons.rocket_launch_outlined),
+  bug('Bug', Icons.bug_report_outlined),
+  edit('Editor', Icons.edit_outlined),
+  box('Caixa', Icons.inventory_2_outlined);
 
   const LauncherIcon(this.label, this.glyph);
   final String label;

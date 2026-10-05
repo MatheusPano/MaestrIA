@@ -106,27 +106,27 @@ class Dictation extends ChangeNotifier {
     try {
       if (await endRecording() case final failure?) return (text: null, problem: failure);
       if (!wav.existsSync()) {
-        return (text: null, problem: 'o microfone não gravou nada');
+        return (text: null, problem: 'O microfone não gravou nada');
       }
       // Meio segundo de áudio não é uma frase, é o segundo toque no atalho
       // chegando junto com o primeiro. O whisper transcreve isso como uma
       // alucinação curta -- "Obrigado.", "Legenda:" --, que é pior do que
       // nada, porque parece que funcionou.
       if (wav.lengthSync() < _floor) {
-        return (text: null, problem: 'não deu tempo de ouvir nada');
+        return (text: null, problem: 'Não deu tempo de ouvir nada');
       }
       // Silêncio nunca chega ao whisper -- ver [peak] pra por quê.
       if (peak(wav) < _audible) {
         return (
           text: null,
-          problem: 'o microfone não captou som: gravou silêncio. confira a '
+          problem: 'O microfone não captou som: gravou silêncio. Confira a '
               'entrada em Ajustes › Som › Entrada — um fone sem microfone no '
               'jack vira "Microfone Externo" e assume a entrada sem captar nada',
         );
       }
       final heard = await transcribe(wav);
       if (heard.text case final text? when looping(text)) {
-        return (text: null, problem: 'o que voltou foi ruído, não fala: "$text"');
+        return (text: null, problem: 'O que voltou foi ruído, não fala: "$text"');
       }
       return heard;
     } finally {
@@ -206,11 +206,11 @@ class Dictation extends ChangeNotifier {
   /// "o ditado não está configurado" mandaria os dois pra mesma busca.
   Future<String?> problem() async {
     if (!await hasBinary()) {
-      return 'o ditado precisa do whisper.cpp: `brew install whisper-cpp` '
+      return 'O ditado precisa do whisper.cpp: `brew install whisper-cpp` '
           '(ou `${config.bin}` no PATH)';
     }
     if (!File(config.model).existsSync()) {
-      return 'falta o modelo em ${config.model} — ver configurações › ditado';
+      return 'Falta o modelo em ${config.model} — ver configurações › ditado';
     }
     return null;
   }
@@ -230,16 +230,16 @@ class Dictation extends ChangeNotifier {
         await _mic.invokeMethod<bool>('start', wav.path);
         return null;
       } on PlatformException catch (e) {
-        return e.message ?? 'o microfone não abriu';
+        return e.message ?? 'O microfone não abriu';
       } on MissingPluginException {
         // Um hot reload põe o Dart novo por cima do binário nativo velho, e o
         // método ainda não existe do outro lado. Ver [Notifier.chooseWorkspace].
-        return 'este build não tem a metade nativa do microfone';
+        return 'Este build não tem a metade nativa do microfone';
       }
     }
     final program = await _linuxRecorder();
     if (program == null) {
-      return 'o ditado precisa do `parecord` (pulseaudio-utils) ou do `arecord` (alsa-utils)';
+      return 'O ditado precisa do `parecord` (pulseaudio-utils) ou do `arecord` (alsa-utils)';
     }
     // `exec` pra que o pid seja o do gravador, e não o do shell que o subiu:
     // é nele que o sinal de parada precisa cair. Mesmo motivo do [TermSession].
@@ -259,9 +259,9 @@ class Dictation extends ChangeNotifier {
         await _mic.invokeMethod<bool>('stop');
         return null;
       } on PlatformException catch (e) {
-        return e.message ?? 'o microfone não fechou';
+        return e.message ?? 'O microfone não fechou';
       } on MissingPluginException {
-        return 'este build não tem a metade nativa do microfone';
+        return 'Este build não tem a metade nativa do microfone';
       }
     }
     final rec = _linux;
@@ -304,7 +304,7 @@ class Dictation extends ChangeNotifier {
       // A última linha do stderr é onde o whisper diz o que houve; o resto é
       // o dump de sistema que ele imprime antes de tentar.
       final said = r.stderr.split('\n').where((l) => l.trim().isNotEmpty).lastOrNull;
-      return (text: null, problem: 'o whisper não transcreveu${said == null ? '' : ': $said'}');
+      return (text: null, problem: 'O whisper não transcreveu${said == null ? '' : ': $said'}');
     }
     return (text: clean(r.stdout), problem: null);
   }

@@ -195,10 +195,10 @@ void main() {
       store.addFeatureOrHotfix(store.loose, 'arrumar a máquina');
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('o que fazer com essa feature'));
+      await tester.tap(find.byTooltip('O que fazer com essa feature'));
       await tester.pumpAndSettle();
-      expect(find.text('sessão do claude'), findsOneWidget);
-      expect(find.text('nova task nessa feature…'), findsNothing);
+      expect(find.text('Sessão do Claude'), findsOneWidget);
+      expect(find.text('Nova task nessa feature…'), findsNothing);
       store.dispose();
     });
   });
@@ -279,11 +279,11 @@ void main() {
       final store = storeWithFolder();
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('o que fazer com essa pasta'));
+      await tester.tap(find.byTooltip('O que fazer com essa pasta'));
       await tester.pumpAndSettle();
 
-      expect(find.text('nova feature…'), findsOneWidget);
-      expect(find.text('novo hotfix…'), findsOneWidget);
+      expect(find.text('Nova feature…'), findsOneWidget);
+      expect(find.text('Novo hotfix…'), findsOneWidget);
       expect(find.text('novo projeto…'), findsNothing);
       store.dispose();
     });
@@ -293,12 +293,12 @@ void main() {
       store.addFeatureOrHotfix(store.folders.first, 'login quebrado', kind: FeatureOrHotfixKind.hotfix);
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('o que fazer com esse hotfix'));
+      await tester.tap(find.byTooltip('O que fazer com esse hotfix'));
       await tester.pumpAndSettle();
 
-      expect(find.text('concluir hotfix'), findsOneWidget);
-      expect(find.text('dissolver hotfix'), findsOneWidget);
-      expect(find.text('virar feature'), findsOneWidget);
+      expect(find.text('Concluir hotfix'), findsOneWidget);
+      expect(find.text('Dissolver hotfix'), findsOneWidget);
+      expect(find.text('Virar feature'), findsOneWidget);
       store.dispose();
     });
   });

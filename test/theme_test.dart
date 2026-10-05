@@ -33,7 +33,7 @@ Future<void> pumpSidebar(WidgetTester tester) {
 }
 
 Color _emptyStateColor(WidgetTester tester) {
-  final text = tester.widget<Text>(find.textContaining('nenhuma pasta ainda'));
+  final text = tester.widget<Text>(find.textContaining('Nenhuma pasta ainda'));
   return text.style!.color!;
 }
 
@@ -144,19 +144,19 @@ void main() {
   group('as cores de etiqueta', () {
     test('são treze, na ordem do círculo de cores, com o cinza por último', () {
       expect(MxTint.values.map((t) => t.label), [
-        'vermelho',
-        'laranja',
-        'amarelo',
-        'lima',
-        'verde',
-        'verde-água',
-        'ciano',
-        'azul-petróleo',
-        'violeta',
-        'magenta',
-        'rosa',
-        'marrom',
-        'cinza',
+        'Vermelho',
+        'Laranja',
+        'Amarelo',
+        'Lima',
+        'Verde',
+        'Verde-água',
+        'Ciano',
+        'Azul-petróleo',
+        'Violeta',
+        'Magenta',
+        'Rosa',
+        'Marrom',
+        'Cinza',
       ]);
     });
 

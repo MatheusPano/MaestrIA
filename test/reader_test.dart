@@ -132,7 +132,7 @@ void main() {
       expect(identical(first, second), isTrue);
       expect(store.paneCount, 2);
       expect(second.doc!.source, DocSource.message);
-      expect(second.title, 'recado de TASK#47730');
+      expect(second.title, 'Recado de TASK#47730');
     });
 
     test('um leitor que saiu do painel é reaproveitado, não duplicado', () {
@@ -209,7 +209,7 @@ void main() {
       final tab = reader(MxDoc.file('/nao/existe/PLANO.md'));
 
       await pumpReader(tester, store, tab);
-      expect(find.text('esse arquivo não está mais lá'), findsOneWidget);
+      expect(find.text('Esse arquivo não está mais lá'), findsOneWidget);
       // O painel continua olhando o disco: um arquivo que a sessão reescrever
       // volta sozinho. Cancelado aqui porque o teste acaba antes dele.
       await tester.pumpWidget(const SizedBox.shrink());
@@ -256,7 +256,7 @@ void main() {
       expect(find.byType(DocBar), findsOneWidget);
       // Uma só: a ficha "plano" mora aqui e não no cabeçalho -- duas fichas
       // com a mesma palavra e a mesma ação a 40px uma da outra eram uma a mais.
-      expect(find.text('plano'), findsOneWidget);
+      expect(find.text('Plano'), findsOneWidget);
       expect(find.text('PLANO.md'), findsOneWidget);
       // A fita responde "o que dá pra ler", não "o que a sessão mexeu" -- essa
       // pergunta continua sendo da tira de arquivos alterados.

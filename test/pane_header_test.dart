@@ -8,7 +8,7 @@ import 'package:maestria/theme.dart';
 import 'package:maestria/ui/panel.dart';
 import 'package:maestria/ui/terminal_pane.dart';
 
-const closeTooltip = 'tirar do painel — a sessão continua na lateral\n⌘⌫ encerra a sessão';
+const closeTooltip = 'Tirar do painel — a sessão continua na lateral\n⌘⌫ encerra a sessão';
 
 MxTab panel(AppStore store, {String title = 'maestria_v2'}) {
   final tab = MxTab(

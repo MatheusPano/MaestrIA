@@ -105,7 +105,7 @@ class Usage {
     final token = await accessToken();
     if (token == null) {
       return const UsageReading.failed(
-        'não achei a credencial do claude nesta máquina — faça login com `claude` uma vez',
+        'Não achei a credencial do Claude nesta máquina — faça login com `claude` uma vez',
       );
     }
 
@@ -121,21 +121,21 @@ class Usage {
       // o que a cli tem na mão.
       if (response.statusCode == 401 || response.statusCode == 403) {
         return const UsageReading.failed(
-          'a credencial venceu — ela se renova sozinha da próxima vez que você usar o claude',
+          'A credencial venceu — ela se renova sozinha da próxima vez que você usar o Claude',
         );
       }
       if (response.statusCode != 200) {
-        return UsageReading.failed('a api respondeu ${response.statusCode}');
+        return UsageReading.failed('A api respondeu ${response.statusCode}');
       }
       return parse(body, account: await account());
     } on SocketException {
-      return const UsageReading.failed('sem rede pra perguntar');
+      return const UsageReading.failed('Sem rede pra perguntar');
     } on TimeoutException {
       // Separado do resto porque a frase de um `TimeoutException` cru --
       // "after 0:00:10.000000: Future not completed" -- não é pra ninguém ler.
-      return const UsageReading.failed('a api demorou demais pra responder');
+      return const UsageReading.failed('A api demorou demais pra responder');
     } on Exception catch (e) {
-      return UsageReading.failed('não deu pra ler: $e');
+      return UsageReading.failed('Não deu pra ler: $e');
     } finally {
       client.close(force: true);
     }
@@ -153,11 +153,11 @@ class Usage {
     try {
       json = jsonDecode(body) as Map<String, dynamic>;
     } catch (_) {
-      return const UsageReading.failed('a api respondeu uma coisa que não é json');
+      return const UsageReading.failed('A api respondeu uma coisa que não é json');
     }
 
     final limits = json['limits'];
-    if (limits is! List) return const UsageReading.failed('a resposta não trouxe limite nenhum');
+    if (limits is! List) return const UsageReading.failed('A resposta não trouxe limite nenhum');
 
     final windows = <UsageWindow>[];
     for (final limit in limits.whereType<Map<String, dynamic>>()) {
@@ -171,7 +171,7 @@ class Usage {
         ),
       );
     }
-    if (windows.isEmpty) return const UsageReading.failed('a resposta não trouxe limite nenhum');
+    if (windows.isEmpty) return const UsageReading.failed('A resposta não trouxe limite nenhum');
 
     return UsageReading.ok(windows, account: account, credits: _creditsOf(json));
   }
@@ -187,14 +187,14 @@ class Usage {
     final scope = limit['scope'];
     final model = scope is Map ? _displayName(scope['model']) : null;
     return switch (kind) {
-      'session' => 'sessão (5h)',
-      'weekly_all' => 'semanal (7 dias)',
-      'weekly_scoped' when model != null => 'semanal $model',
-      'weekly_scoped' => 'semanal por modelo',
+      'session' => 'Sessão (5h)',
+      'weekly_all' => 'Semanal (7 dias)',
+      'weekly_scoped' when model != null => 'Semanal $model',
+      'weekly_scoped' => 'Semanal por modelo',
       // Uma janela que a api passou a mandar e este código não conhece entra
       // com o nome cru: uma linha estranha é melhor que uma linha faltando,
       // porque é a faltando que faz a soma na cabeça de quem lê dar errado.
-      '' => 'limite',
+      '' => 'Limite',
       _ => kind.replaceAll('_', ' '),
     };
   }
@@ -212,7 +212,7 @@ class Usage {
     final used = _money(spend['used']);
     final limit = _money(spend['limit']);
     if (used == null) return null;
-    return limit == null ? 'créditos extras: $used' : 'créditos extras: $used de $limit';
+    return limit == null ? 'Créditos extras: $used' : 'Créditos extras: $used de $limit';
   }
 
   /// `{amount_minor: 1234, currency: 'BRL', exponent: 2}` virado em `BRL 12,34`.

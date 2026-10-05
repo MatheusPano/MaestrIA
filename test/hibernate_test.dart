@@ -54,7 +54,7 @@ void main() {
       // O id é o que faz a hibernação valer alguma coisa.
       expect(tab.resumable, isTrue);
       expect(tab.resumeId, 'sess-1');
-      expect(tab.subtitle, contains('hibernada'));
+      expect(tab.subtitle, contains('Hibernada'));
       expect(tab.status, ClaudeStatus.ended);
       // Continua na lateral: hibernar não é fechar.
       expect(store.tabs, contains(tab));
@@ -102,7 +102,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(tab.hibernated, isFalse);
-      expect(tab.subtitle, isNot(contains('hibernada')));
+      expect(tab.subtitle, isNot(contains('Hibernada')));
       // O `--resume` leva o id que ficou.
       expect(tab.resumeId, 'sess-1');
     });
@@ -269,7 +269,7 @@ void main() {
       await tester.pump();
 
       expect(find.byIcon(Icons.bedtime_outlined), findsOneWidget);
-      expect(find.textContaining('hibernada'), findsOneWidget);
+      expect(find.textContaining('Hibernada'), findsOneWidget);
       // A gravação do config é debounced; deixa ela sair antes de desmontar.
       await tester.pump(const Duration(milliseconds: 500));
     });

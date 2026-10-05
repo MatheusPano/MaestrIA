@@ -36,7 +36,7 @@ class SidebarRail extends StatelessWidget {
     final waiting = store.waitingSessions;
     final toggleKeys = store.keymap[MxAction.toggleSidebar].map((c) => c.label);
     String tip(String label, bool current) =>
-        current ? ['esconder a lateral', ...toggleKeys].join('  ') : label;
+        current ? ['Esconder a lateral', ...toggleKeys].join('  ') : label;
 
     return Padding(
       padding: const EdgeInsets.only(right: Mx.gap),
@@ -48,7 +48,7 @@ class SidebarRail extends StatelessWidget {
             _RailIcon(
               selected: shown == '',
               tooltip: tip(
-                waiting.isEmpty ? 'sessões' : 'sessões — ${waiting.length} esperando por você',
+                waiting.isEmpty ? 'Sessões' : 'Sessões — ${waiting.length} esperando por você',
                 shown == '',
               ),
               // Com a lista das sessões fora da tela, é este selo que diz que
@@ -92,7 +92,7 @@ class SidebarRail extends StatelessWidget {
             _RailIcon(
               selected: false,
               faint: true,
-              tooltip: 'instalar plugin',
+              tooltip: 'Instalar plugin',
               onTap: () => showInstallPlugin(context, store),
               builder: (color) => Icon(Icons.add, size: 16, color: color),
             ),

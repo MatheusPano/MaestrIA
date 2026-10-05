@@ -72,7 +72,7 @@ void main() {
       // Waiting from the call itself, not from the prompt that follows it.
       expect(s.status, ClaudeStatus.waitingAnswer);
       expect(s.status.needsHuman, isTrue);
-      expect(s.subtitle, 'pergunta: Receitas (+1)');
+      expect(s.subtitle, 'Pergunta: Receitas (+1)');
       expect(s.status.callToAction, 'te faz uma pergunta');
 
       // The permission prompt fires for a question too, and must not turn the
@@ -99,7 +99,7 @@ void main() {
               ],
             },
           }));
-      expect(s.subtitle, 'pergunta: Sobrescrevo o arquivo?');
+      expect(s.subtitle, 'Pergunta: Sobrescrevo o arquivo?');
     });
 
     test('a tool that acts still gets the lock', () {
@@ -172,7 +172,7 @@ void main() {
       expect(s.status, ClaudeStatus.starting);
       expect(s.settle(), isTrue);
       expect(s.status, ClaudeStatus.ready);
-      expect(s.subtitle, 'pronto');
+      expect(s.subtitle, 'Pronto');
     });
 
     test('settling never walks a session that already spoke backwards', () {

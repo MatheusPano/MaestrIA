@@ -80,7 +80,7 @@ class _MaestriaAppState extends State<MaestriaApp> {
     return AnimatedBuilder(
       animation: Mx.chrome,
       builder: (context, _) => MaterialApp(
-        title: 'maestria',
+        title: 'MaestrIA',
         debugShowCheckedModeBanner: false,
         theme: Mx.theme(),
         home: AnimatedBuilder(

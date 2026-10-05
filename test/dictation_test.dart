@@ -345,7 +345,7 @@ void main() {
       await store.toggleDictation();
 
       expect(written, isEmpty);
-      expect(store.banner, contains('não deu tempo'));
+      expect(store.banner, contains('Não deu tempo'));
       store.dispose();
     });
 
@@ -434,7 +434,7 @@ void main() {
       final store = AppStore(dictation: FakeDictation());
       await pumpSettings(tester, store);
 
-      expect(find.textContaining('tudo no lugar'), findsOneWidget);
+      expect(find.textContaining('Tudo no lugar'), findsOneWidget);
       expect(find.textContaining('brew install'), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -464,17 +464,17 @@ void main() {
     testWidgets('diz que está ouvindo, e some quando para', (tester) async {
       final (store, tab) = storeWithPanel();
       await pumpPane(tester, store, tab);
-      expect(find.text('ouvindo…'), findsNothing);
+      expect(find.text('Ouvindo…'), findsNothing);
 
       await store.toggleDictation();
       // `pump` e não `pumpAndSettle`: o pulso do microfone não termina nunca,
       // que é justamente o ponto dele.
       await tester.pump();
-      expect(find.text('ouvindo…'), findsOneWidget);
+      expect(find.text('Ouvindo…'), findsOneWidget);
 
       await store.toggleDictation();
       await tester.pump();
-      expect(find.text('ouvindo…'), findsNothing);
+      expect(find.text('Ouvindo…'), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       store.dispose();

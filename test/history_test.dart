@@ -335,7 +335,7 @@ void main() {
       expect(store.standingOf(chat), ChatStanding.live);
       expect(store.resumeChat(chat, folder: folder), isNull);
       expect(store.asked, isEmpty);
-      expect(store.banner, contains('ainda está rodando fora do maestria'));
+      expect(store.banner, contains('ainda está rodando fora do MaestrIA'));
     });
 
     test('a de uma pasta que sumiu avisa em vez de abrir', () async {
@@ -357,7 +357,7 @@ void main() {
       store.folders.add(folder);
       await openHistory(tester, store, until: find.text(chamada));
 
-      expect(find.text('todas as conversas'), findsOneWidget);
+      expect(find.text('Todas as conversas'), findsOneWidget);
       expect(find.text(chamada), findsOneWidget);
       expect(find.text('Tarefa o + da bandeja de grupos ficou torto'), findsOneWidget);
       expect(find.text('Migrar o schema do relatório'), findsOneWidget);
@@ -365,7 +365,7 @@ void main() {
       // qual dos dois motivos é: a pasta que sumiu, ou o transcript que nunca
       // disse em que pasta ela rodou.
       expect(find.text('a pasta não existe mais'), findsOneWidget);
-      expect(find.text('não sei onde ela rodou'), findsOneWidget);
+      expect(find.text('Não sei onde ela rodou'), findsOneWidget);
       // A pasta aparece pelo nome curto, que é como a lateral chama um repo.
       expect(find.textContaining('· sumiu ·'), findsOneWidget);
       expect(find.textContaining('/repo/sumiu'), findsNothing);
@@ -381,7 +381,7 @@ void main() {
       await openHistory(tester, store, until: find.text(chamada));
 
       final tmp = tester.getTopLeft(find.text('tmp')).dy;
-      final avulsos = tester.getTopLeft(find.text('avulsos')).dy;
+      final avulsos = tester.getTopLeft(find.text('Avulsos')).dy;
       expect(tmp, lessThan(avulsos));
       // As conversas de /tmp entre as duas réguas, e embaixo da segunda as
       // duas que a lateral não sabe de quem são: a do repo que sumiu e a que
@@ -402,11 +402,11 @@ void main() {
       final store = NoPty();
       await openHistory(tester, store, until: find.text(chamada));
 
-      expect(find.text('avulsos'), findsOneWidget);
+      expect(find.text('Avulsos'), findsOneWidget);
       expect(find.text('4'), findsOneWidget);
       // E não há histórico de pasta a buscar: fora das pastas, o que a leitura
       // da janela trouxe já é tudo que há.
-      expect(find.textContaining('todas as conversas em'), findsNothing);
+      expect(find.textContaining('Todas as conversas em'), findsNothing);
       store.dispose();
     });
 
@@ -419,23 +419,23 @@ void main() {
       store.folders.add(Folder(root: '/tmp', name: 'tmp'));
       await openHistory(tester, store, until: find.text(chamada));
 
-      expect(find.text('todas as conversas em tmp'), findsOneWidget);
-      await tester.tap(find.text('todas as conversas em tmp'));
+      expect(find.text('Todas as conversas em tmp'), findsOneWidget);
+      await tester.tap(find.text('Todas as conversas em tmp'));
       // A mesma linha diz que está buscando enquanto o disco não responde: o
       // clique já aconteceu, e oferecê-lo de novo convidaria a um segundo.
       await tester.pump();
-      expect(find.text('buscando…'), findsOneWidget);
-      await pumpUntilGone(tester, find.text('buscando…'));
+      expect(find.text('Buscando…'), findsOneWidget);
+      await pumpUntilGone(tester, find.text('Buscando…'));
 
       // Atendida, a linha sai: a seção passou a *ser* o histórico da pasta, e
       // uma linha que oferecesse o que já está na tela só ensinaria a duvidar
       // dela.
-      expect(find.text('todas as conversas em tmp'), findsNothing);
+      expect(find.text('Todas as conversas em tmp'), findsNothing);
       expect(find.text(chamada), findsOneWidget);
       // A leitura da pasta é por caminho e não pelo que o transcript diz, então
       // ela acha também a conversa que não disse onde rodou -- e essa sai dos
       // avulsos em vez de aparecer nas duas seções.
-      final avulsos = tester.getTopLeft(find.text('avulsos')).dy;
+      final avulsos = tester.getTopLeft(find.text('Avulsos')).dy;
       expect(find.text('maestria_v2'), findsOneWidget);
       expect(tester.getTopLeft(find.text('maestria_v2')).dy, lessThan(avulsos));
       expect(find.text('3'), findsOneWidget);
@@ -453,10 +453,10 @@ void main() {
       store.folders.add(Folder(root: '/tmp', name: 'tmp'));
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('retomar uma conversa'));
+      await tester.tap(find.byTooltip('Retomar uma conversa'));
       await pumpUntil(tester, find.text(chamada));
 
-      expect(find.text('todas as conversas'), findsOneWidget);
+      expect(find.text('Todas as conversas'), findsOneWidget);
       store.dispose();
     });
 
@@ -472,7 +472,7 @@ void main() {
       expect(store.asked.single['resumeId'], titled);
       expect(store.asked.single['cwd'], '/tmp');
       // O diálogo sai de cena: o painel que ele abriu é o que se olha agora.
-      expect(find.text('fechar'), findsNothing);
+      expect(find.text('Fechar'), findsNothing);
       store.dispose();
     });
   });

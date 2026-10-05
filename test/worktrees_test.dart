@@ -52,7 +52,7 @@ void main() {
   group('the sidebar itself', () {
     testWidgets('says nothing about worktrees — the tree is what is running', (tester) async {
       await pumpSidebar(tester, storeWith());
-      expect(find.text('worktrees'), findsNothing);
+      expect(find.text('Worktrees'), findsNothing);
       expect(find.text('TASK#47730'), findsNothing);
       expect(find.text('meu-repo'), findsOneWidget);
     });
@@ -77,9 +77,9 @@ void main() {
     testWidgets('offers the worktrees, with how many there are', (tester) async {
       await pumpSidebar(tester, storeWith());
       await openFolderMenu(tester);
-      expect(find.text('worktrees'), findsOneWidget);
+      expect(find.text('Worktrees'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
-      expect(find.text('remover pasta'), findsOneWidget);
+      expect(find.text('Remover pasta'), findsOneWidget);
     });
 
     testWidgets('says nothing about worktrees when there is only the checkout', (tester) async {
@@ -88,30 +88,30 @@ void main() {
       await pumpSidebar(tester, store);
       await openFolderMenu(tester);
       // A list whose one entry is the folder you just right-clicked.
-      expect(find.text('worktrees'), findsNothing);
-      expect(find.text('remover pasta'), findsOneWidget);
+      expect(find.text('Worktrees'), findsNothing);
+      expect(find.text('Remover pasta'), findsOneWidget);
     });
 
     testWidgets('opens onto every worktree of the repo', (tester) async {
       await pumpSidebar(tester, storeWith());
       await openFolderMenu(tester);
-      await tester.tap(find.text('worktrees'));
+      await tester.tap(find.text('Worktrees'));
       await tester.pumpAndSettle();
 
       expect(find.text('TASK#47730'), findsOneWidget);
       expect(find.text('TASK#45371'), findsOneWidget);
-      expect(find.text('sem pasta no disco'), findsOneWidget);
+      expect(find.text('Sem pasta no disco'), findsOneWidget);
       // The main checkout goes by the folder's name, in the list and nowhere
       // else now: the header behind it is the second one on screen.
       expect(find.text('meu-repo'), findsNWidgets(2));
       // Cleaning up the ghosts is about the list, so it sits in the list.
-      expect(find.text('limpar worktrees fantasmas'), findsOneWidget);
+      expect(find.text('Limpar worktrees fantasmas'), findsOneWidget);
     });
 
     testWidgets('picking one opens what you can do to it', (tester) async {
       await pumpSidebar(tester, storeWith());
       await openFolderMenu(tester);
-      await tester.tap(find.text('worktrees'));
+      await tester.tap(find.text('Worktrees'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('TASK#47730'));
       await tester.pumpAndSettle();
@@ -119,11 +119,11 @@ void main() {
       // O mesmo bloco de abrir do + da pasta, que é escrito uma vez só -- e
       // retomar conversa não está nele desde que virou o relógio do rodapé da
       // lateral. Ver `openHereItems`.
-      expect(find.text('sessão do claude'), findsOneWidget);
-      expect(find.text('terminal'), findsOneWidget);
+      expect(find.text('Sessão do Claude'), findsOneWidget);
+      expect(find.text('Terminal'), findsOneWidget);
       expect(find.text('retomar conversa…'), findsNothing);
-      expect(find.text('abrir no vscode'), findsOneWidget);
-      expect(find.text('excluir worktree…'), findsOneWidget);
+      expect(find.text('Abrir no vscode'), findsOneWidget);
+      expect(find.text('Excluir worktree…'), findsOneWidget);
     });
   });
 

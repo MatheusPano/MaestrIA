@@ -150,7 +150,7 @@ void main() {
       expect(store.tabs, contains(tab));
       expect(tab.launcher, isNull);
       expect(tab.title, 'meu-repo');
-      expect(tab.subtitle, 'shell');
+      expect(tab.subtitle, 'Shell');
       // E o painel salvo não volta apontando pro que não existe mais.
       expect(tab.recipe.containsKey('launcher'), isFalse);
       expect(store.launcherById('lch-que-nao-existe'), isNull);
@@ -220,30 +220,30 @@ void main() {
       await mouse.moveTo(tester.getCenter(find.text('meu-repo')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('abrir algo nessa pasta'));
+      await tester.tap(find.byTooltip('Abrir algo nessa pasta'));
       await tester.pumpAndSettle();
 
       // Claude e terminal primeiro, e o menu não cresce uma linha por
       // programa: o único 'btop' na tela é a linha do painel.
-      expect(find.text('sessão do claude'), findsOneWidget);
-      expect(find.text('terminal'), findsOneWidget);
-      expect(find.text('meus programas'), findsOneWidget);
+      expect(find.text('Sessão do Claude'), findsOneWidget);
+      expect(find.text('Terminal'), findsOneWidget);
+      expect(find.text('Meus programas'), findsOneWidget);
       expect(find.text('btop'), findsOneWidget);
-      expect(find.text('outro programa…'), findsNothing);
+      expect(find.text('Outro programa…'), findsNothing);
 
-      await mouse.moveTo(tester.getCenter(find.text('meus programas')));
+      await mouse.moveTo(tester.getCenter(find.text('Meus programas')));
       await tester.pumpAndSettle();
 
       // Agora dois: a linha do painel e a do submenu.
       expect(find.text('btop'), findsNWidgets(2));
-      expect(find.text('outro programa…'), findsOneWidget);
+      expect(find.text('Outro programa…'), findsOneWidget);
 
       // E apontar outra linha do menu o fecha: um submenu que fica aberto
       // enquanto você lê o resto do menu é um submenu no caminho.
-      await mouse.moveTo(tester.getCenter(find.text('terminal')));
+      await mouse.moveTo(tester.getCenter(find.text('Terminal')));
       await tester.pumpAndSettle();
       expect(find.text('btop'), findsOneWidget);
-      expect(find.text('outro programa…'), findsNothing);
+      expect(find.text('Outro programa…'), findsNothing);
     });
 
     // Sem programa nenhum não há seta pra lugar nenhum: a oferta de ensinar o
@@ -254,11 +254,11 @@ void main() {
       addTearDown(store.dispose);
       await pumpSidebar(tester, store);
 
-      await tester.tap(find.byTooltip('abrir algo nessa pasta'));
+      await tester.tap(find.byTooltip('Abrir algo nessa pasta'));
       await tester.pumpAndSettle();
 
-      expect(find.text('criar um programa…'), findsOneWidget);
-      expect(find.text('meus programas'), findsNothing);
+      expect(find.text('Criar um programa…'), findsOneWidget);
+      expect(find.text('Meus programas'), findsNothing);
     });
   });
 }

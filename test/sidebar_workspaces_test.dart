@@ -99,7 +99,7 @@ void main() {
 
     expect(find.text('ATRIUM'), findsOneWidget);
     expect(find.text('0 pastas'), findsOneWidget);
-    expect(find.text('arraste uma pasta pra cá'), findsOneWidget);
+    expect(find.text('Arraste uma pasta pra cá'), findsOneWidget);
     store.dispose();
   });
 
@@ -174,26 +174,26 @@ void main() {
     addTearDown(store.dispose);
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('adicionar pasta ou workspace'));
+    await tester.tap(find.byTooltip('Adicionar pasta ou workspace'));
     await tester.pumpAndSettle();
 
-    expect(find.text('adicionar pasta…'), findsOneWidget);
-    expect(find.text('importar .code-workspace…'), findsOneWidget);
-    expect(find.text('novo workspace…'), findsOneWidget);
+    expect(find.text('Adicionar pasta…'), findsOneWidget);
+    expect(find.text('Importar .code-workspace…'), findsOneWidget);
+    expect(find.text('Novo workspace…'), findsOneWidget);
   });
 
   testWidgets('o diálogo cria o workspace com o nome e as pastas marcadas', (tester) async {
     final store = storeWith(['atrium-api', 'atrium-web', 'infra']);
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('adicionar pasta ou workspace'));
+    await tester.tap(find.byTooltip('Adicionar pasta ou workspace'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('novo workspace…'));
+    await tester.tap(find.text('Novo workspace…'));
     await tester.pumpAndSettle();
     await tester.enterText(dialogField, 'ATRIUM');
     await tester.tap(find.widgetWithText(CheckboxListTile, 'atrium-api'));
     await tester.tap(find.widgetWithText(CheckboxListTile, 'atrium-web'));
-    await tester.tap(find.text('criar'));
+    await tester.tap(find.text('Criar'));
     await tester.pumpAndSettle();
 
     final ws = store.workspaces.single;
@@ -207,18 +207,18 @@ void main() {
     final ws = store.createWorkspace('ATRIUM');
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('o que fazer com essa pasta'));
+    await tester.tap(find.byTooltip('O que fazer com essa pasta'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('adicionar a workspace'));
+    await tester.tap(find.text('Adicionar a workspace'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('ATRIUM').last);
     await tester.pumpAndSettle();
     expect(store.foldersOf(ws).single.name, 'infra');
 
     // Agora desenhada dentro do ATRIUM, o menu dela oferece sair.
-    await tester.tap(find.byTooltip('o que fazer com essa pasta'));
+    await tester.tap(find.byTooltip('O que fazer com essa pasta'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('tirar deste workspace'));
+    await tester.tap(find.text('Tirar deste workspace'));
     await tester.pumpAndSettle();
     expect(store.foldersOf(ws), isEmpty);
     store.dispose();
@@ -229,20 +229,20 @@ void main() {
     store.createWorkspace('atrium', folders: [named(store, 'api')]);
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('o que fazer com esse workspace'));
+    await tester.tap(find.byTooltip('O que fazer com esse workspace'));
     await tester.pumpAndSettle();
-    expect(find.text('associar .code-workspace…'), findsOneWidget);
-    expect(find.text('abrir no vscode'), findsNothing);
-    await tester.tap(find.text('renomear…'));
+    expect(find.text('Associar .code-workspace…'), findsOneWidget);
+    expect(find.text('Abrir no vscode'), findsNothing);
+    await tester.tap(find.text('Renomear…'));
     await tester.pumpAndSettle();
     await tester.enterText(dialogField, 'ATRIUM');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(store.workspaces.single.name, 'ATRIUM');
 
-    await tester.tap(find.byTooltip('o que fazer com esse workspace'));
+    await tester.tap(find.byTooltip('O que fazer com esse workspace'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('desfazer workspace'));
+    await tester.tap(find.text('Desfazer workspace'));
     await tester.pumpAndSettle();
     expect(store.workspaces, isEmpty);
     expect(store.folders.single.name, 'api');
@@ -254,11 +254,11 @@ void main() {
     store.createWorkspace('ATRIUM', codeWorkspacePath: '/repos/atrium.code-workspace');
     await pumpSidebar(tester, store);
 
-    await tester.tap(find.byTooltip('o que fazer com esse workspace'));
+    await tester.tap(find.byTooltip('O que fazer com esse workspace'));
     await tester.pumpAndSettle();
 
-    expect(find.text('abrir no vscode'), findsOneWidget);
-    expect(find.text('desassociar .code-workspace'), findsOneWidget);
+    expect(find.text('Abrir no vscode'), findsOneWidget);
+    expect(find.text('Desassociar .code-workspace'), findsOneWidget);
     store.dispose();
   });
 }

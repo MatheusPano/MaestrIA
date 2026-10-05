@@ -296,7 +296,7 @@ class MxTab {
     if (doc case final open?) return open.title;
     // E a configuração pela pasta que ela configura: é a única coisa que
     // distingue duas abertas lado a lado.
-    if (setup case final open?) return 'claude · ${open.name}';
+    if (setup case final open?) return 'Claude · ${open.name}';
     if (view case final v?) return v.title;
     // E um painel de programa se chama pelo programa: "btop", e não pelo repo
     // em que ele por acaso subiu. Mesmo raciocínio do documento acima -- a
@@ -331,17 +331,17 @@ class MxTab {
       return [open.source.label, if (says) 'de $from', when].join(' · ');
     }
     // O arquivo aberto no editor, que é o que o título não diz.
-    if (setup case final open?) return open.selected ?? 'configuração do claude';
-    if (view case final v?) return 'plugin · ${v.pluginName}';
+    if (setup case final open?) return open.selected ?? 'Configuração do Claude';
+    if (view case final v?) return 'Plugin · ${v.pluginName}';
     // Antes do "processo saiu": saiu porque o app mandou, e o que a linha tem
     // a dizer é o que fazer a respeito.
-    if (hibernated) return 'hibernada · clique pra retomar';
-    if (exited) return 'processo saiu (${term.exitCode ?? '?'})';
+    if (hibernated) return 'Hibernada · clique pra retomar';
+    if (exited) return 'Processo saiu (${term.exitCode ?? '?'})';
     // O comando, que é a única coisa que o cabeçalho ainda não disse: o nome
     // do programa já é o título, e "programa" embaixo dele não informaria
     // nada. `npm run dev` embaixo de "dev" informa.
     if (launcher case final l?) return l.command;
-    if (kind == TabKind.shell) return 'shell';
+    if (kind == TabKind.shell) return 'Shell';
     return hooks.subtitle;
   }
 
@@ -441,8 +441,8 @@ class MxTab {
 /// *e* esperando você"). Sem isso, marcar duas coisas de grupos diferentes
 /// devolvia lista vazia e parecia bug.
 enum MxFilterGroup {
-  kind('tipo'),
-  state('estado');
+  kind('Tipo'),
+  state('Estado');
 
   const MxFilterGroup(this.label);
   final String label;
@@ -451,12 +451,12 @@ enum MxFilterGroup {
 /// Uma opção do menu de filtros da lateral, fora do escopo (pastas e
 /// projetos, que são a lista do próprio usuário) e do texto digitado.
 enum MxFilter {
-  claude('sessões do claude', MxFilterGroup.kind),
-  shell('terminais', MxFilterGroup.kind),
-  waiting('esperando você', MxFilterGroup.state),
-  working('rodando', MxFilterGroup.state),
-  parked('paradas', MxFilterGroup.state),
-  finished('concluídas', MxFilterGroup.state);
+  claude('Sessões do Claude', MxFilterGroup.kind),
+  shell('Terminais', MxFilterGroup.kind),
+  waiting('Esperando você', MxFilterGroup.state),
+  working('Rodando', MxFilterGroup.state),
+  parked('Paradas', MxFilterGroup.state),
+  finished('Concluídas', MxFilterGroup.state);
 
   const MxFilter(this.label, this.group);
   final String label;
@@ -1425,7 +1425,7 @@ class AppStore extends ChangeNotifier {
   Future<Folder?> addFolder(String rawPath) async {
     final outcome = await _adoptFolder(rawPath);
     if (outcome.folder == null) {
-      showBanner('pasta não encontrada: ${expandHome(rawPath)}', sticky: true);
+      showBanner('Pasta não encontrada: ${expandHome(rawPath)}', sticky: true);
       return null;
     }
     if (!outcome.created) return outcome.folder;
@@ -1477,11 +1477,11 @@ class AppStore extends ChangeNotifier {
   Future<WorkspaceImport?> importWorkspace(String rawPath) async {
     final ws = await CodeWorkspace.read(rawPath);
     if (ws == null) {
-      showBanner('não consegui ler esse workspace: ${expandHome(rawPath.trim())}', sticky: true);
+      showBanner('Não consegui ler esse workspace: ${expandHome(rawPath.trim())}', sticky: true);
       return null;
     }
     if (ws.folders.isEmpty) {
-      showBanner('o workspace "${ws.name}" não lista nenhuma pasta', sticky: true);
+      showBanner('O workspace "${ws.name}" não lista nenhuma pasta', sticky: true);
       return null;
     }
     final added = <Folder>[];
@@ -1744,8 +1744,8 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     showBanner(
       going.length == 1
-          ? 'workspace "$name" fechado — 1 pasta saiu da lateral'
-          : 'workspace "$name" fechado — ${going.length} pastas saíram da lateral',
+          ? 'Workspace "$name" fechado — 1 pasta saiu da lateral'
+          : 'Workspace "$name" fechado — ${going.length} pastas saíram da lateral',
     );
   }
 
@@ -2195,7 +2195,7 @@ class AppStore extends ChangeNotifier {
       tab.hibernated = true;
       tab.term.park();
       tab.hooks.status = ClaudeStatus.ended;
-      tab.term.remark('hibernada — a conversa volta com um clique');
+      tab.term.remark('Hibernada — a conversa volta com um clique');
     }
 
     Git.branchOf(cwd).then((b) {
@@ -2332,16 +2332,16 @@ class AppStore extends ChangeNotifier {
         return open;
       case ChatStanding.live:
         showBanner(
-          '"${chat.label}" ainda está rodando fora do maestria — '
-          'o claude só retoma uma conversa depois que ela sai',
+          '"${chat.label}" ainda está rodando fora do MaestrIA — '
+          'o Claude só retoma uma conversa depois que ela sai',
           sticky: true,
         );
         return null;
       case ChatStanding.gone:
         showBanner(
           chat.cwd.isEmpty
-              ? 'não sei em que pasta "${chat.label}" rodou'
-              : 'a pasta dessa conversa não existe mais: ${chat.cwd}',
+              ? 'Não sei em que pasta "${chat.label}" rodou'
+              : 'A pasta dessa conversa não existe mais: ${chat.cwd}',
           sticky: true,
         );
         return null;
@@ -2424,8 +2424,8 @@ class AppStore extends ChangeNotifier {
     }
     final which = tab.hooks.plans.indexOf(plan);
     final versioned = which >= 0 && which < tab.hooks.plans.length - 1
-        ? 'plano ${which + 1}/${tab.hooks.plans.length}'
-        : 'plano';
+        ? 'Plano ${which + 1}/${tab.hooks.plans.length}'
+        : 'Plano';
     return showDoc(
       MxDoc(
         source: DocSource.plan,
@@ -2448,7 +2448,7 @@ class AppStore extends ChangeNotifier {
     return showDoc(
       MxDoc(
         source: DocSource.message,
-        title: 'recado de ${tab.title}',
+        title: 'Recado de ${tab.title}',
         text: said,
         origin: tab.title,
       ),
@@ -2459,7 +2459,7 @@ class AppStore extends ChangeNotifier {
   /// Um `.md` do disco. O painel relê sozinho enquanto estiver aberto.
   MxTab? showFile(String path, {MxTab? from, Folder? folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     if (!File(path).existsSync()) {
-      showBanner('esse arquivo não está mais lá: $path', sticky: true);
+      showBanner('Esse arquivo não está mais lá: $path', sticky: true);
       return null;
     }
     return showDoc(
@@ -2489,7 +2489,7 @@ class AppStore extends ChangeNotifier {
       // Página e e-mail são assunto de quem cuida de links: o app escolhido
       // pra cada um deles é o do sistema.
       final ok = await Notifier.openLink(href);
-      if (!ok) showBanner('não consegui abrir $href', sticky: true);
+      if (!ok) showBanner('Não consegui abrir $href', sticky: true);
       return;
     }
     // Só a parte que é caminho: a âncora depois do # não é um arquivo, e o
@@ -2498,7 +2498,7 @@ class AppStore extends ChangeNotifier {
     if (path.isEmpty) return;
     final target = resolveLinkPath(path, base: base ?? from?.cwd);
     if (!File(target).existsSync()) {
-      showBanner('esse link aponta pra um arquivo que não existe: $target', sticky: true);
+      showBanner('Esse link aponta pra um arquivo que não existe: $target', sticky: true);
       return;
     }
     if (readable(target)) {
@@ -2769,7 +2769,7 @@ class AppStore extends ChangeNotifier {
         );
       case CommandTarget.session:
         if (tab == null || tab.kind != TabKind.claude || tab.exited || tab.hibernated) {
-          showBanner('${command.title}: precisa de uma sessão do claude rodando em foco');
+          showBanner('${command.title}: precisa de uma sessão do Claude rodando em foco');
           return;
         }
         await tab.term.submit(expandCommand(command.send!, values, quote: false));
@@ -2880,8 +2880,8 @@ class AppStore extends ChangeNotifier {
     if (!Directory(path).existsSync() && !File(path).existsSync()) {
       showBanner(
         CodeWorkspace.looksLikeOne(path)
-            ? 'esse workspace não está mais lá: $path'
-            : 'essa pasta não existe mais: $path',
+            ? 'Esse workspace não está mais lá: $path'
+            : 'Essa pasta não existe mais: $path',
         sticky: true,
       );
       return;
@@ -2889,8 +2889,8 @@ class AppStore extends ChangeNotifier {
     final ok = await Editor.open(path);
     showBanner(
       ok
-          ? 'aberto no vscode: ${path.split('/').last}'
-          : 'não achei o vscode — nem o `code` no PATH, nem o app',
+          ? 'Aberto no vscode: ${path.split('/').last}'
+          : 'Não achei o vscode — nem o `code` no PATH, nem o app',
       sticky: !ok,
     );
   }
@@ -2907,7 +2907,7 @@ class AppStore extends ChangeNotifier {
     bool deleteBranch = false,
   }) async {
     if (tabAt(w.path) != null) {
-      showBanner('feche o painel que está nessa worktree antes de excluí-la', sticky: true);
+      showBanner('Feche o painel que está nessa worktree antes de excluí-la', sticky: true);
       return;
     }
     final outcome = await Git.removeWorktree(
@@ -2939,7 +2939,7 @@ class AppStore extends ChangeNotifier {
       ? '$title: não achei o `claude` no PATH do app — instale-o, ou ponha a '
             'pasta do binário no ${Sh.profileFile} (o rc do shell interativo o '
             'app não lê)'
-      : '$title: o claude saiu na largada (código ${code ?? '?'}) '
+      : '$title: o Claude saiu na largada (código ${code ?? '?'}) '
             '— abra o painel pra ver o motivo';
 
   void _register(MxTab tab, {bool place = true}) {
@@ -3438,7 +3438,7 @@ class AppStore extends ChangeNotifier {
     tab.hooks.activeTool = null;
     tab.hooks.toolStartedAt = null;
     tab.term.remark(
-      'hibernada — processo desligado pra liberar memória; a conversa volta com um clique',
+      'Hibernada — processo desligado pra liberar memória; a conversa volta com um clique',
     );
     // Sem await, como em [closeTab]: o hangup é atendido no tempo dele e a
     // linha já pode dizer o que aconteceu. Sem pty não há o que desligar --
@@ -3638,7 +3638,7 @@ class AppStore extends ChangeNotifier {
 
     final first = panels.nonNulls.firstOrNull;
     if (first == null) {
-      showBanner('o grupo "${group.name}" não tem mais nenhum painel pra abrir', sticky: true);
+      showBanner('O grupo "${group.name}" não tem mais nenhum painel pra abrir', sticky: true);
       return;
     }
     panes =
@@ -4394,7 +4394,7 @@ class AppStore extends ChangeNotifier {
   @visibleForTesting
   static String handoffText(MxTab from, String note) {
     final said = _clipHandoff(from.hooks.lastMessageFull);
-    final out = StringBuffer('[maestria] o painel "${from.title}" acabou de terminar.');
+    final out = StringBuffer('[MaestrIA] o painel "${from.title}" acabou de terminar.');
     if (said != null && said.isNotEmpty) {
       out.write('\n\nO que ele disse ao terminar:\n"""\n$said\n"""');
     }
@@ -4447,7 +4447,7 @@ class AppStore extends ChangeNotifier {
 
     for (final entry in waiting.entries) {
       if (_alerted.add(entry.key)) {
-        notifier.alert('maestria', entry.value);
+        notifier.alert('MaestrIA', entry.value);
       }
     }
     _alerted.removeWhere((key) => !waiting.containsKey(key));

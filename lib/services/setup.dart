@@ -35,12 +35,12 @@ enum SetupSection {
   decisions;
 
   String get label => switch (this) {
-    SetupSection.memory => 'memória',
-    SetupSection.settings => 'configuração',
-    SetupSection.rules => 'regras',
-    SetupSection.skills => 'skills',
-    SetupSection.agents => 'agentes',
-    SetupSection.decisions => 'decisões (ADR)',
+    SetupSection.memory => 'Memória',
+    SetupSection.settings => 'Configuração',
+    SetupSection.rules => 'Regras',
+    SetupSection.skills => 'Skills',
+    SetupSection.agents => 'Agentes',
+    SetupSection.decisions => 'Decisões (ADR)',
   };
 
   /// O que a prateleira é, dito uma vez, pra quem nunca viu uma. Aparece no

@@ -146,14 +146,14 @@ class _DocPaneState extends State<DocPane> {
     if (_doc.missing) {
       return _Notice(
         icon: Icons.help_outline,
-        title: 'esse arquivo não está mais lá',
+        title: 'Esse arquivo não está mais lá',
         detail: _doc.path ?? '',
       );
     }
     if (_doc.text.trim().isEmpty) {
       return _Notice(
         icon: Icons.description_outlined,
-        title: _doc.source.onDisk ? 'arquivo vazio' : 'documento vazio',
+        title: _doc.source.onDisk ? 'Arquivo vazio' : 'Documento vazio',
         detail: _doc.path ?? '',
       );
     }
@@ -376,23 +376,23 @@ class _DocHeader extends StatelessWidget {
                 if (doc.source.onDisk && doc.path != null) ...[
                   _Action(
                     icon: Icons.refresh,
-                    tooltip: 'reler do disco — ele já relê sozinho enquanto está aberto',
+                    tooltip: 'Reler do disco — ele já relê sozinho enquanto está aberto',
                     onPressed: onReload,
                   ),
                   _Action(
                     icon: Icons.folder_open_outlined,
-                    tooltip: 'mostrar no Finder',
+                    tooltip: 'Mostrar no Finder',
                     onPressed: () => Notifier.reveal(doc.path!),
                   ),
                   _Action(
                     icon: Icons.edit_outlined,
-                    tooltip: 'abrir no vscode',
+                    tooltip: 'Abrir no vscode',
                     onPressed: () => store.openInEditor(doc.path!),
                   ),
                 ],
                 _Action(
                   icon: Icons.copy_all_outlined,
-                  tooltip: 'copiar o markdown',
+                  tooltip: 'Copiar o markdown',
                   onPressed: onCopy,
                 ),
                 if (store.isPinned(tab) || store.paneCount > 1)
@@ -403,7 +403,7 @@ class _DocHeader extends StatelessWidget {
                   ),
                 _Action(
                   icon: Icons.close,
-                  tooltip: 'fechar este leitor',
+                  tooltip: 'Fechar este leitor',
                   // Fechar de verdade, não [AppStore.dismiss]: um leitor não
                   // tem processo nem conversa pra guardar na lateral, então um
                   // que sai do painel não seria nada — só uma linha a mais na

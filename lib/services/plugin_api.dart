@@ -143,7 +143,7 @@ class PluginApi {
         if (line == null) {
           await store.openInEditor(path);
         } else if (!await Editor.open(path, line: line)) {
-          store.showBanner('não achei o vscode — nem o `code` no PATH, nem o app', sticky: true);
+          store.showBanner('Não achei o vscode — nem o `code` no PATH, nem o app', sticky: true);
         }
         return null;
       case 'session.focus':
