@@ -250,7 +250,7 @@ MxSubmenuItem tintItem(MxTint? current) => MxSubmenuItem(
           color: tint.color,
         ),
         // Um risco entre "sem cor" e as cores: a primeira linha desfaz, as
-        // outras cinco fazem.
+        // outras fazem.
         divided: tint == MxTint.values.first,
       ),
   ],
