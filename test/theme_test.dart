@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:maestria/models.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/theme.dart';
 import 'package:maestria/ui/sidebar.dart';
@@ -34,6 +35,23 @@ Future<void> pumpSidebar(WidgetTester tester) {
 Color _emptyStateColor(WidgetTester tester) {
   final text = tester.widget<Text>(find.textContaining('nenhuma pasta ainda'));
   return text.style!.color!;
+}
+
+/// A distância entre duas cores como o olho a mede (CIELAB, ΔE76). Lado a lado,
+/// abaixo de uns 10 duas bolinhas de menu já se confundem.
+double _deltaE(Color a, Color b) {
+  List<double> lab(Color c) {
+    double lin(double v) => v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4).toDouble();
+    final r = lin(c.r), g = lin(c.g), b = lin(c.b);
+    final x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    final y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    final z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    double f(double t) => t > 0.008856 ? pow(t, 1 / 3).toDouble() : 7.787 * t + 16 / 116;
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+  }
+
+  final p = lab(a), q = lab(b);
+  return sqrt(pow(p[0] - q[0], 2) + pow(p[1] - q[1], 2) + pow(p[2] - q[2], 2));
 }
 
 void main() {
@@ -119,6 +137,71 @@ void main() {
     test('the pty inherits the pane it sits in', () {
       expect(MxThemes.nord.terminal.background, MxThemes.nord.bg);
       expect(MxThemes.githubLight.terminal.foreground, MxThemes.githubLight.fg);
+    });
+  });
+
+  // A cor que alguém escolhe pra um painel, uma pasta ou um projeto. Ver [MxTint].
+  group('as cores de etiqueta', () {
+    test('são treze, na ordem do círculo de cores, com o cinza por último', () {
+      expect(MxTint.values.map((t) => t.label), [
+        'vermelho',
+        'laranja',
+        'amarelo',
+        'lima',
+        'verde',
+        'verde-água',
+        'ciano',
+        'azul-petróleo',
+        'violeta',
+        'magenta',
+        'rosa',
+        'marrom',
+        'cinza',
+      ]);
+    });
+
+    test('nenhuma se confunde com outra, em nenhum tema', () {
+      for (final palette in MxThemes.all) {
+        Mx.apply(palette);
+        for (final a in MxTint.values) {
+          for (final b in MxTint.values.where((b) => b.index > a.index)) {
+            expect(
+              _deltaE(a.color, b.color),
+              greaterThanOrEqualTo(10),
+              reason: '${a.label} e ${b.label} no ${palette.id}',
+            );
+          }
+        }
+      }
+    });
+
+    test('nenhuma some no fundo do painel, em nenhum tema', () {
+      for (final palette in MxThemes.all) {
+        Mx.apply(palette);
+        for (final tint in MxTint.values) {
+          expect(
+            _deltaE(tint.color, palette.bg),
+            greaterThanOrEqualTo(15),
+            reason: '${tint.label} no ${palette.id}',
+          );
+        }
+      }
+    });
+
+    test('seguem o tema: o mesmo nome dá outra cor em outra paleta', () {
+      Mx.apply(MxThemes.nord);
+      final nord = MxTint.cyan.color;
+      Mx.apply(MxThemes.githubLight);
+      expect(MxTint.cyan.color, isNot(nord));
+      Mx.apply(MxThemes.nord);
+      expect(MxTint.cyan.color, nord);
+    });
+
+    test('a escolhida volta do config com o mesmo nome', () {
+      for (final tint in MxTint.values) {
+        final folder = Folder(root: '/repo', name: 'repo')..tint = tint;
+        expect(Folder.fromJson(folder.toJson()).tint, tint);
+      }
     });
   });
 

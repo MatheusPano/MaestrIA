@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
@@ -1494,20 +1496,28 @@ class Mx {
 /// sobrevivendo à troca de tema -- uma cor aceso sozinha no meio de uma paleta
 /// que não é a dela.
 ///
-/// Sai do ansi pelo motivo escrito em [Mx.groupTints]: os cinco acentos da
+/// Saem do ansi, pelo motivo escrito em [Mx.groupTints]: os cinco acentos da
 /// interface já são os estados de uma sessão, e o ansi no chrome ainda não
-/// significa nada.
+/// significa nada. Mas saem dele só pela metade -- a claridade e a saturação --,
+/// e o tom é fixo, de cada cor. É isso que deixa haver treze.
 ///
-/// Cinco, e não quatro como as dos grupos: aqui a cor é escolhida justamente
-/// pra separar duas sessões que se confundem, e quem escolhe merece um tom a
-/// mais que quem só recebe. São os cinco tons de que o ansi dispõe depois de
-/// tirar o preto, o branco e o cinza -- não há um sexto pra oferecer.
+/// Treze tons tirados do ansi direto não existem: depois do preto, do branco e
+/// do cinza ele tem cinco. E misturar dois vizinhos pra fazer um terceiro só
+/// funciona onde os vizinhos são diferentes, o que nem toda paleta garante: no
+/// Everforest o verde e o ciano são quase o mesmo verde, e o "ciano" do Rosé
+/// Pine Dawn é rosa. Medido, a mistura deixava pares que o olho não separa.
+/// Com o tom fixo e a claridade e a saturação médias do ansi da paleta, os
+/// treze ficam a um ΔE de 11 ou mais um do outro em todo tema embutido (ver
+/// `theme_test.dart`), e cada tema continua dando o jeito das suas cores: mais
+/// apagadas no Nord, mais acesas no Synthwave, mais escuras num tema claro.
 ///
-/// Duas escolhas que a lista carrega, e que valem pras duas pontas do arco:
+/// O cinza é a exceção, e sai do ansi inteiro: o `brightBlack` é o cinza que a
+/// paleta escolheu pra ficar legível sobre o fundo dela.
 ///
 /// Azul ficou de fora. Na paleta padrão ele é o mesmo valor do [Mx.accent], e
 /// o accent é o anel do painel em foco -- uma cor que quer dizer "este painel
-/// é aquele" não pode ser a mesma que já diz "o teclado está aqui".
+/// é aquele" não pode ser a mesma que já diz "o teclado está aqui". O
+/// azul-petróleo e o violeta ficam um de cada lado dele.
 ///
 /// Vermelho entrou, contra a regra do [Mx.groupTints], que o reserva pro que
 /// tem risco ([ClaudeStatus.waitingPermission]). A diferença é quem pinta:
@@ -1515,28 +1525,56 @@ class Mx {
 /// alarme falso; aqui ela é pedida, e um painel vermelho quer dizer o que a
 /// pessoa que o pintou quis dizer. O que ela custa está dito: um painel
 /// vermelho e um pedido de permissão passam a dividir a mesma família de cor.
+///
+/// A ordem é a do círculo de cores, e o config guarda o nome: uma cor que
+/// entra no meio da lista não muda a de ninguém.
 enum MxTint {
-  cyan('ciano'),
-  magenta('magenta'),
-  red('vermelho'),
-  green('verde'),
-  yellow('amarelo');
+  red('vermelho', 25),
+  orange('laranja', 55),
+  yellow('amarelo', 95),
+  lime('lima', 125),
+  green('verde', 150),
+  aqua('verde-água', 175),
+  cyan('ciano', 205),
+  petrol('azul-petróleo', 235),
+  violet('violeta', 290),
+  magenta('magenta', 330),
+  pink('rosa', 0),
+  // O laranja com menos luz e menos cor, que é o que um marrom é.
+  brown('marrom', 55),
+  grey('cinza', 0);
 
-  const MxTint(this.label);
+  const MxTint(this.label, this._hue);
 
   /// Como a linha do menu se chama. Em português, como o resto dos menus.
   final String label;
 
-  Color get color => switch (this) {
-    MxTint.cyan => Mx.palette.ansi.cyan,
-    MxTint.magenta => Mx.palette.ansi.magenta,
-    MxTint.red => Mx.palette.ansi.red,
-    // O verde do ansi é, em várias paletas, o mesmo verde do "concluída" --
-    // daí o claro, que é o tom que sobra pra dizer outra coisa. Mesmo motivo
-    // do [Mx.groupTints].
-    MxTint.green => Mx.palette.ansi.brightGreen,
-    MxTint.yellow => Mx.palette.ansi.yellow,
-  };
+  /// O tom no círculo do OKLCH, em graus.
+  final double _hue;
+
+  Color get color => _tintsOf(Mx.palette)[index];
+
+  /// As treze da paleta, calculadas uma vez por paleta: `color` é lido a cada
+  /// build de cada linha pintada da lateral.
+  static List<Color> _tintsOf(MxPalette palette) {
+    if (identical(palette, _cachedFor)) return _cached;
+    final a = palette.ansi;
+    final base = [a.red, a.yellow, a.brightGreen, a.cyan, a.magenta].map(_Oklch.of);
+    final lightness = base.map((c) => c.l).average;
+    final chroma = base.map((c) => c.c).average;
+    _cachedFor = palette;
+    return _cached = [
+      for (final tint in values)
+        switch (tint) {
+          MxTint.grey => a.brightBlack,
+          MxTint.brown => _Oklch(lightness * 0.8, chroma * 0.6, tint._hue).toColor(),
+          _ => _Oklch(lightness, chroma, tint._hue).toColor(),
+        },
+    ];
+  }
+
+  static MxPalette? _cachedFor;
+  static List<Color> _cached = const [];
 
   /// O que o config diz, virado de volta em cor -- ou null, que é o painel
   /// sem cor. Um nome que não existe mais também volta null: um painel
@@ -1549,4 +1587,54 @@ enum MxTint {
     }
     return null;
   }
+}
+
+/// Uma cor no OKLCH: claridade, croma e tom. É o espaço em que dois tons a
+/// mesma distância no círculo parecem a mesma distância pro olho -- no HSL o
+/// amarelo e o azul de mesma "luz" não têm a mesma luz nenhuma.
+///
+/// As matrizes são as do Björn Ottosson, que publicou o espaço.
+class _Oklch {
+  const _Oklch(this.l, this.c, this.hue);
+
+  final double l, c, hue;
+
+  static _Oklch of(Color color) {
+    double linear(double v) =>
+        v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4).toDouble();
+    final r = linear(color.r), g = linear(color.g), b = linear(color.b);
+    final l = _cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    final m = _cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    final s = _cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    final okA = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    final okB = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    return _Oklch(
+      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      sqrt(okA * okA + okB * okB),
+      atan2(okB, okA) * 180 / pi,
+    );
+  }
+
+  /// De volta pro sRGB. O que cair fora dele é cortado na borda -- com a croma
+  /// média de um ansi, isso é raro e pouco.
+  Color toColor() {
+    final h = hue * pi / 180;
+    final okA = c * cos(h), okB = c * sin(h);
+    final l = pow(this.l + 0.3963377774 * okA + 0.2158037573 * okB, 3);
+    final m = pow(this.l - 0.1055613458 * okA - 0.0638541728 * okB, 3);
+    final s = pow(this.l - 0.0894841775 * okA - 1.2914855480 * okB, 3);
+    double encoded(num v) {
+      final x = v.clamp(0, 1).toDouble();
+      return x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055;
+    }
+
+    return Color.from(
+      alpha: 1,
+      red: encoded(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+      green: encoded(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+      blue: encoded(-0.0041960771 * l - 0.7034186147 * m + 1.7076069010 * s),
+    );
+  }
+
+  static double _cbrt(double v) => pow(v, 1 / 3).toDouble();
 }
