@@ -488,6 +488,11 @@ class _PaneHeader extends StatelessWidget {
                               ),
                             if (tab.branch.isNotEmpty && tab.branch != tab.title)
                               _Chip(text: tab.branch, color: Mx.fgDim, icon: Icons.call_split),
+                            // O número vem da linha de status do Claude Code; é
+                            // null antes da primeira resposta e depois de
+                            // `/compact`, e a ficha some junto com ele.
+                            if (tab.kind == TabKind.claude && tab.context != null)
+                              _ContextChip(usage: tab.context!),
                             if (tab.dirty > 0) _Chip(text: '${tab.dirty}', color: Mx.yellow),
                             if (tab.hooks.touched.isNotEmpty)
                               ResultChip(
@@ -568,6 +573,17 @@ class _PaneHeader extends StatelessWidget {
                       pinned: store.isPinned(tab),
                       onPressed: () => store.togglePin(tab),
                     ),
+                  // Do painel pra linha dele na lateral: a pessoa que está
+                  // olhando a sessão e quer saber onde ela mora na lista.
+                  IconButton(
+                    tooltip: 'mostrar na lateral',
+                    iconSize: 16,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                    style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    onPressed: () => store.revealTab(tab),
+                    icon: Icon(Icons.my_location, color: Mx.fgDim),
+                  ),
                   // O tique fica antes do x porque é a outra forma de acabar
                   // com um painel — e a que fica com ele. Quem leu a resposta
                   // está olhando pra este header; é daqui que ele diz "essa
@@ -792,6 +808,56 @@ class _Chip extends StatelessWidget {
           if (icon != null) ...[Icon(icon, size: 11, color: color), const SizedBox(width: 4)],
           Text(text, style: TextStyle(color: color, fontSize: 11)),
         ],
+      ),
+    );
+  }
+}
+
+/// Tokens em prosa curta: `116 mil`, `1,2 mi`.
+String formatTokens(int n) {
+  if (n < 1000) return '$n';
+  final thousands = (n / 1000).round();
+  // 999.500 em diante arredonda para 1000 mil: vira `1 mi`, nunca `1000 mil`.
+  if (thousands < 1000) return '$thousands mil';
+  final tenths = (n / 100000).round();
+  return tenths % 10 == 0 ? '${tenths ~/ 10} mi' : '${tenths ~/ 10},${tenths % 10} mi';
+}
+
+class _ContextChip extends StatelessWidget {
+  const _ContextChip({required this.usage});
+  final ContextUsage usage;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = usage.percent >= 85
+        ? Mx.red
+        : usage.percent >= 60
+        ? Mx.yellow
+        : Mx.fgDim;
+    final filled = (usage.percent / 20).ceil().clamp(0, 5);
+    return Tooltip(
+      message: '${formatTokens(usage.tokens)} de ${formatTokens(usage.window)} tokens',
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            for (var i = 0; i < 5; i++)
+              Container(
+                key: ValueKey('context-segment-${i < filled ? 'filled' : 'empty'}-$i'),
+                width: 4,
+                height: 7,
+                margin: EdgeInsets.only(right: i < 4 ? 1 : 0),
+                color: color.withValues(alpha: i < filled ? 1 : 0.25),
+              ),
+            const SizedBox(width: 4),
+            Text('${usage.percent}%', style: TextStyle(color: color, fontSize: 11)),
+          ],
+        ),
       ),
     );
   }

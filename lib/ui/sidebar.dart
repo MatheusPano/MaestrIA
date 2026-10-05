@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 import '../models.dart';
@@ -55,6 +56,11 @@ class Sidebar extends StatelessWidget {
             // The loose tray closes the list on purpose: it is where you go
             // when none of the folders above is the answer.
             child: ListView(
+              // Tudo montado, mesmo fora da tela: "mostrar na lateral" rola até
+              // a linha, e uma linha que a lista ainda não construiu não tem
+              // contexto pra ser rolada. Por isso a lista inteira fica montada
+              // o tempo todo; é aceitável porque são dezenas de linhas, não milhares.
+              scrollCacheExtent: const ScrollCacheExtent.pixels(100000),
               padding: const EdgeInsets.only(top: 6, bottom: 20),
               children: [
                 // Os arranjos salvos abrem a lista. Uma busca em curso os
@@ -804,8 +810,14 @@ class _FolderGroup extends StatelessWidget {
             color: tint,
             children: [
               for (final p in featuresOrHotfixes)
-                _FeatureOrHotfixGroup(key: ValueKey(p.id), store: store, folder: folder, featureOrHotfix: p),
-              ..._panelRows(store, tabs),
+                _FeatureOrHotfixGroup(
+                  key: ValueKey(p.id),
+                  store: store,
+                  folder: folder,
+                  featureOrHotfix: p,
+                  within: within,
+                ),
+              ..._panelRows(store, tabs, within: within),
               // The strip of chips used to end the nest; the rail still wants
               // to run a little past the last row rather than stop dead on it.
               const SizedBox(height: 8),
@@ -1490,11 +1502,16 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
     required this.store,
     required this.folder,
     required this.featureOrHotfix,
+    this.within,
   });
 
   final AppStore store;
   final Folder folder;
   final FeatureOrHotfix featureOrHotfix;
+
+  /// A aparição da pasta que desenha este projeto; null na raiz e na bandeja.
+  /// As linhas dele precisam saber, pra lateral achar a que está revelando.
+  final Workspace? within;
 
   @override
   Widget build(BuildContext context) {
@@ -1589,7 +1606,7 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
             // A trilha é o que liga as sessões ao projeto delas; pintada, ela
             // diz de relance onde aquele bloco de cor começa e acaba.
             color: featureOrHotfix.tint?.color,
-            children: [..._panelRows(store, tabs), const SizedBox(height: 4)],
+            children: [..._panelRows(store, tabs, within: within), const SizedBox(height: 4)],
           ),
       ],
     );
@@ -1657,29 +1674,55 @@ class _FeatureOrHotfixDropState extends State<_FeatureOrHotfixDrop> {
 /// Só enquanto o filho vier logo atrás do pai na lista. Arrastar uma linha pra
 /// outro lugar é dizer que ela vale sozinha, e aí ela volta a ser uma linha
 /// como as outras -- sem estado escondido pra discordar do que se vê.
-List<Widget> _panelRows(AppStore store, List<MxTab> tabs) {
+List<Widget> _panelRows(AppStore store, List<MxTab> tabs, {Workspace? within}) {
   final rows = <Widget>[];
   for (var i = 0; i < tabs.length; i++) {
     final tab = tabs[i];
-    rows.add(_TabRow(key: ValueKey(tab.id), store: store, tab: tab));
+    rows.add(_TabRow(key: ValueKey(tab.id), store: store, tab: tab, within: within));
     final brood = <MxTab>[];
     while (i + 1 < tabs.length && store.descendsFrom(tabs[i + 1], tab)) {
       brood.add(tabs[++i]);
     }
     if (brood.isNotEmpty) {
-      rows.add(_Nest(rail: 18, children: _panelRows(store, brood)));
+      rows.add(_Nest(rail: 18, children: _panelRows(store, brood, within: within)));
     }
   }
   return rows;
 }
 
-class _TabRow extends StatelessWidget {
-  const _TabRow({super.key, required this.store, required this.tab});
+class _TabRow extends StatefulWidget {
+  const _TabRow({super.key, required this.store, required this.tab, this.within});
   final AppStore store;
   final MxTab tab;
 
+  /// A aparição em que esta linha está desenhada: a mesma sessão aparece uma
+  /// vez por workspace que espelha a pasta dela, e só uma é a revelada.
+  final Workspace? within;
+
+  @override
+  State<_TabRow> createState() => _TabRowState();
+}
+
+class _TabRowState extends State<_TabRow> {
   @override
   Widget build(BuildContext context) {
+    final store = widget.store;
+    final tab = widget.tab;
+    final within = widget.within;
+    // O pedido de rolar vale uma vez: o redesenho que vem a cada tique durante
+    // o destaque não pode puxar a lista de volta.
+    if (store.takeRevealScroll(tab, within)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.3,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      });
+    }
+    final revealed = store.revealedTabId == tab.id && store.revealedWithin == within;
     final selected = store.isOpen(tab);
     // Which pane has the keyboard, so four selected rows are still readable.
     final focused = selected && store.focusedPaneId == tab.id;
@@ -1801,7 +1844,30 @@ class _TabRow extends StatelessWidget {
       onClose: () => store.closeTab(tab),
       onSecondary: (pos) => showPanelMenu(context, store, tab, pos),
     );
-    return _PanelDrag(store: store, tab: tab, child: row);
+    return _PanelDrag(
+      store: store,
+      tab: tab,
+      // O mesmo realce de "entrar" do arrasto: borda e véu do accent, por
+      // cima da linha e sem pegar o clique.
+      child: revealed
+          ? Stack(
+              children: [
+                row,
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Mx.accent.withValues(alpha: 0.12),
+                        border: Border.all(color: Mx.accent, width: 1.5),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : row,
+    );
   }
 }
 

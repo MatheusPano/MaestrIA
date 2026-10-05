@@ -96,7 +96,7 @@ GL_DEPS="libegl1, libgles2"
 
 # `git`, `libnotify-bin` e `xdg-utils` são o que o app shella em runtime; o
 # `claude` não está aqui porque não vem do apt -- quem o instala é o usuário.
-RUN_DEPS="git, libnotify-bin, xdg-utils"
+RUN_DEPS="git, libnotify-bin, xdg-utils, curl"
 
 cat > "$ROOT/DEBIAN/control" <<CONTROL
 Package: maestria

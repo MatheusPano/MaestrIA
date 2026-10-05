@@ -84,6 +84,10 @@ class MxTab {
   final TermSession term = TermSession();
   final HookState hooks = HookState();
 
+  /// Quanto do contexto a sessão deste painel ocupa, ou null enquanto não há
+  /// número. Só memória: nunca vai pro config.
+  ContextUsage? context;
+
   /// O que este painel mostra, quando ele é um [TabKind.reader]. Null em todos
   /// os outros -- e não-null em todos os readers, que é o que [isReader]
   /// garante pra quem vai desreferenciar.
@@ -740,6 +744,7 @@ class AppStore extends ChangeNotifier {
   Future<void> init() async {
     await hooks.start();
     hooks.events.listen(applyHook);
+    hooks.statuses.listen(applyStatus);
     agents.updates.listen(applyAgents);
     plugins.onCall = PluginApi(this).handle;
     // Ligar, desligar ou ver um plugin cair muda o que os menus oferecem e o
@@ -1267,6 +1272,68 @@ class AppStore extends ChangeNotifier {
     // aparelhos.
     _syncSidebar(announce: true);
     notifyListeners();
+  }
+
+  /// A sessão que a lateral está revelando, e em que aparição. Ver [revealTab].
+  String? revealedTabId;
+  Workspace? revealedWithin;
+
+  /// O pedido de rolar até a linha revelada, ainda não atendido. A linha o
+  /// consome uma vez (ver [takeRevealScroll]); sem isso cada redesenho durante
+  /// os 2s de destaque rolaria a lista de novo.
+  bool _revealScrollPending = false;
+  Timer? _revealTimer;
+
+  /// "Mostrar na lateral": leva a pessoa do painel à linha dele na lista.
+  ///
+  /// Faz o que ela faria à mão -- traz a lateral, tira a busca que escondia a
+  /// sessão, abre workspace, pasta e projeto -- e por isso o que abriu fica
+  /// aberto. Não usa [showSidebarView]: com a lista já na tela ele a esconde,
+  /// e aqui o pedido é sempre "mostre".
+  ///
+  /// A pasta espelhada em mais de um workspace é revelada no primeiro deles
+  /// na ordem da lateral, a mesma escolha de [chosenTintOf]: o painel existe
+  /// uma vez só e é daquele de cima que se vê primeiro.
+  void revealTab(MxTab tab) {
+    sidebarHidden = false;
+    sidebarView = null;
+    if (filtering && !matches(tab)) clearSearch();
+
+    final Workspace? within = tab.folder.isLoose
+        ? null
+        : sidebarRows.whereType<Workspace>().firstWhereOrNull(
+            (w) => w.folderRoots.contains(tab.folderRoot),
+          );
+    if (within != null) {
+      within.collapsed = false;
+      within.collapsedFolders.remove(tab.folderRoot);
+    } else if (!tab.folder.isLoose) {
+      tab.folder.collapsed = false;
+    }
+    featureOrHotfixOf(tab)?.collapsed = false;
+
+    revealedTabId = tab.id;
+    revealedWithin = within;
+    _revealScrollPending = true;
+    _revealTimer?.cancel();
+    _revealTimer = Timer(const Duration(seconds: 2), () {
+      if (_gone || revealedTabId != tab.id) return;
+      revealedTabId = null;
+      revealedWithin = null;
+      _revealScrollPending = false;
+      notifyListeners();
+    });
+    _save();
+    _syncSidebar();
+    notifyListeners();
+  }
+
+  /// Se esta linha é a que deve rolar até a tela: verdadeiro uma vez só, e só
+  /// pra aparição revelada. Ver [_revealScrollPending].
+  bool takeRevealScroll(MxTab tab, Workspace? within) {
+    if (!_revealScrollPending || revealedTabId != tab.id || revealedWithin != within) return false;
+    _revealScrollPending = false;
+    return true;
   }
 
   /// O plugin cuja aba própria está na tela agora. Ver [_syncSidebar].
@@ -2218,7 +2285,7 @@ class AppStore extends ChangeNotifier {
     final parts = [
       'claude',
       '--name ${Sh.q(name)}',
-      '--settings ${Sh.q(hooks.settingsFor(tab.id))}',
+      '--settings ${Sh.q(hooks.settingsFor(tab.id, cwd: tab.cwd))}',
       if (brief.isNotEmpty) '--append-system-prompt ${Sh.q(brief)}',
       if (resumeId != null) '--resume ${Sh.q(resumeId)}',
       // Positional, so it comes last: `claude [flags] '<prompt>'` opens the
@@ -4079,6 +4146,23 @@ class AppStore extends ChangeNotifier {
 
   // --- incoming events ----------------------------------------------------
 
+  /// Um retrato da linha de status, aplicado. Só avisa quem escuta se o número
+  /// mudou: a linha de status repete o mesmo valor a cada atualização.
+  @visibleForTesting
+  void applyStatus(StatusEvent e) {
+    final tab = _byId(e.tabId);
+    if (tab == null) return;
+    final before = tab.context;
+    final now = ContextUsage.fromStatusLine(e.payload);
+    if (before?.percent == now?.percent &&
+        before?.tokens == now?.tokens &&
+        before?.window == now?.window) {
+      return;
+    }
+    tab.context = now;
+    notifyListeners();
+  }
+
   /// One hook event, applied. Visible because the edge it watches for is the
   /// whole contract of a queue: one turn, one step.
   @visibleForTesting
@@ -4503,6 +4587,7 @@ class AppStore extends ChangeNotifier {
     // write about: the panels it would describe are being killed right here.
     _saveDebounce?.cancel();
     _bannerTimer?.cancel();
+    _revealTimer?.cancel();
     _clearToasts();
     floats.dispose();
     agents.stop();
