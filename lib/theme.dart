@@ -1529,20 +1529,20 @@ class Mx {
 /// A ordem é a do círculo de cores, e o config guarda o nome: uma cor que
 /// entra no meio da lista não muda a de ninguém.
 enum MxTint {
-  red('vermelho', 25),
-  orange('laranja', 55),
-  yellow('amarelo', 95),
-  lime('lima', 125),
-  green('verde', 150),
-  aqua('verde-água', 175),
-  cyan('ciano', 205),
-  petrol('azul-petróleo', 235),
-  violet('violeta', 290),
-  magenta('magenta', 330),
-  pink('rosa', 0),
+  red('Vermelho', 25),
+  orange('Laranja', 55),
+  yellow('Amarelo', 95),
+  lime('Lima', 125),
+  green('Verde', 150),
+  aqua('Verde-água', 175),
+  cyan('Ciano', 205),
+  petrol('Azul-petróleo', 235),
+  violet('Violeta', 290),
+  magenta('Magenta', 330),
+  pink('Rosa', 0),
   // O laranja com menos luz e menos cor, que é o que um marrom é.
-  brown('marrom', 55),
-  grey('cinza', 0);
+  brown('Marrom', 55),
+  grey('Cinza', 0);
 
   const MxTint(this.label, this._hue);
 

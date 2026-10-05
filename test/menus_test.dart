@@ -441,13 +441,13 @@ void main() {
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
       await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('magenta'));
+      await tester.tap(find.text('Magenta'));
       await tester.pumpAndSettle();
 
       expect(tab.tint, MxTint.magenta);
       // E a linha do menu passa a dizer qual é, sem ter que reabrir o submenu.
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
-      expect(find.text('Cor: magenta'), findsOneWidget);
+      expect(find.text('Cor: Magenta'), findsOneWidget);
       await closeMenu(tester);
     });
 
@@ -460,7 +460,7 @@ void main() {
       addTearDown(mouse.removePointer);
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
-      await mouse.moveTo(tester.getCenter(find.text('Cor: ciano')));
+      await mouse.moveTo(tester.getCenter(find.text('Cor: Ciano')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Sem cor'));
       await tester.pumpAndSettle();
@@ -493,7 +493,7 @@ void main() {
       );
       await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('vermelho'));
+      await tester.tap(find.text('Vermelho'));
       await tester.pumpAndSettle();
 
       expect(featureOrHotfix.tint, MxTint.red);
@@ -520,7 +520,7 @@ void main() {
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('Cor: ciano — da feature'), findsOneWidget);
+      expect(find.text('Cor: Ciano — da feature'), findsOneWidget);
       expect(find.text('Cor'), findsNothing);
       await closeMenu(tester);
     });
@@ -552,7 +552,7 @@ void main() {
       );
       await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('amarelo'));
+      await tester.tap(find.text('Amarelo'));
       await tester.pumpAndSettle();
 
       expect(folder.tint, MxTint.yellow);
