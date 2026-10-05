@@ -109,9 +109,9 @@ void main() {
       store.dispose();
     });
 
-    // O aviso de ociosidade chega um minuto depois do `Stop` e reescreve o
-    // estado da sessão. Uma fila segurada pelos agentes dela ainda está
-    // esperando quando ele chega, e ele não pode ser o que a prende.
+    // O aviso de ociosidade chega um minuto depois do `Stop`. Uma fila
+    // segurada pelos agentes dela ainda está esperando quando ele chega, e ele
+    // não pode ser o que a prende.
     test('the idle notice that lands mid-wait does not strand the queue', () {
       final (store, tab) = storeWithPanel();
       store.queue(tab, [step('revisa')]);
@@ -121,7 +121,7 @@ void main() {
       store.applyHook(
         HookEvent(tab.id, 'Notification', {'notification_type': 'idle_prompt'}),
       );
-      expect(tab.status, ClaudeStatus.waitingInput);
+      expect(tab.status.atRest, isTrue);
 
       store.applyHook(HookEvent(tab.id, 'SubagentStop', {'agent_id': 'a1'}));
       silent(tab);

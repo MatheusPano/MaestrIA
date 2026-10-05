@@ -241,9 +241,17 @@ class HookReducer {
           s.status = s.activeTool == _askTool
               ? ClaudeStatus.waitingAnswer
               : ClaudeStatus.waitingPermission;
-        } else if (type == 'agent_needs_input' || type == 'idle_prompt') {
+        } else if (type == 'agent_needs_input') {
           s.status = ClaudeStatus.waitingInput;
           s.lastMessage = _clip(p['message'] as String?, 70) ?? s.lastMessage;
+        } else if (type == 'idle_prompt') {
+          // O Claude Code manda este um minuto depois de a resposta terminar,
+          // se ninguém digitou -- é o `Stop` visto de novo, não um pedido. Lido
+          // como espera por input, ele punha o (1) de "esperando você" em toda
+          // sessão parada, mesmo com o painel em foco, e trocava o fim do turno
+          // pelo texto genérico dele no tile. Uma pergunta ou uma permissão
+          // ainda abertas continuam sendo o que eram.
+          if (!s.status.needsHuman) s.status = ClaudeStatus.idle;
         }
       case 'Stop':
         s.status = ClaudeStatus.idle;

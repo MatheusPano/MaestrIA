@@ -133,6 +133,46 @@ void main() {
       expect(s.status.needsHuman, isFalse);
     });
 
+    // O aviso de ociosidade chega um minuto depois do `Stop` e não diz nada que
+    // o `Stop` não tivesse dito: a sessão terminou e está no prompt. Era ele
+    // que punha o (1) de "esperando você" em toda sessão parada, mesmo em foco.
+    test('the idle prompt a minute after a turn is not a call for you', () {
+      final s = HookState();
+      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'oi'}));
+      HookReducer.apply(
+          s, 'Stop', ev('Stop', {'last_assistant_message': 'Pronto, os testes passam.'}));
+      HookReducer.apply(
+          s,
+          'Notification',
+          ev('Notification', {
+            'notification_type': 'idle_prompt',
+            'message': 'Claude is waiting for your input',
+          }));
+
+      expect(s.status.needsHuman, isFalse);
+      expect(s.status.atRest, isTrue);
+      // E o tile continua dizendo como o turno acabou, não o texto genérico.
+      expect(s.subtitle, 'Pronto, os testes passam.');
+    });
+
+    test('the idle prompt does not wipe a question or a permission still open', () {
+      final asked = HookState();
+      HookReducer.apply(asked, 'PreToolUse', ev('PreToolUse', {'tool_name': 'AskUserQuestion'}));
+      HookReducer.apply(asked, 'Notification',
+          ev('Notification', {'notification_type': 'permission_prompt'}));
+      HookReducer.apply(
+          asked, 'Notification', ev('Notification', {'notification_type': 'idle_prompt'}));
+      expect(asked.status, ClaudeStatus.waitingAnswer);
+
+      final locked = HookState();
+      HookReducer.apply(locked, 'PreToolUse', ev('PreToolUse', {'tool_name': 'Bash'}));
+      HookReducer.apply(locked, 'Notification',
+          ev('Notification', {'notification_type': 'permission_prompt'}));
+      HookReducer.apply(
+          locked, 'Notification', ev('Notification', {'notification_type': 'idle_prompt'}));
+      expect(locked.status, ClaudeStatus.waitingPermission);
+    });
+
     test('a bash command becomes a short target', () {
       final s = HookState();
       HookReducer.apply(
