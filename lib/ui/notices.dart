@@ -192,7 +192,7 @@ class SessionList extends StatelessWidget {
               ? Padding(
                   padding: const EdgeInsets.all(14),
                   child: Text(
-                    'nenhuma sessão do claude aberta',
+                    'Nenhuma sessão do Claude aberta',
                     style: TextStyle(fontSize: 12, color: Mx.fgFaint),
                   ),
                 )
@@ -200,9 +200,9 @@ class SessionList extends StatelessWidget {
                   shrinkWrap: true,
                   padding: const EdgeInsets.only(bottom: 6),
                   children: [
-                    if (waiting.isNotEmpty) ..._block('esperando você', waiting),
-                    if (working.isNotEmpty) ..._block('trabalhando', working),
-                    if (rest.isNotEmpty) ..._block('abertas', rest),
+                    if (waiting.isNotEmpty) ..._block('Esperando você', waiting),
+                    if (working.isNotEmpty) ..._block('Trabalhando', working),
+                    if (rest.isNotEmpty) ..._block('Abertas', rest),
                   ],
                 ),
         ),
@@ -317,7 +317,7 @@ class _NoticeBellState extends State<NoticeBell> {
       groupId: noticeTapGroup,
       child: Tooltip(
         message: [
-          'notificações',
+          'Notificações',
           if (unread > 0) '$unread nova${unread == 1 ? '' : 's'}',
           if (quiet) 'não perturbe',
         ].join(' · '),
@@ -609,7 +609,7 @@ class _Empty extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 6, 14, 18),
       child: Text(
-        'nenhuma notificação — quando um painel perguntar algo ou terminar, aparece aqui',
+        'Nenhuma notificação — quando um painel perguntar algo ou terminar, aparece aqui',
         style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.4),
       ),
     );
@@ -909,24 +909,24 @@ class _Header extends StatelessWidget {
                 ? Icons.notifications_off_rounded
                 : Icons.notifications_off_outlined,
             tooltip: store.doNotDisturb
-                ? 'não perturbe ligado · os avisos não aparecem na tela'
-                : 'não perturbe · avisos só aqui, sem aparecer na tela',
+                ? 'Não perturbe ligado · os avisos não aparecem na tela'
+                : 'Não perturbe · avisos só aqui, sem aparecer na tela',
             active: store.doNotDisturb,
             onTap: store.toggleDoNotDisturb,
           ),
           _SmallButton(
             icon: Icons.done_all_rounded,
-            tooltip: 'marcar tudo como lido',
+            tooltip: 'Marcar tudo como lido',
             onTap: store.unreadNotices > 0 ? store.readAllNotices : null,
           ),
           _SmallButton(
             icon: Icons.clear_all_rounded,
-            tooltip: 'limpar tudo',
+            tooltip: 'Limpar tudo',
             onTap: any ? onClear : null,
           ),
           _SmallButton(
             icon: Icons.expand_more_rounded,
-            tooltip: 'fechar',
+            tooltip: 'Fechar',
             onTap: store.closeNotices,
           ),
         ],
@@ -1043,7 +1043,7 @@ class _NoticeRowState extends State<_NoticeRow> {
                 child: _hover || widget.toast
                     ? _SmallButton(
                         icon: Icons.close_rounded,
-                        tooltip: widget.toast ? 'tirar da tela' : 'dispensar',
+                        tooltip: widget.toast ? 'Tirar da tela' : 'Dispensar',
                         onTap: widget.onDismiss,
                       )
                     : n.read

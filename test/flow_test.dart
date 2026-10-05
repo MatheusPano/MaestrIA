@@ -146,19 +146,19 @@ void main() {
       final (store, tab) = storeWithPanel();
       await open(tester, (ctx) => showFlow(ctx, store, tab));
 
-      expect(find.text('quando essa sessão terminar'), findsOneWidget);
-      expect(find.text('por onde o fluxo começa?'), findsOneWidget);
+      expect(find.text('Quando essa sessão terminar'), findsOneWidget);
+      expect(find.text('Por onde o fluxo começa?'), findsOneWidget);
 
       // Com a lista vazia as quatro ofertas são a única coisa com esse nome
       // na tela; depois do primeiro passo elas dividem o nome com a ficha de
       // tipo do cartão, que é a mesma palavra.
-      await tester.tap(find.text('continuar'));
+      await tester.tap(find.text('Continuar'));
       await tester.pumpAndSettle();
-      expect(find.text('e depois?'), findsOneWidget);
+      expect(find.text('E depois?'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField).first, 'agora roda os testes');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('armar'));
+      await tester.tap(find.text('Armar'));
       await tester.pumpAndSettle();
 
       expect(tab.followUps.single.kind, FollowUpKind.keepGoing);
@@ -174,13 +174,13 @@ void main() {
       store.applyHook(HookEvent(tab.id, 'Stop', {}));
 
       await open(tester, (ctx) => showFlow(ctx, store, tab));
-      await tester.tap(find.text('comando'));
+      await tester.tap(find.text('Comando'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'make test');
       await tester.pumpAndSettle();
 
-      expect(find.text('disparar'), findsOneWidget);
-      await tester.tap(find.text('disparar'));
+      expect(find.text('Disparar'), findsOneWidget);
+      await tester.tap(find.text('Disparar'));
       await tester.pumpAndSettle();
       expect(tab.armed, isTrue);
       store.dispose();
@@ -207,17 +207,17 @@ void main() {
       final store = NoPty()..folders.add(folder);
       await open(tester, (ctx) => showNewFlow(ctx, store, folder: folder));
 
-      expect(find.text('abre uma sessão em meu-repo'), findsOneWidget);
+      expect(find.text('Abre uma sessão em meu-repo'), findsOneWidget);
       // Sem prompt não há fluxo: o primeiro passo é a sessão.
       expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
 
       await tester.enterText(find.byType(TextField).at(0), 'refatorar o store');
       await tester.enterText(find.byType(TextField).at(1), 'quebra o store em dois');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('outra sessão'));
+      await tester.tap(find.text('Outra sessão'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('abrir e armar'));
+      await tester.tap(find.text('Abrir e armar'));
       await tester.pumpAndSettle();
 
       expect(store.abertas.single['prompt'], 'quebra o store em dois');

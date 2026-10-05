@@ -270,7 +270,7 @@ Uma sessão é:
 ```json
 {
   "id": "tab3", "kind": "claude", "title": "TASK#47730", "cwd": "/repo/wt", "folder": "/repo",
-  "branch": "feature/TASK#47730", "status": "waitingPermission", "statusLabel": "permissão",
+  "branch": "feature/TASK#47730", "status": "waitingPermission", "statusLabel": "Permissão",
   "needsYou": true, "sessionId": "…", "done": false, "hibernated": false, "exited": false,
   "onScreen": true, "focused": false, "startedAt": "2026-09-23T09:12:00.000",
   "project": "permissão do google", "featureOrHotfix": "permissão do google", "featureOrHotfixKind": "feature", "workspaces": ["ATRIUM"],

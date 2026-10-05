@@ -33,7 +33,7 @@ Future<void> pumpSidebar(WidgetTester tester) {
 }
 
 Color _emptyStateColor(WidgetTester tester) {
-  final text = tester.widget<Text>(find.textContaining('nenhuma pasta ainda'));
+  final text = tester.widget<Text>(find.textContaining('Nenhuma pasta ainda'));
   return text.style!.color!;
 }
 

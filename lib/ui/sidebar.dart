@@ -149,7 +149,7 @@ class _Header extends StatelessWidget {
             // um tooltip que ensinasse ⌘⇧P a quem trocou por outra estaria
             // simplesmente errado.
             tooltip: [
-              'configurações',
+              'Configurações',
               ...store.keymap[MxAction.settings].map((c) => c.label),
             ].join('  '),
             onPressed: () => showSettings(context, store),
@@ -213,7 +213,7 @@ class _Footer extends StatelessWidget {
               // palavra ao lado era repetição. O tooltip continua dizendo o que
               // ele adiciona.
               icon: Icons.create_new_folder_outlined,
-              tooltip: 'adicionar pasta ou workspace',
+              tooltip: 'Adicionar pasta ou workspace',
               onPressed: () {
                 final box = context.findRenderObject() as RenderBox;
                 _showFooterAdd(context, store, box.localToGlobal(Offset.zero));
@@ -232,7 +232,7 @@ class _Footer extends StatelessWidget {
             // procurava a linha reconhece o desenho dela aqui. Ver
             // [_StripIcon].
             icon: Icons.history_outlined,
-            tooltip: 'retomar uma conversa',
+            tooltip: 'Retomar uma conversa',
             onPressed: () => showChatHistory(context, store),
           ),
           // Os comandos de plugin que pediram um lugar aqui -- o relatório do
@@ -263,7 +263,7 @@ class _Footer extends StatelessWidget {
           _StripIcon(
             icon: Icons.view_sidebar_outlined,
             tooltip: [
-              'esconder a lateral',
+              'Esconder a lateral',
               ...store.keymap[MxAction.toggleSidebar].map((c) => c.label),
             ].join('  '),
             onPressed: store.toggleSidebar,
@@ -380,7 +380,7 @@ class _SearchFieldState extends State<_SearchField> {
                     // A tecla vai no próprio hint, lida do mapa: é o único
                     // lugar onde ela se ensina sem custar uma linha de tela, e
                     // ela sai da frente no instante em que o campo é usado.
-                    hintText: _focused ? 'buscar sessão' : 'buscar sessão$_chord',
+                    hintText: _focused ? 'Buscar sessão' : 'Buscar sessão$_chord',
                     hintStyle: TextStyle(fontSize: 12, color: Mx.fgFaint),
                   ),
                 ),
@@ -390,7 +390,7 @@ class _SearchFieldState extends State<_SearchField> {
           if (has)
             _MiniButton(
               icon: Icons.close_rounded,
-              tooltip: 'limpar a busca',
+              tooltip: 'Limpar a busca',
               onTap: () {
                 store.setQuery('');
                 _controller.clear();
@@ -419,7 +419,7 @@ class _FilterButton extends StatelessWidget {
     return _MiniButton(
       icon: Icons.filter_list_rounded,
       tooltip: active == 0
-          ? 'filtrar por pasta, feature/hotfix ou estado'
+          ? 'Filtrar por pasta, feature/hotfix ou estado'
           : '$active ${active == 1 ? 'filtro' : 'filtros'} — clique pra mexer',
       // O ponto é o que diz, com o menu fechado, que a lista na sua frente não
       // é a lista inteira. Sem ele, um filtro esquecido é uma sessão que
@@ -888,8 +888,8 @@ class _LooseTray extends StatelessWidget {
                 if (settled > 0)
                   _ClearButton(
                     tooltip: settled == 1
-                        ? 'limpar 1 painel concluído'
-                        : 'limpar $settled painéis concluídos',
+                        ? 'Limpar 1 painel concluído'
+                        : 'Limpar $settled painéis concluídos',
                     shown: hovered,
                     onTap: () => _sweep(store, folder),
                   ),
@@ -945,7 +945,7 @@ class _PluginHeader extends StatelessWidget {
           ),
           _StripIcon(
             icon: Icons.settings_outlined,
-            tooltip: 'configurar os plugins',
+            tooltip: 'Configurar os plugins',
             onPressed: () => showSettings(context, store, section: MxSection.plugins),
           ),
         ],
@@ -978,7 +978,7 @@ class _PluginPage extends StatelessWidget {
       padding: const EdgeInsets.only(top: 6, bottom: 20),
       children: [
         _PluginRuler(
-          label: 'janelas',
+          label: 'Janelas',
           count: tabs.length,
           onClear: tabs.isEmpty
               ? null
@@ -987,21 +987,21 @@ class _PluginPage extends StatelessWidget {
                     store.closeTab(t);
                   }
                 },
-          clearTooltip: tabs.length == 1 ? 'fechar a janela' : 'fechar as ${tabs.length} janelas',
+          clearTooltip: tabs.length == 1 ? 'Fechar a janela' : 'Fechar as ${tabs.length} janelas',
           first: true,
         ),
         if (tabs.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(17, 8, 12, 4),
             child: Text(
-              'nenhuma janela aberta',
+              'Nenhuma janela aberta',
               style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
             ),
           )
         else
           ..._panelRows(store, tabs),
         if (commands.isNotEmpty) ...[
-          _PluginRuler(label: 'comandos', count: commands.length),
+          _PluginRuler(label: 'Comandos', count: commands.length),
           const SizedBox(height: 4),
           for (final c in commands) _CommandRow(store: store, plugin: plugin, command: c),
         ],
@@ -1022,10 +1022,10 @@ class _PluginPage extends StatelessWidget {
       children: [
         if (tabs.isNotEmpty) ...[
           _PluginRuler(
-            label: 'janelas',
+            label: 'Janelas',
             count: tabs.length,
             first: true,
-            clearTooltip: tabs.length == 1 ? 'fechar a janela' : 'fechar as ${tabs.length} janelas',
+            clearTooltip: tabs.length == 1 ? 'Fechar a janela' : 'Fechar as ${tabs.length} janelas',
             onClear: () {
               for (final t in [...tabs]) {
                 store.closeTab(t);
@@ -1073,7 +1073,7 @@ class _Waiting extends StatelessWidget {
               ],
               Expanded(
                 child: Text(
-                  crashed ? '${plugin.name} caiu: ${plugin.crash}' : 'abrindo ${plugin.name}…',
+                  crashed ? '${plugin.name} caiu: ${plugin.crash}' : 'Abrindo ${plugin.name}…',
                   style: TextStyle(fontSize: 11.5, color: crashed ? Mx.red : Mx.fgFaint),
                 ),
               ),
@@ -1082,7 +1082,7 @@ class _Waiting extends StatelessWidget {
           if (crashed)
             TextButton(
               onPressed: () => store.plugins.restart(plugin),
-              child: const Text('reiniciar'),
+              child: const Text('Reiniciar'),
             ),
         ],
       ),
@@ -1236,7 +1236,7 @@ class _LooseMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _RowButton(
-      tooltip: 'o que fazer com os avulsos',
+      tooltip: 'O que fazer com os avulsos',
       icon: Icons.more_horiz,
       onTap: (anchor) async {
         final choice = await mxMenu<String>(
@@ -1252,7 +1252,7 @@ class _LooseMenu extends StatelessWidget {
             mxItem(
               'sweep',
               glyph: Icon(Icons.clear_all, size: 14, color: Mx.fgDim),
-              label: 'limpar concluídos',
+              label: 'Limpar concluídos',
             ),
           ],
         );
@@ -1281,9 +1281,9 @@ void _sweep(AppStore store, Folder folder) {
   final closed = store.closeSettled(folder);
   store.showBanner(
     closed == 0
-        ? 'nada pra limpar aqui — nenhum painel marcado como concluído'
+        ? 'Nada pra limpar aqui — nenhum painel marcado como concluído'
         : closed == 1
-        ? 'um painel fechado — o que estava marcado como concluído'
+        ? 'Um painel fechado — o que estava marcado como concluído'
         : '$closed painéis fechados — os que estavam marcados como concluídos',
   );
 }
@@ -1336,7 +1336,7 @@ class _GroupTray extends StatelessWidget {
                     color: Mx.fgFaint,
                   ),
                   Text(
-                    'grupos',
+                    'Grupos',
                     style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
                   ),
                   const SizedBox(width: 9),
@@ -1347,7 +1347,7 @@ class _GroupTray extends StatelessWidget {
                   Text('${store.groups.length}', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
                   const SizedBox(width: 6),
                   _ClearButton(
-                    tooltip: 'esquecer todos os grupos',
+                    tooltip: 'Esquecer todos os grupos',
                     shown: hovered,
                     onTap: () => confirmClearGroups(context, store),
                   ),
@@ -1414,7 +1414,7 @@ class _GroupMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _RowButton(
-      tooltip: 'o que fazer com esse grupo',
+      tooltip: 'O que fazer com esse grupo',
       icon: Icons.more_horiz,
       onTap: (anchor) => showGroupMenu(context, store, group, anchor),
     );
@@ -1435,17 +1435,17 @@ Future<void> showGroupMenu(
       mxItem(
         'update',
         glyph: Icon(Icons.grid_view_rounded, size: 14, color: group.color),
-        label: 'guardar a tela de agora aqui',
+        label: 'Guardar a tela de agora aqui',
       ),
       mxItem(
         'rename',
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
-        label: 'renomear',
+        label: 'Renomear',
       ),
       mxItem(
         'remove',
         glyph: Icon(Icons.grid_off, size: 14, color: Mx.red),
-        label: 'esquecer o grupo',
+        label: 'Esquecer o grupo',
         color: Mx.red,
       ),
     ],
@@ -1459,15 +1459,15 @@ Future<void> showGroupMenu(
       final saved = store.saveGroup(group.name);
       store.showBanner(
         saved == null
-            ? 'não há nada na tela pra guardar no grupo "${group.name}"'
-            : 'grupo "${saved.name}" agora é ${saved.summary}',
+            ? 'Não há nada na tela pra guardar no grupo "${group.name}"'
+            : 'Grupo "${saved.name}" agora é ${saved.summary}',
       );
     case 'rename':
       final name = await promptText(
         context,
-        title: 'renomear grupo',
+        title: 'Renomear grupo',
         initial: group.name,
-        label: 'nome',
+        label: 'Nome',
       );
       if (name != null) store.renameGroup(group, name);
     case 'remove':
@@ -1570,7 +1570,7 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
                       shown: hovered || tabs.isEmpty,
                     ),
                     _RowButton(
-                      tooltip: 'o que fazer com ${featureOrHotfix.kind.thisOne}',
+                      tooltip: 'O que fazer com ${featureOrHotfix.kind.thisOne}',
                       icon: Icons.more_horiz,
                       onTap: (anchor) => showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, anchor),
                     ),
@@ -1755,7 +1755,7 @@ class _TabRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 5),
               child: Tooltip(
-                message: 'concluída',
+                message: 'Concluída',
                 child: Icon(Icons.task_alt, size: 14, color: Mx.green),
               ),
             ),
@@ -1770,7 +1770,7 @@ class _TabRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 5),
               child: Tooltip(
-                message: 'hibernada — sem processo; clique pra retomar a conversa',
+                message: 'Hibernada — sem processo; clique pra retomar a conversa',
                 child: Icon(Icons.bedtime_outlined, size: 13, color: Mx.fgFaint),
               ),
             ),
@@ -2000,7 +2000,7 @@ class _GhostChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: count == 1 ? 'uma sem pasta no disco' : '$count sem pasta no disco',
+      message: count == 1 ? 'Uma sem pasta no disco' : '$count sem pasta no disco',
       child: Container(
         padding: const EdgeInsets.fromLTRB(5, 2, 6, 2),
         decoration: BoxDecoration(
@@ -2115,10 +2115,10 @@ class _AddButton extends StatelessWidget {
           // Three different rows can hold one of these, and the tooltip is the
           // only thing that says which of them you are about to add to.
           tooltip: featureOrHotfix != null
-              ? 'abrir algo ${featureOrHotfix!.kind.inThis}'
+              ? 'Abrir algo ${featureOrHotfix!.kind.inThis}'
               : folder.isLoose
-              ? 'abrir algo sem pasta'
-              : 'abrir algo nessa pasta',
+              ? 'Abrir algo sem pasta'
+              : 'Abrir algo nessa pasta',
           icon: Icons.add,
           onTap: (anchor) => _showAddMenu(context, store, folder, featureOrHotfix, anchor),
         ),
@@ -2169,18 +2169,18 @@ Future<void> _showFooterAdd(BuildContext context, AppStore store, Offset anchor)
       mxItem(
         'folder',
         glyph: Icon(Icons.create_new_folder_outlined, size: 14, color: Mx.fgDim),
-        label: 'adicionar pasta…',
+        label: 'Adicionar pasta…',
       ),
       mxItem(
         'import',
         glyph: Icon(Icons.file_open_outlined, size: 14, color: Mx.fgDim),
-        label: 'importar .code-workspace…',
+        label: 'Importar .code-workspace…',
       ),
       mxDivider(),
       mxItem(
         'workspace',
         glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.accent),
-        label: 'novo workspace…',
+        label: 'Novo workspace…',
       ),
     ],
   );
@@ -2191,7 +2191,7 @@ Future<void> _showFooterAdd(BuildContext context, AppStore store, Offset anchor)
     case 'import':
       final picked = await Notifier.chooseWorkspace();
       if (picked.path case final path?) await store.importWorkspace(path);
-      if (!picked.available) store.showBanner('não consegui abrir o seletor de arquivos', sticky: true);
+      if (!picked.available) store.showBanner('Não consegui abrir o seletor de arquivos', sticky: true);
     case 'workspace':
       await showNewWorkspace(context, store);
   }
@@ -2224,7 +2224,7 @@ Future<void> _showAddMenu(
         mxItem(
           'new:${kind.name}',
           glyph: Icon(kind.icon, size: 14, color: Mx.purple),
-          label: '${kind.label}…',
+          label: '${kind.label[0].toUpperCase()}${kind.label.substring(1)}…',
         ),
       ],
     ],
@@ -2262,7 +2262,7 @@ class _FolderMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _RowButton(
-      tooltip: 'o que fazer com essa pasta',
+      tooltip: 'O que fazer com essa pasta',
       icon: Icons.more_horiz,
       onTap: (anchor) =>
           showFolderMenu(context, store, folder, worktrees, anchor, within: within),
@@ -2317,7 +2317,7 @@ Future<void> showFolderMenu(
       mxItem(
         'setup',
         glyph: Icon(Icons.tune, size: 14, color: Mx.fgDim),
-        label: 'configuração do claude',
+        label: 'Configuração do Claude',
       ),
       // Depois do bloco de abrir, porque abrir numa worktree é o que se
       // escolhe lá dentro: a linha é a mesma oferta sobre outro checkout, com
@@ -2326,7 +2326,7 @@ Future<void> showFolderMenu(
         mxItem(
           'worktrees',
           glyph: Icon(Icons.call_split, size: 14, color: Mx.fgDim),
-          label: 'worktrees',
+          label: 'Worktrees',
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2353,7 +2353,7 @@ Future<void> showFolderMenu(
       mxItem(
         'rename',
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
-        label: 'renomear',
+        label: 'Renomear',
       ),
       // A mesma linha do menu do projeto e do painel, um andar acima de
       // todos: aqui ela é o fundo do repo -- vale pro painel que ninguém
@@ -2363,7 +2363,7 @@ Future<void> showFolderMenu(
       // Em que workspaces a pasta está: marcar e desmarcar é como ela fica em
       // vários -- o repo de infra de dois produtos.
       MxSubmenuItem(
-        label: 'adicionar a workspace',
+        label: 'Adicionar a workspace',
         glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.fgDim),
         items: () => [
           for (final w in store.workspaces)
@@ -2378,7 +2378,7 @@ Future<void> showFolderMenu(
             ),
           MxSubItem(
             value: 'ws:new',
-            label: 'novo workspace…',
+            label: 'Novo workspace…',
             glyph: Icon(Icons.add, size: 13, color: Mx.fgDim),
             divided: store.workspaces.isNotEmpty,
           ),
@@ -2388,19 +2388,19 @@ Future<void> showFolderMenu(
         mxItem(
           'leave',
           glyph: Icon(Icons.logout, size: 14, color: Mx.fgDim),
-          label: 'tirar deste workspace',
+          label: 'Tirar deste workspace',
         ),
       mxDivider(),
       // E o que tira coisas da lateral.
       mxItem(
         'sweep',
         glyph: Icon(Icons.clear_all, size: 14, color: Mx.fgDim),
-        label: 'limpar concluídos',
+        label: 'Limpar concluídos',
       ),
       mxItem(
         'remove',
         glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.red),
-        label: 'remover pasta',
+        label: 'Remover pasta',
         color: Mx.red,
       ),
     ],
@@ -2429,9 +2429,9 @@ Future<void> showFolderMenu(
     case 'rename':
       final name = await promptText(
         context,
-        title: 'renomear pasta',
+        title: 'Renomear pasta',
         initial: folder.name,
-        label: 'nome',
+        label: 'Nome',
       );
       if (name != null && name.trim().isNotEmpty) store.renameFolder(folder, name.trim());
     case final pick when isTintChoice(pick):
@@ -2497,7 +2497,7 @@ Future<void> showWorktreesMenu(
           // metade que seria cortada, e a que identifica a worktree. Ver
           // [mxMenuRow].
           subtitle: w.prunable
-              ? 'sem pasta no disco'
+              ? 'Sem pasta no disco'
               : store.tabAt(w.path) != null
               ? '${w.branch} · sessão aberta'
               : w.branch,
@@ -2510,7 +2510,7 @@ Future<void> showWorktreesMenu(
         mxItem(
           'prune',
           glyph: Icon(Icons.cleaning_services_outlined, size: 14, color: Mx.yellow),
-          label: 'limpar worktrees fantasmas',
+          label: 'Limpar worktrees fantasmas',
           color: Mx.yellow,
         ),
       ],
@@ -2741,7 +2741,7 @@ class _CloseButtonState extends State<_CloseButton> {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'fechar painel',
+      message: 'Fechar painel',
       waitDuration: const Duration(milliseconds: 600),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
@@ -2817,14 +2817,14 @@ class _NoHits extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'nenhuma sessão com $what.',
+            'Nenhuma sessão com $what.',
             style: TextStyle(color: Mx.fgDim, fontSize: 12.5, height: 1.5),
           ),
           const SizedBox(height: 14),
           _HeaderAction(
             icon: Icons.filter_list_off_rounded,
-            label: 'mostrar tudo',
-            tooltip: 'limpar a busca e os filtros',
+            label: 'Mostrar tudo',
+            tooltip: 'Limpar a busca e os filtros',
             onPressed: store.clearSearch,
           ),
         ],
@@ -2843,8 +2843,8 @@ class _NoFolders extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Text(
-        'nenhuma pasta ainda.\n\nsessões do claude já rodando aparecem aqui sozinhas — '
-        'ou use o + no rodapé pra adicionar um repo.\n\npra abrir um painel sem pasta '
+        'Nenhuma pasta ainda.\n\nSessões do Claude já rodando aparecem aqui sozinhas — '
+        'ou use o + no rodapé pra adicionar um repo.\n\nPra abrir um painel sem pasta '
         'nenhuma, o + na linha de "avulsos" logo abaixo.',
         style: TextStyle(color: Mx.fgFaint, fontSize: 12.5, height: 1.55),
       ),

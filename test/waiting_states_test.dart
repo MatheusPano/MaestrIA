@@ -48,8 +48,8 @@ void main() {
     await pumpSidebar(tester, store);
 
     // What each row says it wants. Neither says "AskUserQuestion".
-    expect(find.text('pergunta: Receitas'), findsOneWidget);
-    expect(find.text('quer aprovação pra Bash'), findsOneWidget);
+    expect(find.text('Pergunta: Receitas'), findsOneWidget);
+    expect(find.text('Quer aprovação pra Bash'), findsOneWidget);
     expect(find.textContaining('AskUserQuestion'), findsNothing);
 
     // And how each is stamped: one lock in the whole sidebar, on the row that

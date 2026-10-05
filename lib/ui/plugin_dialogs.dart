@@ -99,10 +99,10 @@ class _InstallState extends State<_Install> {
       backgroundColor: Mx.bgSidebar,
       title: Text(
         staged == null
-            ? 'instalar plugin'
+            ? 'Instalar plugin'
             : staged.replacing == null
-            ? 'instalar ${staged.manifest.name}?'
-            : 'atualizar ${staged.manifest.name}?',
+            ? 'Instalar ${staged.manifest.name}?'
+            : 'Atualizar ${staged.manifest.name}?',
         style: const TextStyle(fontSize: 15),
       ),
       content: SizedBox(
@@ -111,8 +111,8 @@ class _InstallState extends State<_Install> {
       ),
       actions: staged == null
           ? [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
-              FilledButton(onPressed: _busy ? null : _fetch, child: const Text('continuar')),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+              FilledButton(onPressed: _busy ? null : _fetch, child: const Text('Continuar')),
             ]
           : [
               TextButton(
@@ -122,11 +122,11 @@ class _InstallState extends State<_Install> {
                         widget.store.plugins.discard(staged);
                         setState(() => _staged = null);
                       },
-                child: const Text('voltar'),
+                child: const Text('Voltar'),
               ),
               FilledButton(
                 onPressed: _busy ? null : _install,
-                child: Text(staged.replacing == null ? 'confio, instalar' : 'confio, atualizar'),
+                child: Text(staged.replacing == null ? 'Confio, instalar' : 'Confio, atualizar'),
               ),
             ],
     );
@@ -138,7 +138,7 @@ class _InstallState extends State<_Install> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'uma URL de git, um .zip ou uma pasta com um $mxManifestName na raiz.',
+          'Uma URL de git, um .zip ou uma pasta com um $mxManifestName na raiz.',
           style: TextStyle(fontSize: 12, color: Mx.fgDim, height: 1.4),
         ),
         const SizedBox(height: 14),
@@ -161,7 +161,7 @@ class _InstallState extends State<_Install> {
             TextButton.icon(
               onPressed: _busy ? null : _pickFolder,
               icon: const Icon(Icons.folder_open_outlined, size: 15),
-              label: const Text('escolher pasta…'),
+              label: const Text('Escolher pasta…'),
             ),
             const Spacer(),
             if (_busy)
@@ -235,22 +235,22 @@ class PluginTrust extends StatelessWidget {
           fact(
             Icons.terminal,
             Mx.yellow,
-            'roda um programa seu, com as suas permissões: ${m.main!.join(' ')}',
+            'Roda um programa seu, com as suas permissões: ${m.main!.join(' ')}',
           )
         else
-          fact(Icons.check_rounded, Mx.green, 'só declarações — nenhum programa roda'),
-        for (final perm in m.permissions) fact(Icons.key_outlined, Mx.yellow, 'pode ${perm.label}'),
+          fact(Icons.check_rounded, Mx.green, 'Só declarações — nenhum programa roda'),
+        for (final perm in m.permissions) fact(Icons.key_outlined, Mx.yellow, 'Pode ${perm.label}'),
         if (m.commands.isNotEmpty)
           fact(
             Icons.bolt_outlined,
             Mx.fgDim,
-            'comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} (${c.key!.label})').join(', ')}',
+            'Comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} (${c.key!.label})').join(', ')}',
           ),
         if (m.themes.isNotEmpty)
           fact(
             Icons.palette_outlined,
             Mx.fgDim,
-            m.themes.length == 1 ? 'um tema' : '${m.themes.length} temas',
+            m.themes.length == 1 ? 'Um tema' : '${m.themes.length} temas',
           ),
         for (final w in m.warnings) fact(Icons.warning_amber_outlined, Mx.yellow, w),
       ],
@@ -265,7 +265,7 @@ Future<void> showPluginLog(BuildContext context, AppStore store, MxPlugin plugin
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
-        title: Text('log de ${plugin.name}', style: const TextStyle(fontSize: 15)),
+        title: Text('Log de ${plugin.name}', style: const TextStyle(fontSize: 15)),
         content: SizedBox(
           width: 640,
           height: 380,
@@ -279,7 +279,7 @@ Future<void> showPluginLog(BuildContext context, AppStore store, MxPlugin plugin
               ),
               child: plugin.log.isEmpty
                   ? Center(
-                      child: Text('nada ainda', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+                      child: Text('Nada ainda', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
                     )
                   : ListView.builder(
                       reverse: true,
@@ -296,9 +296,9 @@ Future<void> showPluginLog(BuildContext context, AppStore store, MxPlugin plugin
         actions: [
           TextButton(
             onPressed: () => Clipboard.setData(ClipboardData(text: plugin.log.join('\n'))),
-            child: const Text('copiar'),
+            child: const Text('Copiar'),
           ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('fechar')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
         ],
       ),
     );
@@ -308,24 +308,24 @@ Future<void> confirmUninstallPlugin(BuildContext context, AppStore store, MxPlug
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('remover ${plugin.name}?', style: const TextStyle(fontSize: 15)),
+      title: Text('Remover ${plugin.name}?', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 420,
         child: Text(
           plugin.linked
-              ? 'sai da maestria o link pra ${plugin.dir.split('/').last}. A sua pasta de '
+              ? 'Sai da MaestrIA o link pra ${plugin.dir.split('/').last}. A sua pasta de '
                     'desenvolvimento fica onde está, intocada.'
-              : 'a pasta do plugin e o que ele guardou vão embora. Pra ter de volta, '
+              : 'A pasta do plugin e o que ele guardou vão embora. Pra ter de volta, '
                     'instale de novo.',
           style: TextStyle(fontSize: 12.5, color: Mx.fg, height: 1.45),
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Mx.red),
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('remover'),
+          child: const Text('Remover'),
         ),
       ],
     ),
@@ -344,7 +344,7 @@ Future<void> linkDevPlugin(AppStore store) async {
     final plugin = await store.plugins.link(path);
     store.showBanner('${plugin.name} carregado de ${path.split('/').last} — reinicie pra pegar mudanças');
   } on PluginInstallError catch (e) {
-    store.showBanner('não deu pra carregar: ${e.message}', sticky: true);
+    store.showBanner('Não deu pra carregar: ${e.message}', sticky: true);
   }
 }
 
@@ -445,7 +445,7 @@ class _QuickPickState extends State<_QuickPick> {
                   onSubmitted: (_) => _pick(),
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: widget.placeholder ?? 'filtrar',
+                    hintText: widget.placeholder ?? 'Filtrar',
                     hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
                     border: const OutlineInputBorder(),
                   ),
@@ -457,7 +457,7 @@ class _QuickPickState extends State<_QuickPick> {
               child: shown.isEmpty
                   ? Padding(
                       padding: const EdgeInsets.all(18),
-                      child: Text('nada com esse nome', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+                      child: Text('Nada com esse nome', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
                     )
                   : ListView.builder(
                       shrinkWrap: true,
@@ -580,7 +580,7 @@ class _PluginSettings extends StatelessWidget {
         Padding(
           padding: EdgeInsets.only(top: rows.isEmpty ? 0 : 18, bottom: 8),
           child: Text(
-            'atalhos',
+            'Atalhos',
             style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Mx.fg),
           ),
         ),
@@ -611,7 +611,7 @@ class _PluginSettings extends StatelessWidget {
                 ),
                 if (taken != null)
                   Text(
-                    'já é "${taken.label}" no app — este comando fica sem tecla',
+                    'Já é "${taken.label}" no app — este comando fica sem tecla',
                     style: TextStyle(fontSize: 11.5, color: Mx.yellow, height: 1.4),
                   ),
               ],
@@ -622,7 +622,7 @@ class _PluginSettings extends StatelessWidget {
     }
     return AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('configurar ${plugin.name}', style: const TextStyle(fontSize: 15)),
+      title: Text('Configurar ${plugin.name}', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -634,8 +634,8 @@ class _PluginSettings extends StatelessWidget {
         ),
       ),
       actions: [
-        Text('vale na hora', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('pronto')),
+        Text('Vale na hora', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Pronto')),
       ],
     );
   }
@@ -719,7 +719,7 @@ class _SettingRowState extends State<_SettingRow> {
     );
     final reset = widget.changed
         ? IconButton(
-            tooltip: 'voltar ao padrão',
+            tooltip: 'Voltar ao padrão',
             iconSize: 14,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -818,7 +818,7 @@ class _SettingRowState extends State<_SettingRow> {
           ),
         ),
         const SizedBox(width: 6),
-        SizedBox(width: 96, child: _input(hint: 'do tema')),
+        SizedBox(width: 96, child: _input(hint: 'Do tema')),
       ],
     );
   }

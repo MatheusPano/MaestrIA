@@ -256,7 +256,7 @@ class _DropHint extends StatelessWidget {
                   ),
                 ),
                 child: Center(
-                  child: DropLabel(text: side == DropSide.center ? 'trocar' : 'dividir'),
+                  child: DropLabel(text: side == DropSide.center ? 'Trocar' : 'Dividir'),
                 ),
               ),
             ),

@@ -168,7 +168,7 @@ void main() {
       expect(store.folders.map((f) => f.root), containsAll(made));
       expect(store.foldersOf(store.workspaces.single).map((f) => f.root), made);
       expect(store.workspaces.single.codeWorkspacePath, path);
-      expect(store.banner, 'workspace "cefis": 2 pastas adicionadas');
+      expect(store.banner, 'Workspace "cefis": 2 pastas adicionadas');
     });
 
     test('o apelido do arquivo vira o nome da pasta na lateral', () async {
@@ -197,7 +197,7 @@ void main() {
       expect(store.folders.single.root, made.single);
       expect(result!.added.length, 1);
       expect(result.already.length, 1);
-      expect(store.banner, 'workspace "cefis": 1 pasta adicionada, 1 já estava aqui');
+      expect(store.banner, 'Workspace "cefis": 1 pasta adicionada, 1 já estava aqui');
     });
 
     test('a pasta que o disco não tem é contada, e a tarja fica parada', () async {
@@ -210,7 +210,7 @@ void main() {
       expect(result!.added.length, 1);
       expect(result.missing.single, endsWith('/sumiu'));
       expect(result.sticky, isTrue);
-      expect(store.banner, 'workspace "cefis": 1 pasta adicionada, 1 não existe no disco');
+      expect(store.banner, 'Workspace "cefis": 1 pasta adicionada, 1 não existe no disco');
     });
 
     test('importar duas vezes não duplica nem repete o carimbo', () async {
@@ -224,7 +224,7 @@ void main() {
       expect(store.folders.length, 2);
       expect(again!.added, isEmpty);
       expect(again.already.length, 2);
-      expect(store.banner, 'workspace "cefis": 2 já estavam aqui');
+      expect(store.banner, 'Workspace "cefis": 2 já estavam aqui');
     });
 
     // Com o espelho, a pasta que os dois arquivos listam fica nos dois.
@@ -248,7 +248,7 @@ void main() {
       addTearDown(store.dispose);
 
       expect(await store.importWorkspace('/nao/existe.code-workspace'), isNull);
-      expect(store.banner, startsWith('não consegui ler esse workspace'));
+      expect(store.banner, startsWith('Não consegui ler esse workspace'));
 
       final dir = Directory.systemTemp.createTempSync('maestria-ws-');
       addTearDown(() => dir.deleteSync(recursive: true));
@@ -256,7 +256,7 @@ void main() {
         ..writeAsStringSync('{"folders": []}');
 
       expect(await store.importWorkspace(vazio.path), isNull);
-      expect(store.banner, 'o workspace "vazio" não lista nenhuma pasta');
+      expect(store.banner, 'O workspace "vazio" não lista nenhuma pasta');
       expect(store.folders, isEmpty);
     });
 
@@ -283,17 +283,17 @@ void main() {
 
       await tester.tap(find.text('+'));
       await tester.pumpAndSettle();
-      expect(find.text('escolher workspace…'), findsOneWidget);
+      expect(find.text('Escolher workspace…'), findsOneWidget);
       expect(
-        find.text('um .code-workspace adiciona todas as pastas dele de uma vez.'),
+        find.text('Um .code-workspace adiciona todas as pastas dele de uma vez.'),
         findsOneWidget,
       );
 
       await tester.enterText(find.byType(TextField), '/nao/existe.code-workspace');
-      await tester.tap(find.text('adicionar'));
+      await tester.tap(find.text('Adicionar'));
       await tester.pumpAndSettle();
 
-      expect(store.banner, startsWith('não consegui ler esse workspace'));
+      expect(store.banner, startsWith('Não consegui ler esse workspace'));
       expect(store.folders, isEmpty);
     });
 
@@ -323,16 +323,16 @@ void main() {
       await tester.tap(find.text('+'));
       await tester.pumpAndSettle();
       expect(
-        find.text('um .code-workspace adiciona todas as pastas dele de uma vez.'),
+        find.text('Um .code-workspace adiciona todas as pastas dele de uma vez.'),
         findsOneWidget,
       );
 
-      await tester.tap(find.text('escolher workspace…'));
+      await tester.tap(find.text('Escolher workspace…'));
       await tester.pumpAndSettle();
 
       expect(
         find.text(
-          'não consegui abrir o seletor — cole aí em cima o caminho do .code-workspace',
+          'Não consegui abrir o seletor — cole aí em cima o caminho do .code-workspace',
         ),
         findsOneWidget,
       );
@@ -364,7 +364,7 @@ void main() {
 
       await tester.tap(find.text('+'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('escolher workspace…'));
+      await tester.tap(find.text('Escolher workspace…'));
       await tester.pumpAndSettle();
 
       expect(
@@ -589,7 +589,7 @@ void main() {
 
       expect(store.workspaces, isEmpty);
       expect(store.folders.map((f) => f.name), ['solta']);
-      expect(store.banner, 'workspace "cefis" fechado — 2 pastas saíram da lateral');
+      expect(store.banner, 'Workspace "cefis" fechado — 2 pastas saíram da lateral');
     });
 
     // Os painéis das pastas fecham junto -- é o que [removeFolder] faz --, e é
@@ -643,22 +643,22 @@ void main() {
 
       await tester.tap(find.text('cefis'), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      expect(find.text('fechar workspace…'), findsOneWidget);
+      expect(find.text('Fechar workspace…'), findsOneWidget);
 
-      await tester.tap(find.text('fechar workspace…'));
+      await tester.tap(find.text('Fechar workspace…'));
       await tester.pumpAndSettle();
 
       // Os dois fatos que decidem a resposta, e o que o diálogo *não* faz.
-      expect(find.text('fechar cefis?'), findsOneWidget);
+      expect(find.text('Fechar cefis?'), findsOneWidget);
       expect(find.text('2 pastas saem da lateral'), findsOneWidget);
       expect(find.text('1 sessão aberta é encerrada'), findsOneWidget);
       expect(
-        find.text('nada é apagado do disco — nem os repos, nem o .code-workspace'),
+        find.text('Nada é apagado do disco — nem os repos, nem o .code-workspace'),
         findsOneWidget,
       );
 
       // E cancelar não fecha nada.
-      await tester.tap(find.text('cancelar'));
+      await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
       expect(store.workspaces, hasLength(1));
       expect(store.folders, hasLength(3));
@@ -684,9 +684,9 @@ void main() {
 
       await tester.tap(find.text('cefis'), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('fechar workspace…'));
+      await tester.tap(find.text('Fechar workspace…'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('fechar workspace'));
+      await tester.tap(find.text('Fechar workspace'));
       await tester.pumpAndSettle();
 
       expect(find.text('cefis'), findsNothing);

@@ -65,7 +65,7 @@ class _WorkspaceSection extends StatelessWidget {
                     style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
                   ),
                   _RowButton(
-                    tooltip: 'o que fazer com esse workspace',
+                    tooltip: 'O que fazer com esse workspace',
                     icon: Icons.more_horiz,
                     onTap: (anchor) => showWorkspaceMenu(context, store, workspace, anchor),
                   ),
@@ -92,7 +92,7 @@ class _WorkspaceSection extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 6, 8, 8),
                   child: Text(
-                    'arraste uma pasta pra cá',
+                    'Arraste uma pasta pra cá',
                     style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
                   ),
                 ),
@@ -292,7 +292,7 @@ Future<void> showWorkspaceMenu(
       mxItem(
         'rename',
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
-        label: 'renomear…',
+        label: 'Renomear…',
       ),
       tintItem(workspace.tint),
       mxDivider(),
@@ -300,18 +300,18 @@ Future<void> showWorkspaceMenu(
         mxItem(
           'link',
           glyph: Icon(Icons.link, size: 14, color: Mx.fgDim),
-          label: 'associar .code-workspace…',
+          label: 'Associar .code-workspace…',
         )
       else ...[
         mxItem(
           'vscode',
           glyph: Icon(Icons.open_in_new, size: 14, color: Mx.fgDim),
-          label: 'abrir no vscode',
+          label: 'Abrir no vscode',
         ),
         mxItem(
           'unlink',
           glyph: Icon(Icons.link_off, size: 14, color: Mx.fgDim),
-          label: 'desassociar .code-workspace',
+          label: 'Desassociar .code-workspace',
         ),
       ],
       mxDivider(),
@@ -320,12 +320,12 @@ Future<void> showWorkspaceMenu(
       mxItem(
         'dissolve',
         glyph: Icon(Icons.hexagon_outlined, size: 14, color: Mx.fgDim),
-        label: 'desfazer workspace',
+        label: 'Desfazer workspace',
       ),
       mxItem(
         'close',
         glyph: Icon(Icons.folder_off_outlined, size: 14, color: Mx.red),
-        label: 'fechar workspace…',
+        label: 'Fechar workspace…',
         color: Mx.red,
       ),
     ],
@@ -336,9 +336,9 @@ Future<void> showWorkspaceMenu(
     case 'rename':
       final name = await promptText(
         context,
-        title: 'renomear workspace',
+        title: 'Renomear workspace',
         initial: workspace.name,
-        label: 'nome',
+        label: 'Nome',
       );
       if (name != null) store.renameWorkspace(workspace, name);
     case final pick when isTintChoice(pick):
@@ -346,7 +346,7 @@ Future<void> showWorkspaceMenu(
     case 'link':
       final picked = await Notifier.chooseWorkspace();
       if (picked.path case final path?) store.linkCodeWorkspace(workspace, path);
-      if (!picked.available) store.showBanner('não consegui abrir o seletor de arquivos', sticky: true);
+      if (!picked.available) store.showBanner('Não consegui abrir o seletor de arquivos', sticky: true);
     case 'vscode':
       await store.openInEditor(file!);
     case 'unlink':
@@ -354,7 +354,7 @@ Future<void> showWorkspaceMenu(
     case 'dissolve':
       final name = workspace.name;
       store.dissolveWorkspace(workspace);
-      store.showBanner('workspace "$name" desfeito — as pastas continuam na lateral');
+      store.showBanner('Workspace "$name" desfeito — as pastas continuam na lateral');
     case 'close':
       await confirmCloseWorkspace(context, store, workspace);
   }

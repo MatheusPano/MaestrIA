@@ -269,8 +269,8 @@ void main() {
       await tester.tap(find.text('abrir'));
       await tester.pumpAndSettle();
 
-      expect(find.text('tipografia do pty'), findsOne);
-      expect(find.text('corpo'), findsOne);
+      expect(find.text('Tipografia do pty'), findsOne);
+      expect(find.text('Corpo'), findsOne);
       expect(find.text('13px'), findsOne);
       expect(find.text('1.20'), findsOne);
       // A face que vem no app está sempre entre as oferecidas.
@@ -278,7 +278,7 @@ void main() {
 
       // A galeria de temas é alta: o bloco existe, mas está abaixo da dobra —
       // e um tap em algo fora da viewport acerta o que estiver no lugar dele.
-      final more = find.byTooltip('mais').first;
+      final more = find.byTooltip('Mais').first;
       await tester.ensureVisible(more);
       await tester.pumpAndSettle();
       await tester.tap(more);

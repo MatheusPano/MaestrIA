@@ -37,7 +37,7 @@ void main() {
       expect(reading.ok, isTrue, reason: reading.problem);
       expect(
         reading.windows.map((w) => w.label),
-        ['sessão (5h)', 'semanal (7 dias)', 'semanal Fable'],
+        ['Sessão (5h)', 'Semanal (7 dias)', 'Semanal Fable'],
       );
       expect(reading.windows.map((w) => w.percent), [3, 18, 14]);
     });
@@ -47,7 +47,7 @@ void main() {
     test('a janela por modelo se chama pelo modelo', () {
       final fable = Usage.parse(_resposta).windows.last;
 
-      expect(fable.label, 'semanal Fable');
+      expect(fable.label, 'Semanal Fable');
     });
 
     test('o reset vira data, e é a mesma instante que veio', () {
@@ -121,7 +121,7 @@ void main() {
                      "limit": {"amount_minor": 50000, "currency": "BRL", "exponent": 2}}}
         ''');
 
-        expect(reading.credits, 'créditos extras: BRL 12,34 de BRL 500,00');
+        expect(reading.credits, 'Créditos extras: BRL 12,34 de BRL 500,00');
       });
 
       test('ligados sem teto dizem só o quanto', () {
@@ -131,7 +131,7 @@ void main() {
                      "used": {"amount_minor": 1234, "currency": "BRL", "exponent": 2}}}
         ''');
 
-        expect(reading.credits, 'créditos extras: BRL 12,34');
+        expect(reading.credits, 'Créditos extras: BRL 12,34');
       });
 
       // O expoente vem na resposta porque nem toda moeda tem duas casas.
@@ -142,7 +142,7 @@ void main() {
                      "used": {"amount_minor": 900, "currency": "JPY", "exponent": 0}}}
         ''');
 
-        expect(reading.credits, 'créditos extras: JPY 900');
+        expect(reading.credits, 'Créditos extras: JPY 900');
       });
     });
   });
@@ -208,11 +208,11 @@ void main() {
     testWidgets('desenha uma barra por janela, com o número ao lado', (tester) async {
       final store = await pumpAccount(tester, Usage.parse(_resposta));
 
-      expect(find.text('sessão (5h)'), findsOneWidget);
+      expect(find.text('Sessão (5h)'), findsOneWidget);
       expect(find.text('3%'), findsOneWidget);
-      expect(find.text('semanal (7 dias)'), findsOneWidget);
+      expect(find.text('Semanal (7 dias)'), findsOneWidget);
       expect(find.text('18%'), findsOneWidget);
-      expect(find.text('semanal Fable'), findsOneWidget);
+      expect(find.text('Semanal Fable'), findsOneWidget);
       expect(find.text('14%'), findsOneWidget);
 
       await closeWindow(tester, store);
@@ -223,14 +223,14 @@ void main() {
         tester,
         UsageReading.ok([
           UsageWindow(
-            label: 'sessão (5h)',
+            label: 'Sessão (5h)',
             percent: 3,
             resetsAt: DateTime.now().add(const Duration(hours: 2, minutes: 10)),
           ),
         ]),
       );
 
-      expect(find.text('reseta em 2h'), findsOneWidget);
+      expect(find.text('Reseta em 2h'), findsOneWidget);
 
       await closeWindow(tester, store);
     });
@@ -240,11 +240,11 @@ void main() {
     testWidgets('uma janela sem reset ainda desenha a barra', (tester) async {
       final store = await pumpAccount(
         tester,
-        const UsageReading.ok([UsageWindow(label: 'sessão (5h)', percent: 3)]),
+        const UsageReading.ok([UsageWindow(label: 'Sessão (5h)', percent: 3)]),
       );
 
-      expect(find.text('sessão (5h)'), findsOneWidget);
-      expect(find.textContaining('reseta'), findsNothing);
+      expect(find.text('Sessão (5h)'), findsOneWidget);
+      expect(find.textContaining('Reseta'), findsNothing);
 
       await closeWindow(tester, store);
     });
@@ -253,7 +253,7 @@ void main() {
       final store = await pumpAccount(
         tester,
         const UsageReading.ok(
-          [UsageWindow(label: 'sessão (5h)', percent: 3)],
+          [UsageWindow(label: 'Sessão (5h)', percent: 3)],
           account: UsageAccount(
             email: 'alguem@exemplo.com',
             organization: 'Marrow',
@@ -271,10 +271,10 @@ void main() {
     testWidgets('sem conta no config, só as barras', (tester) async {
       final store = await pumpAccount(
         tester,
-        const UsageReading.ok([UsageWindow(label: 'sessão (5h)', percent: 3)]),
+        const UsageReading.ok([UsageWindow(label: 'Sessão (5h)', percent: 3)]),
       );
 
-      expect(find.text('sessão (5h)'), findsOneWidget);
+      expect(find.text('Sessão (5h)'), findsOneWidget);
       expect(find.textContaining('·'), findsNothing);
 
       await closeWindow(tester, store);
@@ -298,17 +298,17 @@ void main() {
     testWidgets('recarregar pede a leitura de novo', (tester) async {
       final store = await pumpAccount(
         tester,
-        const UsageReading.ok([UsageWindow(label: 'sessão (5h)', percent: 3)]),
+        const UsageReading.ok([UsageWindow(label: 'Sessão (5h)', percent: 3)]),
       );
       expect(find.text('3%'), findsOneWidget);
 
       var vezes = 0;
       Usage.reader = () async {
         vezes++;
-        return const UsageReading.ok([UsageWindow(label: 'sessão (5h)', percent: 9)]);
+        return const UsageReading.ok([UsageWindow(label: 'Sessão (5h)', percent: 9)]);
       };
 
-      await tester.tap(find.byTooltip('ler de novo'));
+      await tester.tap(find.byTooltip('Ler de novo'));
       await tester.pumpAndSettle();
 
       expect(vezes, 1);
@@ -326,7 +326,7 @@ void main() {
 
     Future<AppStore> pumpSidebar(WidgetTester tester) async {
       Usage.reader = () async =>
-          const UsageReading.ok([UsageWindow(label: 'sessão (5h)', percent: 3)]);
+          const UsageReading.ok([UsageWindow(label: 'Sessão (5h)', percent: 3)]);
       final store = AppStore();
       await tester.pumpWidget(
         MaterialApp(
@@ -342,12 +342,12 @@ void main() {
     testWidgets('abre o settings já na seção de uso', (tester) async {
       final store = await pumpSidebar(tester);
 
-      await tester.tap(find.byTooltip('conta & uso'));
+      await tester.tap(find.byTooltip('Conta & uso'));
       await tester.pumpAndSettle();
 
       // A barra é a prova de que caiu na seção certa: aberto no padrão, o
       // diálogo mostraria a aparência.
-      expect(find.text('sessão (5h)'), findsOneWidget);
+      expect(find.text('Sessão (5h)'), findsOneWidget);
       expect(find.text('3%'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -360,8 +360,8 @@ void main() {
     testWidgets('não desloca os glifos que já estavam lá', (tester) async {
       final store = await pumpSidebar(tester);
 
-      final pasta = tester.getCenter(find.byTooltip('adicionar pasta ou workspace'));
-      final medidor = tester.getCenter(find.byTooltip('conta & uso'));
+      final pasta = tester.getCenter(find.byTooltip('Adicionar pasta ou workspace'));
+      final medidor = tester.getCenter(find.byTooltip('Conta & uso'));
 
       expect(pasta.dx, lessThan(medidor.dx));
       expect(medidor.dx - pasta.dx, greaterThan(200));

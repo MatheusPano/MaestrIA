@@ -163,8 +163,8 @@ class PanePinButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: pinned
-          ? 'preso — a lateral não troca este painel. clique pra soltar'
-          : 'prender este painel — a lateral passa a trocar só os outros',
+          ? 'Preso — a lateral não troca este painel. Clique pra soltar'
+          : 'Prender este painel — a lateral passa a trocar só os outros',
       iconSize: iconSize,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 26, height: 26),

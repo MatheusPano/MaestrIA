@@ -387,16 +387,16 @@ void main() {
       await pumpSidebar(tester, store);
 
       await openPanelMenu(tester, 'um');
-      expect(find.text('agrupar painéis'), findsOneWidget);
-      await tester.tap(find.text('agrupar painéis'));
+      expect(find.text('Agrupar painéis'), findsOneWidget);
+      await tester.tap(find.text('Agrupar painéis'));
       await tester.pumpAndSettle();
       expect(store.groups, hasLength(1));
       expect(store.groups.single.name, '3 terminais');
 
       // Agrupado, o mesmo menu oferece o caminho de volta -- e só ele.
       await openPanelMenu(tester, 'um');
-      expect(find.text('agrupar painéis'), findsNothing);
-      await tester.tap(find.text('desagrupar "3 terminais"'));
+      expect(find.text('Agrupar painéis'), findsNothing);
+      await tester.tap(find.text('Desagrupar "3 terminais"'));
       await tester.pumpAndSettle();
       expect(store.groups, isEmpty);
       expect(store.tabs, hasLength(3));
@@ -412,8 +412,8 @@ void main() {
       await pumpSidebar(tester, store);
 
       await openPanelMenu(tester, 'um');
-      expect(find.text('agrupar painéis'), findsOneWidget);
-      expect(find.text('desagrupar "3 terminais"'), findsOneWidget);
+      expect(find.text('Agrupar painéis'), findsOneWidget);
+      expect(find.text('Desagrupar "3 terminais"'), findsOneWidget);
       store.dispose();
     });
 
@@ -423,7 +423,7 @@ void main() {
       await pumpSidebar(tester, store);
 
       await openPanelMenu(tester, 'um');
-      expect(find.text('agrupar painéis'), findsNothing);
+      expect(find.text('Agrupar painéis'), findsNothing);
       store.dispose();
     });
 
@@ -462,7 +462,7 @@ void main() {
       }
 
       await pumpSidebar(tester, store);
-      expect(find.text('grupos'), findsOneWidget);
+      expect(find.text('Grupos'), findsOneWidget);
       expect(find.text(saved.name), findsOneWidget);
       // A linha diz o que o grupo abre: um nome sozinho não distingue a grade
       // de três terminais do par claude-e-terminal.
@@ -485,7 +485,7 @@ void main() {
       // Duas réguas abertas na tela: a dos grupos e o cabeçalho da pasta.
       expect(find.byIcon(Icons.expand_more), findsNWidgets(2));
 
-      await tester.tap(find.text('grupos'));
+      await tester.tap(find.text('Grupos'));
       await tester.pump();
       expect(store.groupsCollapsed, isTrue);
 
@@ -493,12 +493,12 @@ void main() {
       await pumpSidebar(tester, store);
       expect(find.text(saved.name), findsNothing);
       // A palavra e a conta ficam: dobrada, é o que a régua tem pra dizer.
-      expect(find.text('grupos'), findsOneWidget);
+      expect(find.text('Grupos'), findsOneWidget);
       expect(find.text('1'), findsOneWidget);
       // Só o cabeçalho da pasta segue aberto: o galho da régua virou.
       expect(find.byIcon(Icons.expand_more), findsOneWidget);
 
-      await tester.tap(find.text('grupos'));
+      await tester.tap(find.text('Grupos'));
       await pumpSidebar(tester, store);
       expect(find.text(saved.name), findsOneWidget);
       store.dispose();
@@ -540,15 +540,15 @@ void main() {
       store.saveGroup('grid da tarde');
       await pumpSidebar(tester, store);
 
-      expect(opacityOf(tester, 'esquecer todos os grupos'), 0);
-      await hover(tester, find.text('grupos'));
-      expect(opacityOf(tester, 'esquecer todos os grupos'), 1);
+      expect(opacityOf(tester, 'Esquecer todos os grupos'), 0);
+      await hover(tester, find.text('Grupos'));
+      expect(opacityOf(tester, 'Esquecer todos os grupos'), 1);
 
-      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await tester.tap(find.byTooltip('Esquecer todos os grupos'));
       await tester.pumpAndSettle();
-      expect(find.text('esquecer os 2 grupos?'), findsOneWidget);
+      expect(find.text('Esquecer os 2 grupos?'), findsOneWidget);
 
-      await tester.tap(find.text('cancelar'));
+      await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
       expect(store.groups, hasLength(2));
       store.dispose();
@@ -560,17 +560,17 @@ void main() {
       store.saveGroup('grid da tarde');
       await pumpSidebar(tester, store);
 
-      await hover(tester, find.text('grupos'));
-      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await hover(tester, find.text('Grupos'));
+      await tester.tap(find.byTooltip('Esquecer todos os grupos'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('esquecer'));
+      await tester.tap(find.text('Esquecer'));
       await tester.pumpAndSettle();
 
       expect(store.groups, isEmpty);
       expect(store.banner, contains('2 grupos esquecidos'));
       // Sem grupo, sem régua: ela não anuncia uma lista vazia.
       await pumpSidebar(tester, store);
-      expect(find.text('grupos'), findsNothing);
+      expect(find.text('Grupos'), findsNothing);
       store.dispose();
     });
 
@@ -581,8 +581,8 @@ void main() {
       store.saveGroup('grid da manhã');
       await pumpSidebar(tester, store);
 
-      await hover(tester, find.text('grupos'));
-      await tester.tap(find.byTooltip('esquecer todos os grupos'));
+      await hover(tester, find.text('Grupos'));
+      await tester.tap(find.byTooltip('Esquecer todos os grupos'));
       await tester.pumpAndSettle();
 
       expect(store.groups, isEmpty);

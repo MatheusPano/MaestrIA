@@ -47,7 +47,7 @@ class MxKeys {
       case MxAction.newTask:
         // Uma worktree precisa de um repo pra ser worktree de.
         if (folder.isLoose) {
-          store.showBanner('nova task precisa de uma pasta — o painel em foco não está em nenhuma');
+          store.showBanner('Nova task precisa de uma pasta — o painel em foco não está em nenhuma');
           return;
         }
         showNewTask(context, store, folder, featureOrHotfix: store.focusedFeatureOrHotfix);
@@ -56,14 +56,14 @@ class MxKeys {
         // renomear, e o banner diz isso em vez de abrir um diálogo vazio.
         final focused = store.focusedTab;
         if (focused == null) {
-          store.showBanner('nenhum painel em foco pra renomear');
+          store.showBanner('Nenhum painel em foco pra renomear');
           return;
         }
         showRenamePanel(context, store, focused);
       case MxAction.pinPane:
         final focused = store.focusedTab;
         if (focused == null) {
-          store.showBanner('nenhum painel em foco pra prender');
+          store.showBanner('Nenhum painel em foco pra prender');
           return;
         }
         store.togglePin(focused);
@@ -110,7 +110,7 @@ class MxKeys {
         // onde se escolhe um plano, é onde um plano é lido.
         final tab = store.focusedTab;
         if (tab == null || tab.kind != TabKind.claude) {
-          store.showBanner('o painel em foco não é uma sessão do claude');
+          store.showBanner('O painel em foco não é uma sessão do Claude');
           return;
         }
         store.showPlan(tab);

@@ -198,8 +198,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(store.sessionsOpen, isTrue);
     // A que espera você vem no bloco dela, e a outra no das abertas.
-    expect(find.text('esperando você  1'), findsOneWidget);
-    expect(find.text('abertas  1'), findsOneWidget);
+    expect(find.text('Esperando você  1'), findsOneWidget);
+    expect(find.text('Abertas  1'), findsOneWidget);
     expect(find.text(b.title), findsOneWidget);
 
     await tester.tap(find.text(a.title));
@@ -378,7 +378,7 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(store.notices, isEmpty);
-    expect(find.textContaining('nenhuma notificação'), findsOneWidget);
+    expect(find.textContaining('Nenhuma notificação'), findsOneWidget);
     expect(tester.getSize(find.byType(NoticeCenter)).height, lessThan(height));
     store.dispose();
   });

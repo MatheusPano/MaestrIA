@@ -142,7 +142,7 @@ void main() {
       final first = store.showSetup(folder: folder);
       expect(first.isSetup, isTrue);
       expect(first.isPassive, isTrue);
-      expect(first.title, 'claude · ${repo.path.split('/').last}');
+      expect(first.title, 'Claude · ${repo.path.split('/').last}');
       expect(Panes.order(store.panes).length, 2);
       expect(store.focusedPaneId, first.id);
 

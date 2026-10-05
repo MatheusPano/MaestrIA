@@ -355,10 +355,10 @@ class MxChord {
 
 /// Onde os atalhos ficam agrupados na tela de configurações.
 enum MxGroup {
-  sessions('sessões'),
-  navigation('navegação'),
-  view('exibição'),
-  window('janela');
+  sessions('Sessões'),
+  navigation('Navegação'),
+  view('Exibição'),
+  window('Janela');
 
   const MxGroup(this.label);
   final String label;
@@ -373,8 +373,8 @@ enum MxGroup {
 enum MxAction {
   newClaude(
     id: 'claude',
-    label: 'nova sessão claude',
-    hint: 'na pasta e na feature/hotfix do painel em foco',
+    label: 'Nova sessão Claude',
+    hint: 'Na pasta e na feature/hotfix do painel em foco',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyT, meta: true)],
     linux: [
@@ -383,8 +383,8 @@ enum MxAction {
   ),
   newShell(
     id: 'shell',
-    label: 'novo shell',
-    hint: 'um terminal comum, no mesmo lugar',
+    label: 'Novo shell',
+    hint: 'Um terminal comum, no mesmo lugar',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyT, meta: true, shift: true)],
     linux: [
@@ -393,8 +393,8 @@ enum MxAction {
   ),
   newTask(
     id: 'task',
-    label: 'nova task',
-    hint: 'abre a worktree e sobe uma sessão nela',
+    label: 'Nova task',
+    hint: 'Abre a worktree e sobe uma sessão nela',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyN, meta: true)],
     linux: [
@@ -403,8 +403,8 @@ enum MxAction {
   ),
   renamePane(
     id: 'rename',
-    label: 'renomear o painel em foco',
-    hint: 'o título dele; em branco, volta a ser o da branch ou da pasta',
+    label: 'Renomear o painel em foco',
+    hint: 'O título dele; em branco, volta a ser o da branch ou da pasta',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyE, meta: true)],
     linux: [
@@ -413,8 +413,8 @@ enum MxAction {
   ),
   pinPane(
     id: 'pin',
-    label: 'prender o painel em foco',
-    hint: 'a lateral para de trocá-lo; de novo, solta',
+    label: 'Prender o painel em foco',
+    hint: 'A lateral para de trocá-lo; de novo, solta',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyP, meta: true, alt: true)],
     linux: [
@@ -423,7 +423,7 @@ enum MxAction {
   ),
   closePane(
     id: 'close',
-    label: 'fechar o painel em foco',
+    label: 'Fechar o painel em foco',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.backspace, meta: true)],
     linux: [
@@ -432,8 +432,8 @@ enum MxAction {
   ),
   closeSettled(
     id: 'close-settled',
-    label: 'fechar as sessões resolvidas',
-    hint: 'as que já foram marcadas como prontas',
+    label: 'Fechar as sessões resolvidas',
+    hint: 'As que já foram marcadas como prontas',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyK, meta: true, shift: true)],
     linux: [
@@ -442,8 +442,8 @@ enum MxAction {
   ),
   nextPane(
     id: 'next-pane',
-    label: 'próximo painel',
-    hint: 'na ordem em que estão na tela',
+    label: 'Próximo painel',
+    hint: 'Na ordem em que estão na tela',
     group: MxGroup.navigation,
     defaults: [
       MxChord(LogicalKeyboardKey.tab, control: true),
@@ -456,7 +456,7 @@ enum MxAction {
   ),
   prevPane(
     id: 'prev-pane',
-    label: 'painel anterior',
+    label: 'Painel anterior',
     group: MxGroup.navigation,
     defaults: [
       MxChord(LogicalKeyboardKey.tab, control: true, shift: true),
@@ -469,8 +469,8 @@ enum MxAction {
   ),
   nextSession(
     id: 'next-session',
-    label: 'próxima sessão',
-    hint: 'percorre a lateral inteira, painel aberto ou não',
+    label: 'Próxima sessão',
+    hint: 'Percorre a lateral inteira, painel aberto ou não',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.arrowRight, meta: true, alt: true)],
     linux: [
@@ -479,7 +479,7 @@ enum MxAction {
   ),
   prevSession(
     id: 'prev-session',
-    label: 'sessão anterior',
+    label: 'Sessão anterior',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.arrowLeft, meta: true, alt: true)],
     linux: [
@@ -488,8 +488,8 @@ enum MxAction {
   ),
   search(
     id: 'search',
-    label: 'buscar na lateral',
-    hint: 'foca o campo de busca; Esc limpa e devolve o teclado',
+    label: 'Buscar na lateral',
+    hint: 'Foca o campo de busca; Esc limpa e devolve o teclado',
     group: MxGroup.navigation,
     defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
     linux: [
@@ -498,8 +498,8 @@ enum MxAction {
   ),
   openMarkdown(
     id: 'markdown',
-    label: 'abrir um markdown…',
-    hint: 'escolhe um arquivo e o desenha num painel de leitura',
+    label: 'Abrir um markdown…',
+    hint: 'Escolhe um arquivo e o desenha num painel de leitura',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyO, meta: true)],
     linux: [
@@ -519,8 +519,8 @@ enum MxAction {
   // ),
   readPlan(
     id: 'plan',
-    label: 'ver o plano da sessão em foco',
-    hint: 'abre o último plano num painel de leitura, ao lado dela',
+    label: 'Ver o plano da sessão em foco',
+    hint: 'Abre o último plano num painel de leitura, ao lado dela',
     group: MxGroup.sessions,
     defaults: [MxChord(LogicalKeyboardKey.keyL, meta: true, shift: true)],
     linux: [
@@ -529,8 +529,8 @@ enum MxAction {
   ),
   refreshGit(
     id: 'refresh',
-    label: 'reler o git',
-    hint: 'worktrees e branches, sem esperar os dez segundos',
+    label: 'Reler o git',
+    hint: 'Worktrees e branches, sem esperar os dez segundos',
     group: MxGroup.window,
     defaults: [MxChord(LogicalKeyboardKey.keyR, meta: true)],
     linux: [
@@ -539,8 +539,8 @@ enum MxAction {
   ),
   zoomIn(
     id: 'zoom-in',
-    label: 'aumentar o corpo do painel',
-    hint: 'só o painel em foco; a base de todos está em aparência',
+    label: 'Aumentar o corpo do painel',
+    hint: 'Só o painel em foco; a base de todos está em aparência',
     group: MxGroup.view,
     // Duas por padrão porque ⌘+ *é* ⌘⇧= no teclado: quem pensa "mais" segura
     // o shift sem perceber, e quem pensa "⌘=" não segura. As duas são a mesma
@@ -559,7 +559,7 @@ enum MxAction {
   ),
   zoomOut(
     id: 'zoom-out',
-    label: 'diminuir o corpo do painel',
+    label: 'Diminuir o corpo do painel',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.minus, meta: true)],
     linux: [
@@ -568,8 +568,8 @@ enum MxAction {
   ),
   zoomReset(
     id: 'zoom-reset',
-    label: 'voltar o painel ao corpo base',
-    hint: 'o 0 fica livre: do 1 ao 9 são as nove sessões da lateral',
+    label: 'Voltar o painel ao corpo base',
+    hint: 'O 0 fica livre: do 1 ao 9 são as nove sessões da lateral',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.digit0, meta: true)],
     linux: [
@@ -578,8 +578,8 @@ enum MxAction {
   ),
   toggleSidebar(
     id: 'sidebar',
-    label: 'esconder ou mostrar a lateral',
-    hint: 'a aba na borda esquerda a traz de volta, e esta tecla também',
+    label: 'Esconder ou mostrar a lateral',
+    hint: 'A aba na borda esquerda a traz de volta, e esta tecla também',
     group: MxGroup.view,
     defaults: [MxChord(LogicalKeyboardKey.keyS, meta: true, alt: true)],
     linux: [
@@ -588,8 +588,8 @@ enum MxAction {
   ),
   settings(
     id: 'settings',
-    label: 'configurações',
-    hint: 'esta tela',
+    label: 'Configurações',
+    hint: 'Esta tela',
     group: MxGroup.window,
     defaults: [
       MxChord(LogicalKeyboardKey.comma, meta: true),

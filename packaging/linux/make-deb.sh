@@ -66,7 +66,7 @@ done
 cat > "$ROOT/usr/share/applications/${APP_ID}.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=maestria
+Name=MaestrIA
 Comment=Cockpit para sessões do Claude Code
 Exec=/opt/maestria/maestria
 Icon=${APP_ID}

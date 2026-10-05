@@ -230,17 +230,17 @@ class _SetupPaneState extends State<SetupPane> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
-        title: Text('descartar o que mudou em ${_slot?.label}?', style: const TextStyle(fontSize: 15)),
+        title: Text('Descartar o que mudou em ${_slot?.label}?', style: const TextStyle(fontSize: 15)),
         content: Text(
-          'o arquivo não foi salvo. sair dele agora perde o que você escreveu.',
+          'O arquivo não foi salvo. Sair dele agora perde o que você escreveu.',
           style: TextStyle(fontSize: 12.5, color: Mx.fgDim),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('voltar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Voltar')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Mx.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('descartar'),
+            child: const Text('Descartar'),
           ),
         ],
       ),
@@ -254,7 +254,7 @@ class _SetupPaneState extends State<SetupPane> {
     try {
       await ClaudeSetup.write(_setup.root, slot.rel, _text.text);
     } catch (e) {
-      widget.store.showBanner('não consegui salvar ${slot.rel}: $e', sticky: true);
+      widget.store.showBanner('Não consegui salvar ${slot.rel}: $e', sticky: true);
       return;
     }
     _disk = _text.text;
@@ -274,21 +274,21 @@ class _SetupPaneState extends State<SetupPane> {
   Future<void> _add(SetupSection section) async {
     final name = await promptText(
       context,
-      title: 'nova ${section.noun}',
+      title: 'Nova ${section.noun}',
       label: switch (section) {
-        SetupSection.skills => 'nome (vira /nome)',
-        SetupSection.decisions => 'título da decisão',
-        _ => 'nome',
+        SetupSection.skills => 'Nome (vira /nome)',
+        SetupSection.decisions => 'Título da decisão',
+        _ => 'Nome',
       },
     );
     if (name == null || name.trim().isEmpty || !mounted) return;
     final rel = ClaudeSetup.relFor(section, name, root: _setup.root);
     if (rel == null) {
-      widget.store.showBanner('esse nome não sobra nada depois de virar arquivo');
+      widget.store.showBanner('Esse nome não sobra nada depois de virar arquivo');
       return;
     }
     if (File(ClaudeSetup.pathOf(_setup.root, rel)).existsSync()) {
-      widget.store.showBanner('já existe: $rel');
+      widget.store.showBanner('Já existe: $rel');
       await _select(rel);
       return;
     }
@@ -300,7 +300,7 @@ class _SetupPaneState extends State<SetupPane> {
         ClaudeSetup.template(rel, folderName: _setup.name, title: name.trim()),
       );
     } catch (e) {
-      widget.store.showBanner('não consegui criar $rel: $e', sticky: true);
+      widget.store.showBanner('Não consegui criar $rel: $e', sticky: true);
       return;
     }
     _slots = ClaudeSetup.scan(_setup.root);
@@ -317,19 +317,19 @@ class _SetupPaneState extends State<SetupPane> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
-        title: Text('apagar ${slot.label}?', style: const TextStyle(fontSize: 15)),
+        title: Text('Apagar ${slot.label}?', style: const TextStyle(fontSize: 15)),
         content: Text(
           slot.section == SetupSection.skills && slot.rel.endsWith('/SKILL.md')
-              ? 'a pasta da skill vai junto, com o que mais houver dentro dela.'
+              ? 'A pasta da skill vai junto, com o que mais houver dentro dela.'
               : ClaudeSetup.pathOf(_setup.root, slot.rel),
           style: TextStyle(fontFamily: Mx.mono, fontSize: 11, color: Mx.fgFaint),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Mx.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('apagar'),
+            child: const Text('Apagar'),
           ),
         ],
       ),
@@ -338,7 +338,7 @@ class _SetupPaneState extends State<SetupPane> {
     try {
       await ClaudeSetup.remove(_setup.root, slot.rel);
     } catch (e) {
-      widget.store.showBanner('não consegui apagar ${slot.rel}: $e', sticky: true);
+      widget.store.showBanner('Não consegui apagar ${slot.rel}: $e', sticky: true);
       return;
     }
     _slots = ClaudeSetup.scan(_setup.root);
@@ -521,12 +521,12 @@ class _SetupHeader extends StatelessWidget {
               children: [
                 _Action(
                   icon: Icons.folder_open_outlined,
-                  tooltip: 'mostrar a pasta no Finder',
+                  tooltip: 'Mostrar a pasta no Finder',
                   onPressed: () => Notifier.reveal(setup.root),
                 ),
                 _Action(
                   icon: Icons.edit_outlined,
-                  tooltip: 'abrir a pasta no vscode',
+                  tooltip: 'Abrir a pasta no vscode',
                   onPressed: () => store.openInEditor(setup.root),
                 ),
                 if (store.isPinned(tab) || store.paneCount > 1)
@@ -537,7 +537,7 @@ class _SetupHeader extends StatelessWidget {
                   ),
                 _Action(
                   icon: Icons.close,
-                  tooltip: 'fechar esta configuração',
+                  tooltip: 'Fechar esta configuração',
                   // Fechar de verdade, como o leitor: não há processo nem
                   // conversa pra guardar na lateral.
                   onPressed: () => store.closeTab(tab),
@@ -580,7 +580,7 @@ class _SectionHead extends StatelessWidget {
           _Help(section: section, size: 12),
           if (onAdd != null)
             IconButton(
-              tooltip: 'nova ${section.noun}',
+              tooltip: 'Nova ${section.noun}',
               iconSize: 14,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 22, height: 22),
@@ -663,7 +663,7 @@ class _EmptyRow extends StatelessWidget {
             Icon(Icons.add_circle_outline, size: 12, color: Mx.fgFaint),
             const SizedBox(width: 8),
             Text(
-              'criar a primeira ${section.noun}…',
+              'Criar a primeira ${section.noun}…',
               style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
             ),
           ],
@@ -707,12 +707,12 @@ class _EditorHead extends StatelessWidget {
   Widget build(BuildContext context) {
     final saveKey = Platform.isMacOS ? '⌘S' : 'ctrl+S';
     final (String state, Color stateColor) = outside
-        ? ('mudou no disco enquanto você editava', Mx.yellow)
+        ? ('Mudou no disco enquanto você editava', Mx.yellow)
         : !slot.exists
-        ? ('não existe ainda — salvar cria', Mx.fgFaint)
+        ? ('Não existe ainda — salvar cria', Mx.fgFaint)
         : dirty
-        ? ('não salvo', Mx.yellow)
-        : ('salvo', Mx.fgFaint);
+        ? ('Não salvo', Mx.yellow)
+        : ('Salvo', Mx.fgFaint);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 12, 10, 10),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Mx.border))),
@@ -742,24 +742,24 @@ class _EditorHead extends StatelessWidget {
               const SizedBox(width: 2),
               _Action(
                 icon: Icons.save_outlined,
-                tooltip: 'salvar  $saveKey',
+                tooltip: 'Salvar  $saveKey',
                 on: dirty || !slot.exists,
                 onPressed: dirty || !slot.exists ? onSave : null,
               ),
               _Action(
                 icon: Icons.history,
-                tooltip: 'voltar ao que está no disco',
+                tooltip: 'Voltar ao que está no disco',
                 onPressed: edited || outside ? onRevert : null,
               ),
               if (slot.exists)
                 _Action(
                   icon: Icons.edit_outlined,
-                  tooltip: 'abrir no vscode',
+                  tooltip: 'Abrir no vscode',
                   onPressed: () => store.openInEditor(ClaudeSetup.pathOf(root, slot.rel)),
                 ),
               _Action(
                 icon: Icons.delete_outline,
-                tooltip: 'apagar o arquivo',
+                tooltip: 'Apagar o arquivo',
                 onPressed: onDelete,
                 danger: true,
               ),
@@ -794,13 +794,13 @@ class _Welcome extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'o que o claude lê em $name',
+                'O que o Claude lê em $name',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Mx.fg),
               ),
               const SizedBox(height: 6),
               Text(
-                'escolha um arquivo à esquerda pra editar. o que está apagado ainda não '
-                'existe: abrir mostra um modelo, e salvar cria. o ? de cada prateleira '
+                'Escolha um arquivo à esquerda pra editar. O que está apagado ainda não '
+                'existe: abrir mostra um modelo, e salvar cria. O ? de cada prateleira '
                 'explica o que ela é, com exemplo.',
                 style: TextStyle(fontSize: 12.5, height: 1.5, color: Mx.fgDim),
               ),
@@ -861,7 +861,7 @@ Future<void> explainSection(BuildContext context, SetupSection section) {
         ),
       ),
       actions: [
-        FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('entendi')),
+        FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Entendi')),
       ],
     ),
   );
@@ -878,7 +878,7 @@ class _Help extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      tooltip: 'o que é ${section.label}?',
+      tooltip: 'O que é ${section.label}?',
       iconSize: size,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 22, height: 22),

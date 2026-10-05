@@ -38,7 +38,7 @@ class ThemeGallery extends StatelessWidget {
             grid(MxThemes.all),
             if (MxThemes.extra.isNotEmpty) ...[
               const SizedBox(height: 18),
-              Text('de plugins', style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
+              Text('De plugins', style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
               const SizedBox(height: 10),
               grid(MxThemes.extra),
             ],

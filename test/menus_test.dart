@@ -144,7 +144,7 @@ Future<TestGesture> openAddMenu(WidgetTester tester, AppStore store) async {
   addTearDown(mouse.removePointer);
   await mouse.moveTo(tester.getCenter(find.text('meu-repo')));
   await tester.pumpAndSettle();
-  await tester.tap(find.byTooltip('abrir algo nessa pasta'));
+  await tester.tap(find.byTooltip('Abrir algo nessa pasta'));
   await tester.pumpAndSettle();
   return mouse;
 }
@@ -189,13 +189,13 @@ void main() {
 
       await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
 
-      final sessao = tester.getTopLeft(find.text('sessão do claude')).dy;
-      final terminal = tester.getTopLeft(find.text('terminal')).dy;
-      final fluxo = tester.getTopLeft(find.text('montar um fluxo…')).dy;
+      final sessao = tester.getTopLeft(find.text('Sessão do Claude')).dy;
+      final terminal = tester.getTopLeft(find.text('Terminal')).dy;
+      final fluxo = tester.getTopLeft(find.text('Montar um fluxo…')).dy;
       expect(sessao, lessThan(terminal));
       expect(terminal, lessThan(fluxo));
       // E o que é do menu de baixo vem depois do risco, não no meio da oferta.
-      expect(fluxo, lessThan(tester.getTopLeft(find.text('renomear')).dy));
+      expect(fluxo, lessThan(tester.getTopLeft(find.text('Renomear')).dy));
       // Retomar uma conversa não é mais deste bloco: é o relógio do rodapé da
       // lateral, e esta pasta virou uma seção da lista de lá.
       expect(find.text('retomar conversa…'), findsNothing);
@@ -207,7 +207,7 @@ void main() {
       addTearDown(store.dispose);
       await openAddMenu(tester, store);
 
-      await tester.tap(find.text('sessão do claude'));
+      await tester.tap(find.text('Sessão do Claude'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.kind, 'claude');
@@ -224,10 +224,10 @@ void main() {
       final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
 
       await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
-      await tester.tap(find.text('renomear'));
+      await tester.tap(find.text('Renomear'));
       await tester.pumpAndSettle();
 
-      expect(find.text('renomear feature'), findsOneWidget);
+      expect(find.text('Renomear feature'), findsOneWidget);
       expect(store.pedidos, isEmpty);
     });
 
@@ -239,16 +239,16 @@ void main() {
       addTearDown(store.dispose);
       await openFolderMenu(tester, store);
 
-      expect(find.text('sessão do claude'), findsOneWidget);
-      expect(find.text('terminal'), findsOneWidget);
+      expect(find.text('Sessão do Claude'), findsOneWidget);
+      expect(find.text('Terminal'), findsOneWidget);
       // Retomar conversa era 'conversas de antes…' aqui e saiu do bloco: hoje
       // é o rodapé da lateral, repartido por pasta.
       expect(find.text('retomar conversa…'), findsNothing);
       expect(find.text('conversas de antes…'), findsNothing);
-      expect(find.text('meus programas'), findsOneWidget);
+      expect(find.text('Meus programas'), findsOneWidget);
       // E o que sempre foi deste menu continua nele, depois do bloco.
-      expect(find.text('worktrees'), findsOneWidget);
-      expect(find.text('remover pasta'), findsOneWidget);
+      expect(find.text('Worktrees'), findsOneWidget);
+      expect(find.text('Remover pasta'), findsOneWidget);
       await closeMenu(tester);
     });
 
@@ -260,7 +260,7 @@ void main() {
       final startIn = mockPicker('/repo/docs/NOTAS.md');
 
       await openFolderMenu(tester, store);
-      await tester.tap(find.text('abrir um markdown…'));
+      await tester.tap(find.text('Abrir um markdown…'));
       await tester.pumpAndSettle();
 
       // O painel nativo abre na pasta em que se clicou, e não na do painel que
@@ -279,7 +279,7 @@ void main() {
       final startIn = mockPicker('${task.path}/PLANO.md');
 
       await openMenu(tester, (ctx) => showWorktreeMenu(ctx, store, folder, task, Offset.zero));
-      await tester.tap(find.text('abrir um markdown…'));
+      await tester.tap(find.text('Abrir um markdown…'));
       await tester.pumpAndSettle();
 
       expect(startIn, [task.path]);
@@ -296,10 +296,10 @@ void main() {
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('abrir um markdown…'), findsNothing);
+      expect(find.text('Abrir um markdown…'), findsNothing);
       // O resto do bloco continua lá -- o que saiu é uma linha, não o menu.
-      expect(find.text('renomear…'), findsOneWidget);
-      expect(find.text('ver o plano'), findsOneWidget);
+      expect(find.text('Renomear…'), findsOneWidget);
+      expect(find.text('Ver o plano'), findsOneWidget);
       await closeMenu(tester);
     });
 
@@ -308,7 +308,7 @@ void main() {
       addTearDown(store.dispose);
       await openFolderMenu(tester, store);
 
-      await tester.tap(find.text('sessão do claude'));
+      await tester.tap(find.text('Sessão do Claude'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.kind, 'claude');
@@ -323,7 +323,7 @@ void main() {
       final featureOrHotfix = store.addFeatureOrHotfix(folder, 'permissão do google');
 
       await openMenu(tester, (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero));
-      await tester.tap(find.text('terminal'));
+      await tester.tap(find.text('Terminal'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.kind, 'shell');
@@ -337,7 +337,7 @@ void main() {
       addTearDown(store.dispose);
 
       await openMenu(tester, (ctx) => showWorktreeMenu(ctx, store, folder, task, Offset.zero));
-      await tester.tap(find.text('sessão do claude'));
+      await tester.tap(find.text('Sessão do Claude'));
       await tester.pumpAndSettle();
 
       // A pasta da worktree, não a raiz do repo: é o que distingue este painel
@@ -351,7 +351,7 @@ void main() {
       addTearDown(store.dispose);
 
       await openMenu(tester, (ctx) => showWorktreeMenu(ctx, store, folder, task, Offset.zero));
-      await tester.tap(find.text('terminal'));
+      await tester.tap(find.text('Terminal'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.kind, 'shell');
@@ -368,7 +368,7 @@ void main() {
         tester,
         (ctx) => showWorktreeMenu(ctx, store, folder, principal, Offset.zero),
       );
-      await tester.tap(find.text('sessão do claude'));
+      await tester.tap(find.text('Sessão do Claude'));
       await tester.pumpAndSettle();
 
       expect(store.ultimo.cwd, '/repo');
@@ -391,12 +391,12 @@ void main() {
       );
 
       await openMenu(tester, (ctx) => showWorktreeMenu(ctx, store, folder, task, Offset.zero));
-      await tester.tap(find.text('copiar caminho'));
+      await tester.tap(find.text('Copiar caminho'));
       await tester.pumpAndSettle();
 
       expect(copiado, ['/repo/.claude/worktrees/TASK-47730']);
       expect(store.pedidos, isEmpty);
-      expect(store.banner, 'caminho copiado');
+      expect(store.banner, 'Caminho copiado');
       // Antes do fim do teste: o recado tem um prazo de verdade correndo, e um
       // timer de pé é o que o `testWidgets` reclama com a árvore já desmontada.
       store.dispose();
@@ -425,7 +425,7 @@ void main() {
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('cor'), findsOneWidget);
+      expect(find.text('Cor'), findsOneWidget);
       expect(tab.tint, isNull);
       await closeMenu(tester);
     });
@@ -439,7 +439,7 @@ void main() {
       addTearDown(mouse.removePointer);
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
-      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('magenta'));
       await tester.pumpAndSettle();
@@ -447,7 +447,7 @@ void main() {
       expect(tab.tint, MxTint.magenta);
       // E a linha do menu passa a dizer qual é, sem ter que reabrir o submenu.
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
-      expect(find.text('cor: magenta'), findsOneWidget);
+      expect(find.text('Cor: magenta'), findsOneWidget);
       await closeMenu(tester);
     });
 
@@ -460,9 +460,9 @@ void main() {
       addTearDown(mouse.removePointer);
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
-      await mouse.moveTo(tester.getCenter(find.text('cor: ciano')));
+      await mouse.moveTo(tester.getCenter(find.text('Cor: ciano')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('sem cor'));
+      await tester.tap(find.text('Sem cor'));
       await tester.pumpAndSettle();
 
       expect(tab.tint, isNull);
@@ -491,7 +491,7 @@ void main() {
         tester,
         (ctx) => showFeatureOrHotfixMenu(ctx, store, folder, featureOrHotfix, Offset.zero),
       );
-      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('vermelho'));
       await tester.pumpAndSettle();
@@ -520,8 +520,8 @@ void main() {
 
       await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
 
-      expect(find.text('cor: ciano — da feature'), findsOneWidget);
-      expect(find.text('cor'), findsNothing);
+      expect(find.text('Cor: ciano — da feature'), findsOneWidget);
+      expect(find.text('Cor'), findsNothing);
       await closeMenu(tester);
     });
   });
@@ -550,7 +550,7 @@ void main() {
         tester,
         (ctx) => showFolderMenu(ctx, store, folder, const [], Offset.zero),
       );
-      await mouse.moveTo(tester.getCenter(find.text('cor')));
+      await mouse.moveTo(tester.getCenter(find.text('Cor')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('amarelo'));
       await tester.pumpAndSettle();
@@ -573,7 +573,7 @@ void main() {
       addTearDown(store.dispose);
       final mouse = await openAddMenu(tester, store);
 
-      await mouse.moveTo(tester.getCenter(find.text('meus programas')));
+      await mouse.moveTo(tester.getCenter(find.text('Meus programas')));
       await tester.pumpAndSettle();
       // A linha do submenu, não a do menu: a de cima é 'meus programas'.
       await tester.tap(find.text('btop'));
@@ -583,7 +583,7 @@ void main() {
       // quem chamou o `showMenu`, o segundo menu não existiu.
       expect(store.ultimo.launcher, 'btop');
       expect(store.ultimo.cwd, '/repo');
-      expect(find.text('meus programas'), findsNothing);
+      expect(find.text('Meus programas'), findsNothing);
     });
 
     // Um ponteiro que veio pelo teclado ou por um trackpad de um toque não
@@ -594,11 +594,11 @@ void main() {
       addTearDown(store.dispose);
       await openAddMenu(tester, store);
 
-      expect(find.text('outro programa…'), findsNothing);
-      await tester.tap(find.text('meus programas'));
+      expect(find.text('Outro programa…'), findsNothing);
+      await tester.tap(find.text('Meus programas'));
       await tester.pumpAndSettle();
 
-      expect(find.text('outro programa…'), findsOneWidget);
+      expect(find.text('Outro programa…'), findsOneWidget);
       await closeMenu(tester);
     });
 
@@ -610,18 +610,18 @@ void main() {
       addTearDown(store.dispose);
       final mouse = await openAddMenu(tester, store);
 
-      await mouse.moveTo(tester.getCenter(find.text('meus programas')));
+      await mouse.moveTo(tester.getCenter(find.text('Meus programas')));
       await tester.pumpAndSettle();
-      expect(find.text('outro programa…'), findsOneWidget);
+      expect(find.text('Outro programa…'), findsOneWidget);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       // Um único frame depois do ⎋: o menu ainda está saindo, e é justamente
       // aí que o submenu não pode estar mais na tela.
       await tester.pump();
-      expect(find.text('outro programa…'), findsNothing);
+      expect(find.text('Outro programa…'), findsNothing);
 
       await tester.pumpAndSettle();
-      expect(find.text('meus programas'), findsNothing);
+      expect(find.text('Meus programas'), findsNothing);
       expect(store.pedidos, isEmpty);
     });
   });

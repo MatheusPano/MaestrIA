@@ -26,12 +26,12 @@ import 'theme_gallery.dart';
 /// gaveta em que já se entra pra olhar uma coisa e sair, e um medidor de plano
 /// não tem tráfego pra pagar uma região da janela só pra ele.
 enum MxSection {
-  appearance('aparência', Icons.palette_outlined),
-  shortcuts('atalhos', Icons.keyboard_outlined),
-  launchers('programas', Icons.rocket_launch_outlined),
-  plugins('plugins', Icons.extension_outlined),
-  sessions('sessões', Icons.bedtime_outlined),
-  account('conta & uso', Icons.speed_outlined);
+  appearance('Aparência', Icons.palette_outlined),
+  shortcuts('Atalhos', Icons.keyboard_outlined),
+  launchers('Programas', Icons.rocket_launch_outlined),
+  plugins('Plugins', Icons.extension_outlined),
+  sessions('Sessões', Icons.bedtime_outlined),
+  account('Conta & uso', Icons.speed_outlined);
   // --- ditado (vocalização) — fora desta versão -------------------------------
   // O microfone era mais uma seção aqui. Ver o cabeçalho de
   // `services/dictation.dart`; quando ele voltar, o `;` acima vira `,` de novo.
@@ -144,13 +144,13 @@ class _SettingsState extends State<_Settings> {
                               // O que muda aqui já está salvo antes de você
                               // ler — o botão fecha, não confirma.
                               Text(
-                                'tudo aqui vale na hora',
+                                'Tudo aqui vale na hora',
                                 style: TextStyle(fontSize: 11, color: Mx.fgFaint),
                               ),
                               const Spacer(),
                               TextButton(
                                 onPressed: () => Navigator.pop(context),
-                                child: const Text('pronto'),
+                                child: const Text('Pronto'),
                               ),
                             ],
                           ),
@@ -190,7 +190,7 @@ class _Rail extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
             child: Text(
-              'configurações',
+              'Configurações',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Mx.fg),
             ),
           ),
@@ -325,8 +325,8 @@ class _Appearance extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Heading(
-          'tema',
-          hint: 'clicar já aplica — a janela atrás deste diálogo é o preview, '
+          'Tema',
+          hint: 'Clicar já aplica — a janela atrás deste diálogo é o preview, '
               'e o pty vai junto: a paleta pinta o scrollback, não só a moldura.',
         ),
         ThemeGallery(store: store),
@@ -334,8 +334,8 @@ class _Appearance extends StatelessWidget {
         _Typography(store: store),
         const SizedBox(height: 26),
         _Heading(
-          'barra de status',
-          hint: 'a faixa com o resumo das sessões e o sino. O sino, a lista '
+          'Barra de status',
+          hint: 'A faixa com o resumo das sessões e o sino. O sino, a lista '
               'dele e os cartões de aviso ficam do mesmo lado que ela.',
         ),
         SwitchListTile(
@@ -344,11 +344,11 @@ class _Appearance extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           dense: true,
           title: Text(
-            'barra de status em cima',
+            'Barra de status em cima',
             style: TextStyle(fontSize: 12.5, color: Mx.fg),
           ),
           subtitle: Text(
-            'no topo da janela, em vez de no pé',
+            'No topo da janela, em vez de no pé',
             style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
           ),
         ),
@@ -376,8 +376,8 @@ class _Sessions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Heading(
-          'hibernação',
-          hint: 'uma sessão do claude parada no prompt custa uns 200MB de RAM pra '
+          'Hibernação',
+          hint: 'Uma sessão do Claude parada no prompt custa uns 200MB de RAM pra '
               'não fazer nada. Hibernar é desligar o processo e ficar com a '
               'conversa: a linha continua na lateral, e o clique nela retoma de '
               'onde parou. Também dá pra hibernar uma sessão à mão, pelo menu '
@@ -389,11 +389,11 @@ class _Sessions extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           dense: true,
           title: Text(
-            'hibernar sozinho o que está parado fora da tela',
+            'Hibernar sozinho o que está parado fora da tela',
             style: TextStyle(fontSize: 12.5, color: Mx.fg),
           ),
           subtitle: Text(
-            'só as que não estão na tela, sem pendência com você, sem fila pra '
+            'Só as que não estão na tela, sem pendência com você, sem fila pra '
             'andar e sem agentes rodando. O que estava rodando dentro dela — '
             'um servidor MCP, um dev server que uma ferramenta subiu — vai '
             'junto com o processo.',
@@ -403,7 +403,7 @@ class _Sessions extends StatelessWidget {
         if (on) ...[
           const SizedBox(height: 14),
           _Stepper(
-            label: 'depois de quanto tempo parada',
+            label: 'Depois de quanto tempo parada',
             value: minutes >= 60 && minutes % 60 == 0 ? '${minutes ~/ 60}' : '$minutes',
             unit: minutes >= 60 && minutes % 60 == 0 ? ' h' : ' min',
             onLess: minutes > 5 ? () => store.setHibernateMinutes(_less(minutes)) : null,
@@ -437,8 +437,8 @@ class _Typography extends StatelessWidget {
           children: [
             Expanded(
               child: _Heading(
-                'tipografia do pty',
-                hint: 'vale pra todo painel. ${MxAction.zoomIn.defaults.first.label} e '
+                'Tipografia do pty',
+                hint: 'Vale pra todo painel. ${MxAction.zoomIn.defaults.first.label} e '
                     '${MxAction.zoomOut.defaults.first.label} mexem em um só, a partir '
                     'daqui — e o painel lembra o que você deixou.',
               ),
@@ -446,7 +446,7 @@ class _Typography extends StatelessWidget {
             if (type != MxType.standard)
               TextButton(
                 onPressed: () => store.setTypography(MxType.standard),
-                child: const Text('restaurar padrões', style: TextStyle(fontSize: 11.5)),
+                child: const Text('Restaurar padrões', style: TextStyle(fontSize: 11.5)),
               ),
           ],
         ),
@@ -469,14 +469,14 @@ class _Typography extends StatelessWidget {
           // Um nome que não existe na máquina não some calado: a face cai na
           // proporcional do sistema e o terminal desalinha inteiro. Por isso a
           // lista é medida antes de ser desenhada — ver [MxFaces.resolves].
-          'só as que existem nesta máquina; a Hack vem no app',
+          'Só as que existem nesta máquina; a Hack vem no app',
           style: TextStyle(fontSize: 11, color: Mx.fgFaint),
         ),
         const SizedBox(height: 16),
         Row(
           children: [
             _Stepper(
-              label: 'corpo',
+              label: 'Corpo',
               // Sem decimal quando não há decimal, e com um quando um config
               // editado à mão trouxe 13.5: o número aqui é pra ser exato.
               value: type.size.toStringAsFixed(type.size == type.size.roundToDouble() ? 0 : 1),
@@ -490,7 +490,7 @@ class _Typography extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             _Stepper(
-              label: 'entrelinha',
+              label: 'Entrelinha',
               value: type.line.toStringAsFixed(2),
               onLess: type.line > MxType.minLine
                   ? () => store.setTypography(type.copyWith(line: type.line - MxType.lineStep))
@@ -650,7 +650,7 @@ class _Stepper extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _Ghost(icon: Icons.remove, tooltip: 'menos', onTap: onLess),
+              _Ghost(icon: Icons.remove, tooltip: 'Menos', onTap: onLess),
               SizedBox(
                 width: 58,
                 child: Text(
@@ -659,7 +659,7 @@ class _Stepper extends StatelessWidget {
                   style: TextStyle(fontFamily: Mx.mono, fontSize: 12, color: Mx.fg),
                 ),
               ),
-              _Ghost(icon: Icons.add, tooltip: 'mais', onTap: onMore),
+              _Ghost(icon: Icons.add, tooltip: 'Mais', onTap: onMore),
             ],
           ),
         ),
@@ -721,8 +721,8 @@ class _ShortcutsState extends State<_Shortcuts> {
           children: [
             Expanded(
               child: _Heading(
-                'atalhos',
-                hint: 'clique numa tecla pra trocar, no + pra dar uma segunda '
+                'Atalhos',
+                hint: 'Clique numa tecla pra trocar, no + pra dar uma segunda '
                     'combinação à mesma ação. Uma tecla só tem um dono: dar a '
                     'outra ação tira de quem a tinha.',
               ),
@@ -733,7 +733,7 @@ class _ShortcutsState extends State<_Shortcuts> {
                   _stop();
                   widget.store.resetShortcuts();
                 },
-                child: const Text('restaurar padrões', style: TextStyle(fontSize: 11.5)),
+                child: const Text('Restaurar padrões', style: TextStyle(fontSize: 11.5)),
               ),
           ],
         ),
@@ -900,7 +900,7 @@ class _CapState extends State<_Cap> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: Tooltip(
-          message: 'trocar',
+          message: 'Trocar',
           waitDuration: const Duration(milliseconds: 600),
           child: Container(
             height: 26,
@@ -953,8 +953,8 @@ class _AddChord extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (onReset != null)
-          _Ghost(icon: Icons.undo, tooltip: 'voltar ao padrão', onTap: onReset!),
-        _Ghost(icon: Icons.add, tooltip: 'adicionar outra combinação', onTap: onTap),
+          _Ghost(icon: Icons.undo, tooltip: 'Voltar ao padrão', onTap: onReset!),
+        _Ghost(icon: Icons.add, tooltip: 'Adicionar outra combinação', onTap: onTap),
       ],
     );
   }
@@ -1050,7 +1050,7 @@ class _Recorder extends StatelessWidget {
           border: Border.all(color: Mx.accent),
         ),
         child: Text(
-          'pressione a combinação   ⎋ cancela',
+          'Pressione a combinação   ⎋ cancela',
           style: TextStyle(fontSize: 11, color: Mx.accent),
         ),
       ),
@@ -1071,20 +1071,20 @@ class _Fixed extends StatelessWidget {
   Widget build(BuildContext context) {
     final linux = MxChord.linux;
     final fixed = <(String, String)>[
-      ('${MxChord.slot(0).label} … ${MxChord.slot(8).label}', 'ir pra enésima sessão da lateral'),
+      ('${MxChord.slot(0).label} … ${MxChord.slot(8).label}', 'Ir pra enésima sessão da lateral'),
       (
         MxChord.paste.take(2).map((c) => c.label).join('  '),
-        'colar no painel — imagem inclusa, que o claude recebe como ^V',
+        'Colar no painel — imagem inclusa, que o Claude recebe como ^V',
       ),
       // No macOS copiar é ⌘C e ninguém precisa ler isso; no Linux o Ctrl+C
       // é do processo, e a primeira coisa que alguém tenta.
-      if (linux) (MxChord.copy.label, 'copiar a seleção — o Ctrl+C é do processo'),
-      (const MxChord(LogicalKeyboardKey.enter, shift: true).label, 'quebrar linha no prompt sem enviar'),
-      (const MxChord(LogicalKeyboardKey.keyC, control: true).label, 'do processo, como em qualquer terminal'),
+      if (linux) (MxChord.copy.label, 'Copiar a seleção — o Ctrl+C é do processo'),
+      (const MxChord(LogicalKeyboardKey.enter, shift: true).label, 'Quebrar linha no prompt sem enviar'),
+      (const MxChord(LogicalKeyboardKey.keyC, control: true).label, 'Do processo, como em qualquer terminal'),
       if (linux)
-        ('Alt+F4', 'do desktop: fechar a janela')
+        ('Alt+F4', 'Do desktop: fechar a janela')
       else
-        ('⌘Q ⌘W ⌘H ⌘M', 'do macOS: sair, fechar, esconder, minimizar'),
+        ('⌘Q ⌘W ⌘H ⌘M', 'Do macOS: sair, fechar, esconder, minimizar'),
     ];
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -1097,7 +1097,7 @@ class _Fixed extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'fixos',
+            'Fixos',
             style: TextStyle(
               fontSize: 10.5,
               letterSpacing: 0.6,
@@ -1148,9 +1148,9 @@ class _Launchers extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Heading(
-          'programas',
-          hint: 'um painel que já abre dentro de um comando — é o que a sessão '
-              'do claude sempre foi, com o comando vindo daqui. cada um vira '
+          'Programas',
+          hint: 'Um painel que já abre dentro de um comando — é o que a sessão '
+              'do Claude sempre foi, com o comando vindo daqui. Cada um vira '
               'uma linha no + da lateral, e volta rodando quando o app reabre.',
         ),
         if (store.launchers.isEmpty)
@@ -1163,7 +1163,7 @@ class _Launchers extends StatelessWidget {
               border: Border.all(color: Mx.border),
             ),
             child: Text(
-              'nenhum ainda. um `btop` aqui é um painel de monitor a um clique '
+              'Nenhum ainda. Um `btop` aqui é um painel de monitor a um clique '
               'de distância; um `npm run dev` é o servidor do projeto sempre '
               'no mesmo lugar.',
               style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.5),
@@ -1174,7 +1174,7 @@ class _Launchers extends StatelessWidget {
         const SizedBox(height: 12),
         TextButton.icon(
           icon: const Icon(Icons.add, size: 15),
-          label: const Text('novo programa…'),
+          label: const Text('Novo programa…'),
           onPressed: () => showNewLauncher(context, store),
         ),
       ],
@@ -1243,7 +1243,7 @@ class _LauncherRowState extends State<_LauncherRow> {
                 ),
               ),
             IconButton(
-              tooltip: 'editar',
+              tooltip: 'Editar',
               iconSize: 15,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 28, height: 28),
@@ -1255,8 +1255,8 @@ class _LauncherRowState extends State<_LauncherRow> {
               // atalho, não matar o que está rodando. Ver
               // [AppStore.removeLauncher].
               tooltip: open == 0
-                  ? 'apagar'
-                  : 'apagar — os $open painéis continuam abertos, como terminais',
+                  ? 'Apagar'
+                  : 'Apagar — os $open painéis continuam abertos, como terminais',
               iconSize: 15,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 28, height: 28),
@@ -1283,8 +1283,8 @@ class _Plugins extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Heading(
-          'plugins',
-          hint: 'temas, comandos e janelas que vêm de fora, instalados em '
+          'Plugins',
+          hint: 'Temas, comandos e janelas que vêm de fora, instalados em '
               '~/.maestria/plugins. Um plugin com programa roda com as suas '
               'permissões — instale só o que você confia. Como escrever um: '
               'docs/plugins.md, no repositório da maestria.',
@@ -1296,12 +1296,12 @@ class _Plugins extends StatelessWidget {
           children: [
             TextButton.icon(
               icon: const Icon(Icons.add, size: 15),
-              label: const Text('instalar…'),
+              label: const Text('Instalar…'),
               onPressed: () => showInstallPlugin(context, store),
             ),
             TextButton.icon(
               icon: const Icon(Icons.folder_open_outlined, size: 15),
-              label: const Text('abrir a pasta'),
+              label: const Text('Abrir a pasta'),
               onPressed: () async {
                 await Directory(plugins.root).create(recursive: true);
                 await Notifier.reveal(plugins.root);
@@ -1309,7 +1309,7 @@ class _Plugins extends StatelessWidget {
             ),
             TextButton.icon(
               icon: const Icon(Icons.refresh, size: 15),
-              label: const Text('reler'),
+              label: const Text('Reler'),
               onPressed: () {
                 plugins.scan();
                 plugins.startup();
@@ -1328,7 +1328,7 @@ class _Plugins extends StatelessWidget {
               border: Border.all(color: Mx.border),
             ),
             child: Text(
-              'nenhum ainda. Os exemplos do repositório (examples/plugins) são um '
+              'Nenhum ainda. Os exemplos do repositório (examples/plugins) são um '
               'bom começo: um tema com atalhos, e um plugin completo em node com '
               'comandos, hooks e uma janela.',
               style: TextStyle(fontSize: 12, color: Mx.fgFaint, height: 1.5),
@@ -1345,7 +1345,7 @@ class _Plugins extends StatelessWidget {
             textStyle: const TextStyle(fontSize: 11.5),
           ),
           icon: const Icon(Icons.code, size: 13),
-          label: const Text('escrevendo um plugin? carregar pasta de desenvolvimento…'),
+          label: const Text('Escrevendo um plugin? Carregar pasta de desenvolvimento…'),
           onPressed: () => linkDevPlugin(store),
         ),
       ],
@@ -1380,11 +1380,11 @@ class _PluginRowState extends State<_PluginRow> {
       if (m.description.isNotEmpty) (m.description, 1),
       if (m.commands.isNotEmpty)
         (
-          'comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} ${c.key!.label}').join(' · ')}',
+          'Comandos: ${m.commands.map((c) => c.key == null ? c.title : '${c.title} ${c.key!.label}').join(' · ')}',
           0,
         ),
       if (plugin.palettes.isNotEmpty)
-        ('temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 0),
+        ('Temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 0),
     ];
     if (parts.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(
@@ -1421,7 +1421,7 @@ class _PluginRowState extends State<_PluginRow> {
                   child: Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      _open ? 'ver menos' : 'ver mais',
+                      _open ? 'Ver menos' : 'Ver mais',
                       style: line.copyWith(color: Mx.purple),
                     ),
                   ),
@@ -1461,14 +1461,14 @@ class _PluginRowState extends State<_PluginRow> {
           mxItem(
             'restart',
             glyph: glyph(Icons.restart_alt),
-            label: 'reiniciar',
-            subtitle: 'relê a pasta e sobe o processo de novo',
+            label: 'Reiniciar',
+            subtitle: 'Relê a pasta e sobe o processo de novo',
           ),
         if (m != null && (m.settings.isNotEmpty || m.commands.any((c) => c.key != null)))
           mxItem(
             'settings',
             glyph: glyph(Icons.tune),
-            label: 'configurar…',
+            label: 'Configurar…',
             subtitle: switch (_clashes) {
               0 => null,
               1 => '1 atalho em conflito',
@@ -1476,13 +1476,13 @@ class _PluginRowState extends State<_PluginRow> {
             },
             subtitleColor: Mx.yellow,
           ),
-        mxItem('log', glyph: glyph(Icons.receipt_long_outlined), label: 'log'),
-        mxItem('reveal', glyph: glyph(Icons.folder_open_outlined), label: 'mostrar no Finder'),
+        mxItem('log', glyph: glyph(Icons.receipt_long_outlined), label: 'Log'),
+        mxItem('reveal', glyph: glyph(Icons.folder_open_outlined), label: 'Mostrar no Finder'),
         mxDivider(),
         mxItem(
           'remove',
           glyph: glyph(Icons.delete_outline, Mx.red),
-          label: 'remover…',
+          label: 'Remover…',
           color: Mx.red,
         ),
       ],
@@ -1547,7 +1547,7 @@ class _PluginRowState extends State<_PluginRow> {
                             ),
                           Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
                           if (plugin.linked)
-                            Text('desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
+                            Text('Desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
                         ],
                       ),
                     ),
@@ -1578,7 +1578,7 @@ class _PluginRowState extends State<_PluginRow> {
           // de vez em quando -- o que se mexe todo dia é o interruptor.
           Builder(
             builder: (context) => IconButton(
-              tooltip: _clashes == 0 ? 'mais' : 'mais — atalho em conflito em configurar',
+              tooltip: _clashes == 0 ? 'Mais' : 'Mais — atalho em conflito em configurar',
               iconSize: 16,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints.tightFor(width: 28, height: 28),
@@ -1642,7 +1642,7 @@ class _AccountState extends State<_Account> {
   String get _when {
     final h = _readAt.hour.toString().padLeft(2, '0');
     final m = _readAt.minute.toString().padLeft(2, '0');
-    return 'lida às $h:$m';
+    return 'Lida às $h:$m';
   }
 
   @override
@@ -1651,8 +1651,8 @@ class _AccountState extends State<_Account> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _Heading(
-          'conta & uso',
-          hint: 'o mesmo que o /usage do claude mostra, lido da credencial desta máquina',
+          'Conta & uso',
+          hint: 'O mesmo que o /usage do Claude mostra, lido da credencial desta máquina',
         ),
         FutureBuilder<UsageReading>(
           future: _reading,
@@ -1809,7 +1809,7 @@ class _Meter extends StatelessWidget {
           if (window.resetsAt case final at?) ...[
             const SizedBox(height: 6),
             Text(
-              'reseta em ${shortUntil(at)}',
+              'Reseta em ${shortUntil(at)}',
               style: TextStyle(fontSize: 11, color: Mx.fgFaint),
             ),
           ],
@@ -1925,7 +1925,7 @@ class _ReloadState extends State<_Reload> {
         onTap: widget.onPressed,
         behavior: HitTestBehavior.opaque,
         child: Tooltip(
-          message: 'ler de novo',
+          message: 'Ler de novo',
           child: Container(
             width: 24,
             height: 24,
@@ -2015,11 +2015,11 @@ class _DictationState extends State<_Dictation> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _Heading(
-          'ditado',
-          hint: 'falar em vez de digitar: o microfone abre, o whisper.cpp '
+          'Ditado',
+          hint: 'Falar em vez de digitar: o microfone abre, o whisper.cpp '
               'transcreve na sua máquina, e o texto é colado no prompt do '
               'painel — sem sair daqui e sem mandar áudio pra lugar nenhum. '
-              '${chord == null ? 'sem atalho — escolha um em atalhos.' : '${chord.label} liga e desliga.'}',
+              '${chord == null ? 'Sem atalho — escolha um em atalhos.' : '${chord.label} liga e desliga.'}',
         ),
         _Setup(
           missing: _missing,
@@ -2029,29 +2029,29 @@ class _DictationState extends State<_Dictation> {
         ),
         const SizedBox(height: 22),
         _Line(
-          label: 'binário',
-          hint: 'o nome no PATH basta — o app roda tudo por um login shell',
+          label: 'Binário',
+          hint: 'O nome no PATH basta — o app roda tudo por um login shell',
           controller: _bin,
           onChanged: (v) => _apply(config.copyWith(bin: v)),
         ),
         _Line(
-          label: 'modelo',
-          hint: 'o .bin do whisper.cpp. large-v3-turbo é o que vale a pena: '
+          label: 'Modelo',
+          hint: 'O .bin do whisper.cpp. large-v3-turbo é o que vale a pena: '
               'roda em Metal e transcreve mais rápido do que se fala',
           controller: _model,
           onChanged: (v) => _apply(config.copyWith(model: v)),
         ),
         _Line(
-          label: 'idioma',
-          hint: 'fixo, não `auto`: numa frase em português com nome de branch '
+          label: 'Idioma',
+          hint: 'Fixo, não `auto`: numa frase em português com nome de branch '
               'no meio, o detector escolhe inglês e traduz a frase inteira',
           controller: _lang,
           width: 90,
           onChanged: (v) => _apply(config.copyWith(lang: v)),
         ),
         _Line(
-          label: 'vocabulário',
-          hint: 'não é uma instrução: é um trecho que o whisper finge ter '
+          label: 'Vocabulário',
+          hint: 'Não é uma instrução: é um trecho que o whisper finge ter '
               'acabado de transcrever, e que por isso enviesa o que ele '
               'escuta. É o que faz "worktree" e "BUG#45902" saírem inteiros em '
               'vez de "UASC Trade" e "Bag 45902". Vazio, é o whisper cru.',
@@ -2066,11 +2066,11 @@ class _DictationState extends State<_Dictation> {
           contentPadding: EdgeInsets.zero,
           dense: true,
           title: Text(
-            'enviar sozinho ao terminar de falar',
+            'Enviar sozinho ao terminar de falar',
             style: TextStyle(fontSize: 12.5, color: Mx.fg),
           ),
           subtitle: Text(
-            'desligado, o texto só é colado e você confere antes do enter — '
+            'Desligado, o texto só é colado e você confere antes do enter — '
             'que é o que vale a pena enquanto você não confia no microfone: '
             'nome de arquivo e nome de branch são o que ele mais erra.',
             style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
@@ -2099,9 +2099,9 @@ class _Setup extends StatelessWidget {
   /// configurado -- copiar um comando que baixa pra outro lugar seria pior do
   /// que não oferecer comando nenhum.
   List<(String, String)> get _steps => [
-    ('o whisper.cpp', 'brew install whisper-cpp'),
+    ('O whisper.cpp', 'brew install whisper-cpp'),
     (
-      'o modelo (1,6 GB, uma vez)',
+      'O modelo (1,6 GB, uma vez)',
       'mkdir -p ${_dir(model)} && curl -L -o $model '
           'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
     ),
@@ -2136,13 +2136,13 @@ class _Setup extends StatelessWidget {
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  checking ? 'conferindo…' : (missing ?? 'tudo no lugar — é só falar'),
+                  checking ? 'Conferindo…' : (missing ?? 'Tudo no lugar — é só falar'),
                   style: TextStyle(fontSize: 12, color: ok ? Mx.green : Mx.fg, height: 1.35),
                 ),
               ),
               TextButton(
                 onPressed: checking ? null : onRecheck,
-                child: const Text('verificar de novo'),
+                child: const Text('Verificar de novo'),
               ),
             ],
           ),
@@ -2200,7 +2200,7 @@ class _CommandState extends State<_Command> {
                   await Clipboard.setData(ClipboardData(text: widget.command));
                   if (context.mounted) setState(() => _copied = true);
                 },
-                child: Text(_copied ? 'copiado' : 'copiar'),
+                child: Text(_copied ? 'Copiado' : 'Copiar'),
               ),
             ],
           ),

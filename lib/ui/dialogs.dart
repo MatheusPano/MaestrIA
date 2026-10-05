@@ -54,15 +54,15 @@ InputDecoration _field(String label, [String? hint]) => InputDecoration(
 /// nunca foi adicionado aqui aparece também -- que é o que este bloco, preso a
 /// uma pasta, nunca teve como oferecer. Ver [showChatHistory].
 List<PopupMenuEntry<String>> openHereItems(AppStore store) => [
-  mxItem('claude', glyph: const ClaudeMark(size: 13), label: 'sessão do claude'),
-  mxItem('shell', glyph: Icon(Icons.terminal, size: 14, color: Mx.fgDim), label: 'terminal'),
+  mxItem('claude', glyph: const ClaudeMark(size: 13), label: 'Sessão do Claude'),
+  mxItem('shell', glyph: Icon(Icons.terminal, size: 14, color: Mx.fgDim), label: 'Terminal'),
   // Uma sessão com o depois dela já escrito. Fica atrás das duas de cima
   // porque é o que menos se pede aqui -- e à frente do resto porque é a
   // mesma coisa que elas: abrir algo que vai rodar agora.
   mxItem(
     'fluxo',
     glyph: Icon(Icons.account_tree_outlined, size: 14, color: Mx.purple),
-    label: 'montar um fluxo…',
+    label: 'Montar um fluxo…',
   ),
   // Um `.md` do disco é a quarta coisa que se abre num lugar, e o lugar é
   // *onde ele está*. A linha era do menu do painel, que sabe de sessões e não
@@ -72,7 +72,7 @@ List<PopupMenuEntry<String>> openHereItems(AppStore store) => [
   mxItem(
     'markdown',
     glyph: Icon(Icons.description_outlined, size: 14, color: Mx.fgDim),
-    label: 'abrir um markdown…',
+    label: 'Abrir um markdown…',
   ),
   // Sem programa nenhum não há submenu a abrir: seria uma seta pra uma lista
   // de um item, e o item é a oferta de ensinar o primeiro.
@@ -80,11 +80,11 @@ List<PopupMenuEntry<String>> openHereItems(AppStore store) => [
     mxItem(
       'novo',
       glyph: Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
-      label: 'criar um programa…',
+      label: 'Criar um programa…',
     )
   else
     MxSubmenuItem(
-      label: 'meus programas',
+      label: 'Meus programas',
       glyph: Icon(Icons.apps_outlined, size: 14, color: Mx.fgDim),
       // Lidos na hora de abrir o submenu: quem acabou de criar um programa
       // pelo diálogo da última linha o encontra aqui sem reabrir o menu.
@@ -99,7 +99,7 @@ List<PopupMenuEntry<String>> openHereItems(AppStore store) => [
           ),
         MxSubItem(
           value: 'novo',
-          label: 'outro programa…',
+          label: 'Outro programa…',
           glyph: Icon(Icons.add_circle_outline, size: 14, color: Mx.fgFaint),
           divided: true,
         ),
@@ -169,8 +169,8 @@ Future<String?> promptText(
         onSubmitted: (v) => Navigator.pop(ctx, v),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('ok')),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Ok')),
       ],
     ),
   );
@@ -190,14 +190,14 @@ Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosi
       mxItem(
         'copy',
         glyph: Icon(Icons.content_copy, size: 13, color: Mx.fgDim),
-        label: 'copiar',
+        label: 'Copiar',
         chord: MxChord.copy.label,
         enabled: hasSelection,
       ),
       mxItem(
         'paste',
         glyph: Icon(Icons.content_paste, size: 13, color: Mx.fgDim),
-        label: 'colar',
+        label: 'Colar',
         chord: MxChord.paste.first.label,
       ),
     ],
@@ -222,7 +222,7 @@ Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosi
 /// [current] é o que já está escolhido, pra linha dizer qual é sem que seja
 /// preciso abrir o submenu pra descobrir.
 MxSubmenuItem tintItem(MxTint? current) => MxSubmenuItem(
-  label: current == null ? 'cor' : 'cor: ${current.label}',
+  label: current == null ? 'Cor' : 'Cor: ${current.label}',
   glyph: Icon(
     current == null ? Icons.circle_outlined : Icons.circle,
     size: 12,
@@ -231,7 +231,7 @@ MxSubmenuItem tintItem(MxTint? current) => MxSubmenuItem(
   items: () => [
     MxSubItem(
       value: '$_tint:none',
-      label: 'sem cor',
+      label: 'Sem cor',
       glyph: Icon(
         current == null ? Icons.check_circle_outline : Icons.circle_outlined,
         size: 13,
@@ -293,7 +293,7 @@ Future<void> showPanelMenu(
         mxItem(
           'relaunch',
           glyph: Icon(Icons.refresh, size: 14, color: tab.launcher!.color),
-          label: 'rodar ${tab.launcher!.name} de novo',
+          label: 'Rodar ${tab.launcher!.name} de novo',
         ),
         mxDivider(),
       ],
@@ -303,7 +303,7 @@ Future<void> showPanelMenu(
         mxItem(
           'wake',
           glyph: Icon(Icons.play_arrow, size: 14, color: Mx.accent),
-          label: 'retomar a conversa',
+          label: 'Retomar a conversa',
         ),
         mxDivider(),
       ],
@@ -313,7 +313,7 @@ Future<void> showPanelMenu(
       mxItem(
         'rename',
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
-        label: 'renomear…',
+        label: 'Renomear…',
       ),
       // Encostada no renomear porque é a outra metade dele: dar nome e dar
       // cor são as duas coisas que você diz sobre um painel, e nenhuma das
@@ -330,7 +330,7 @@ Future<void> showPanelMenu(
         mxItem(
           'tint-project',
           glyph: Icon(Icons.circle, size: 12, color: fromFeatureOrHotfix.color),
-          label: 'cor: ${fromFeatureOrHotfix.label} — ${store.featureOrHotfixOf(tab)!.kind.ofThe}',
+          label: 'Cor: ${fromFeatureOrHotfix.label} — ${store.featureOrHotfixOf(tab)!.kind.ofThe}',
           enabled: false,
         )
       else
@@ -356,22 +356,22 @@ Future<void> showPanelMenu(
           'plan',
           glyph: Icon(Icons.checklist_rtl, size: 14, color: Mx.fgDim),
           label: tab.hooks.plans.length > 1
-              ? 'ver o plano (${tab.hooks.plans.length})'
-              : 'ver o plano',
+              ? 'Ver o plano (${tab.hooks.plans.length})'
+              : 'Ver o plano',
           enabled: tab.hooks.plans.isNotEmpty,
         ),
         mxItem(
           'message',
           glyph: Icon(Icons.chat_bubble_outline, size: 14, color: Mx.fgDim),
-          label: 'ver o último recado',
+          label: 'Ver o último recado',
           enabled: (tab.hooks.lastMessageFull ?? '').trim().isNotEmpty,
         ),
         mxItem(
           'chain',
           glyph: Icon(Icons.account_tree_outlined, size: 14, color: Mx.fgDim),
           label: tab.followUps.isEmpty
-              ? 'quando terminar…'
-              : 'quando terminar… (${tab.followUps.length})',
+              ? 'Quando terminar…'
+              : 'Quando terminar… (${tab.followUps.length})',
         ),
       ],
       mxDivider(),
@@ -398,7 +398,7 @@ Future<void> showPanelMenu(
             size: 14,
             color: store.isPinned(tab) ? Mx.accent : Mx.fgDim,
           ),
-          label: store.isPinned(tab) ? 'soltar o painel' : 'prender o painel',
+          label: store.isPinned(tab) ? 'Soltar o painel' : 'Prender o painel',
           chord: store.keymap[MxAction.pinPane].firstOrNull?.label,
         ),
       if (store.paneCount > 1 &&
@@ -407,7 +407,7 @@ Future<void> showPanelMenu(
         mxItem(
           'group',
           glyph: Icon(Icons.grid_view_rounded, size: 14, color: Mx.fgDim),
-          label: 'agrupar painéis',
+          label: 'Agrupar painéis',
         ),
       if (grouped case final group?)
         mxItem(
@@ -415,7 +415,7 @@ Future<void> showPanelMenu(
           // Na cor do grupo, que é a cor com que a lateral lava as linhas
           // dele: é o que diz de qual grupo a linha está falando.
           glyph: Icon(Icons.grid_off, size: 14, color: group.color),
-          label: 'desagrupar "${group.name}"',
+          label: 'Desagrupar "${group.name}"',
         ),
       // Um leitor e uma configuração não vão pra projeto nem se marcam como
       // concluídos: as duas coisas se dizem de um trabalho, e eles são uma
@@ -426,7 +426,7 @@ Future<void> showPanelMenu(
         mxItem(
           'move',
           glyph: Icon(Icons.track_changes, size: 14, color: Mx.purple),
-          label: 'mover pra feature/hotfix…',
+          label: 'Mover pra feature/hotfix…',
         ),
       if (!tab.isPassive)
         mxItem(
@@ -436,7 +436,7 @@ Future<void> showPanelMenu(
             size: 14,
             color: tab.done ? Mx.green : Mx.fgDim,
           ),
-          label: tab.done ? 'reabrir: não está concluída' : 'marcar como concluída',
+          label: tab.done ? 'Reabrir: não está concluída' : 'Marcar como concluída',
         ),
       // Os comandos dos plugins, num submenu: são de fora, e dez linhas de
       // plugin soltas no meio deste menu o fariam ler como um menu de outro
@@ -444,7 +444,7 @@ Future<void> showPanelMenu(
       if (store.plugins.commands.isNotEmpty) ...[
         mxDivider(),
         MxSubmenuItem(
-          label: 'plugins',
+          label: 'Plugins',
           glyph: Icon(Icons.extension_outlined, size: 14, color: Mx.fgDim),
           items: () => [
             for (final c in store.plugins.commands)
@@ -459,16 +459,16 @@ Future<void> showPanelMenu(
         mxItem(
           'hibernate',
           glyph: Icon(Icons.bedtime_outlined, size: 14, color: Mx.fgDim),
-          label: 'hibernar (libera a memória)',
+          label: 'Hibernar (libera a memória)',
         ),
       mxItem(
         'close',
         glyph: Icon(Icons.close, size: 14, color: Mx.red),
         label: switch (tab.kind) {
-          TabKind.reader => 'fechar o leitor',
-          TabKind.setup => 'fechar a configuração',
-          TabKind.plugin => 'fechar a janela do plugin',
-          _ => 'fechar painel',
+          TabKind.reader => 'Fechar o leitor',
+          TabKind.setup => 'Fechar a configuração',
+          TabKind.plugin => 'Fechar a janela do plugin',
+          _ => 'Fechar painel',
         },
         color: Mx.red,
         // A tecla vem do mapa: ela é editável, e um menu que ensinasse ⌘⌫ a
@@ -533,9 +533,9 @@ Future<void> showRenamePanel(BuildContext context, AppStore store, MxTab tab) as
   // title back to the branch/folder rule.
   final v = await promptText(
     context,
-    title: 'renomear painel',
+    title: 'Renomear painel',
     initial: tab.title,
-    label: 'título',
+    label: 'Título',
   );
   if (v != null) store.renameTab(tab, v);
 }
@@ -586,7 +586,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, refresh) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
-        title: const Text('adicionar pasta', style: TextStyle(fontSize: 15)),
+        title: const Text('Adicionar pasta', style: TextStyle(fontSize: 15)),
         content: SizedBox(
           width: 460,
           child: Column(
@@ -597,7 +597,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                 controller: controller,
                 autofocus: true,
                 style: const TextStyle(fontSize: 13),
-                decoration: _field('caminho do repo', '~/repos/...'),
+                decoration: _field('Caminho do repo', '~/repos/...'),
                 onSubmitted: (v) => Navigator.pop(ctx, v),
               ),
               const SizedBox(height: 10),
@@ -610,7 +610,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                 children: [
                   TextButton.icon(
                     icon: const Icon(Icons.folder_open, size: 15),
-                    label: const Text('escolher pasta…'),
+                    label: const Text('Escolher pasta…'),
                     onPressed: () async {
                       final path = await Notifier.chooseFolder();
                       if (path != null && path.isNotEmpty) controller.text = path;
@@ -618,7 +618,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                   ),
                   TextButton.icon(
                     icon: const Icon(Icons.hexagon_outlined, size: 15),
-                    label: const Text('escolher workspace…'),
+                    label: const Text('Escolher workspace…'),
                     onPressed: () async {
                       final picked = await Notifier.chooseWorkspace();
                       // Sem painel do outro lado o clique não produzia nada --
@@ -626,7 +626,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                       // caminho colado, então o botão morto ainda tem saída.
                       if (!picked.available) {
                         refresh(() {
-                          trouble = 'não consegui abrir o seletor — cole aí em cima o '
+                          trouble = 'Não consegui abrir o seletor — cole aí em cima o '
                               'caminho do .code-workspace';
                         });
                         return;
@@ -638,7 +638,7 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
                 ],
               ),
               Text(
-                trouble ?? 'um .code-workspace adiciona todas as pastas dele de uma vez.',
+                trouble ?? 'Um .code-workspace adiciona todas as pastas dele de uma vez.',
                 style: TextStyle(
                   color: trouble == null ? Mx.fgFaint : Mx.yellow,
                   fontSize: 11,
@@ -648,10 +648,10 @@ Future<void> showAddFolder(BuildContext context, AppStore store) async {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('adicionar'),
+            child: const Text('Adicionar'),
           ),
         ],
       ),
@@ -679,7 +679,7 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: const Text('abrir sem pasta', style: TextStyle(fontSize: 15)),
+      title: const Text('Abrir sem pasta', style: TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 460,
         child: Column(
@@ -690,34 +690,34 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
               controller: controller,
               autofocus: true,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('pasta', 'onde o painel vai rodar'),
+              decoration: _field('Pasta', 'Onde o painel vai rodar'),
               onSubmitted: (_) => Navigator.pop(ctx, TabKind.claude),
             ),
             const SizedBox(height: 10),
             TextButton.icon(
               icon: const Icon(Icons.folder_open, size: 15),
-              label: const Text('escolher pasta…'),
+              label: const Text('Escolher pasta…'),
               onPressed: () async {
                 final picked = await Notifier.chooseFolder();
                 if (picked != null && picked.isNotEmpty) controller.text = picked;
               },
             ),
             Text(
-              'o painel fica em "avulsos" — nenhuma pasta é adicionada.',
+              'O painel fica em "avulsos" — nenhuma pasta é adicionada.',
               style: TextStyle(color: Mx.fgFaint, fontSize: 11),
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
         TextButton(
           onPressed: () => Navigator.pop(ctx, TabKind.shell),
-          child: const Text('terminal'),
+          child: const Text('Terminal'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, TabKind.claude),
-          child: const Text('sessão do claude'),
+          child: const Text('Sessão do Claude'),
         ),
       ],
     ),
@@ -727,7 +727,7 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
   final path = expandHome(controller.text.trim());
   if (kind == null || path.isEmpty) return;
   if (!Directory(path).existsSync()) {
-    store.showBanner('pasta não encontrada: $path', sticky: true);
+    store.showBanner('Pasta não encontrada: $path', sticky: true);
     return;
   }
   if (kind == TabKind.claude) {
@@ -755,7 +755,7 @@ Future<void> showNewTask(
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
       title: Text(
-        'nova task em ${featureOrHotfix?.name ?? folder.name}',
+        'Nova task em ${featureOrHotfix?.name ?? folder.name}',
         style: const TextStyle(fontSize: 15),
       ),
       content: SizedBox(
@@ -777,7 +777,7 @@ Future<void> showNewTask(
                   child: TextField(
                     controller: branch,
                     style: const TextStyle(fontSize: 13),
-                    decoration: _field('branch'),
+                    decoration: _field('Branch'),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -785,7 +785,7 @@ Future<void> showNewTask(
                   child: TextField(
                     controller: dir,
                     style: const TextStyle(fontSize: 13),
-                    decoration: _field('pasta da worktree'),
+                    decoration: _field('Pasta da worktree'),
                   ),
                 ),
               ],
@@ -794,13 +794,13 @@ Future<void> showNewTask(
             TextField(
               controller: base,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('base', 'vazio = origin/HEAD'),
+              decoration: _field('Base', 'Vazio = origin/HEAD'),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: setup,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('comando pós-criação', 'ex: flutter pub get'),
+              decoration: _field('Comando pós-criação', 'Ex: flutter pub get'),
             ),
             const SizedBox(height: 10),
             Align(
@@ -814,8 +814,8 @@ Future<void> showNewTask(
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('criar e abrir')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Criar e abrir')),
       ],
     ),
   );
@@ -856,20 +856,20 @@ Future<void> showWorktreeMenu(
         mxItem(
           'code',
           glyph: Icon(Icons.code, size: 14, color: Mx.fgDim),
-          label: 'abrir no vscode',
+          label: 'Abrir no vscode',
         ),
         // Sobre este checkout, e não sobre a pasta-mãe: o `CLAUDE.md` é o
         // mesmo versionado, mas o `settings.local.json` é deste diretório.
         mxItem(
           'setup',
           glyph: Icon(Icons.tune, size: 14, color: Mx.fgDim),
-          label: 'configuração do claude',
+          label: 'Configuração do Claude',
         ),
       ],
       mxItem(
         'copy',
         glyph: Icon(Icons.link, size: 14, color: Mx.fgDim),
-        label: 'copiar caminho',
+        label: 'Copiar caminho',
       ),
       if (!worktree.isMain)
         mxItem(
@@ -879,7 +879,7 @@ Future<void> showWorktreeMenu(
             size: 14,
             color: Mx.red,
           ),
-          label: ghost ? 'limpar registro…' : 'excluir worktree…',
+          label: ghost ? 'Limpar registro…' : 'Excluir worktree…',
           color: Mx.red,
         ),
     ],
@@ -907,7 +907,7 @@ Future<void> showWorktreeMenu(
       store.showSetup(folder: folder, cwd: worktree.isMain ? null : worktree.path);
     case 'copy':
       await Clipboard.setData(ClipboardData(text: worktree.path));
-      store.showBanner('caminho copiado');
+      store.showBanner('Caminho copiado');
     case 'remove':
       await confirmRemoveWorktree(context, store, folder, worktree);
   }
@@ -935,7 +935,7 @@ Future<void> confirmRemoveWorktree(
       builder: (ctx, setState) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
         title: Text(
-          worktree.prunable ? 'limpar ${worktree.shortLabel}?' : 'excluir ${worktree.shortLabel}?',
+          worktree.prunable ? 'Limpar ${worktree.shortLabel}?' : 'Excluir ${worktree.shortLabel}?',
           style: const TextStyle(fontSize: 15),
         ),
         content: SizedBox(
@@ -953,14 +953,14 @@ Future<void> confirmRemoveWorktree(
                 _Fact(
                   icon: Icons.link_off,
                   color: Mx.fgDim,
-                  text: 'a pasta já não existe — isso só limpa o registro que sobrou no git',
+                  text: 'A pasta já não existe — isso só limpa o registro que sobrou no git',
                 )
               else ...[
                 _Fact(
                   icon: safety.dirty == 0 ? Icons.check_rounded : Icons.warning_amber_rounded,
                   color: safety.dirty == 0 ? Mx.green : Mx.yellow,
                   text: safety.dirty == 0
-                      ? 'nada não commitado'
+                      ? 'Nada não commitado'
                       : '${safety.dirty} arquivo(s) não commitado(s) — isso se perde',
                 ),
                 _Fact(
@@ -975,9 +975,9 @@ Future<void> confirmRemoveWorktree(
                       ? Mx.green
                       : Mx.red,
                   text: safety.base == null
-                      ? 'sem base pra comparar os commits'
+                      ? 'Sem base pra comparar os commits'
                       : safety.unmerged == 0
-                      ? 'todo commit daqui já está em ${safety.base}'
+                      ? 'Todo commit daqui já está em ${safety.base}'
                       : '${safety.unmerged} commit(s) que não estão em ${safety.base}',
                 ),
               ],
@@ -995,7 +995,7 @@ Future<void> confirmRemoveWorktree(
                       ),
                       Expanded(
                         child: Text(
-                          'apagar também a branch ${worktree.branch}',
+                          'Apagar também a branch ${worktree.branch}',
                           style: TextStyle(fontSize: 12, color: Mx.fgDim),
                         ),
                       ),
@@ -1007,11 +1007,11 @@ Future<void> confirmRemoveWorktree(
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Mx.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(safety.risky ? 'excluir de qualquer forma' : 'excluir'),
+            child: Text(safety.risky ? 'Excluir de qualquer forma' : 'Excluir'),
           ),
         ],
       ),
@@ -1061,7 +1061,7 @@ Future<Workspace?> showNewWorkspace(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) => AlertDialog(
         backgroundColor: Mx.bgSidebar,
-        title: const Text('novo workspace', style: TextStyle(fontSize: 15)),
+        title: const Text('Novo workspace', style: TextStyle(fontSize: 15)),
         content: SizedBox(
           width: 480,
           child: Column(
@@ -1072,7 +1072,7 @@ Future<Workspace?> showNewWorkspace(
                 controller: name,
                 autofocus: true,
                 style: const TextStyle(fontSize: 13),
-                decoration: _field('nome', 'ATRIUM'),
+                decoration: _field('Nome', 'ATRIUM'),
                 onSubmitted: (_) => Navigator.pop(ctx, true),
               ),
               const SizedBox(height: 12),
@@ -1098,8 +1098,8 @@ Future<Workspace?> showNewWorkspace(
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('criar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Criar')),
         ],
       ),
     ),
@@ -1138,7 +1138,7 @@ Future<void> confirmCloseWorkspace(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('fechar ${workspace.name}?', style: const TextStyle(fontSize: 15)),
+      title: Text('Fechar ${workspace.name}?', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 470,
         child: Column(
@@ -1163,7 +1163,7 @@ Future<void> confirmCloseWorkspace(
             _Fact(
               icon: Icons.check_rounded,
               color: Mx.green,
-              text: 'nada é apagado do disco — nem os repos, nem o .code-workspace',
+              text: 'Nada é apagado do disco — nem os repos, nem o .code-workspace',
             ),
             if (sessions > 0)
               _Fact(
@@ -1177,11 +1177,11 @@ Future<void> confirmCloseWorkspace(
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Mx.red),
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('fechar workspace'),
+          child: const Text('Fechar workspace'),
         ),
       ],
     ),
@@ -1207,7 +1207,7 @@ Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
   if (total == 1) {
     final name = store.groups.single.name;
     store.clearGroups();
-    store.showBanner('grupo "$name" esquecido — os painéis continuam abertos');
+    store.showBanner('Grupo "$name" esquecido — os painéis continuam abertos');
     return;
   }
 
@@ -1215,7 +1215,7 @@ Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('esquecer os $total grupos?', style: const TextStyle(fontSize: 15)),
+      title: Text('Esquecer os $total grupos?', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 440,
         child: Column(
@@ -1225,27 +1225,27 @@ Future<void> confirmClearGroups(BuildContext context, AppStore store) async {
             _Fact(
               icon: Icons.check_rounded,
               color: Mx.green,
-              text: 'nenhum painel fecha — a tela de agora fica exatamente como está',
+              text: 'Nenhum painel fecha — a tela de agora fica exatamente como está',
             ),
             _Fact(
               icon: Icons.grid_view_rounded,
               color: Mx.fgDim,
-              text: 'o que se perde são os $total arranjos guardados, com os nomes deles',
+              text: 'O que se perde são os $total arranjos guardados, com os nomes deles',
             ),
             _Fact(
               icon: Icons.replay,
               color: Mx.fgFaint,
-              text: 'pra ter um de volta: arrume a grade e agrupe os painéis outra vez',
+              text: 'Pra ter um de volta: arrume a grade e agrupe os painéis outra vez',
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Mx.red),
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('esquecer'),
+          child: const Text('Esquecer'),
         ),
       ],
     ),
@@ -1284,7 +1284,7 @@ Future<void> showNewFeatureOrHotfix(
               controller: name,
               autofocus: true,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('nome', 'permissão do google'),
+              decoration: _field('Nome', 'Permissão do google'),
               onSubmitted: (_) => Navigator.pop(ctx, true),
             ),
             const SizedBox(height: 12),
@@ -1294,13 +1294,13 @@ Future<void> showNewFeatureOrHotfix(
               maxLines: 8,
               style: const TextStyle(fontSize: 13),
               decoration: _field(
-                'briefing (opcional)',
-                'o que todo agente ${kind.ofThis} precisa saber antes de começar',
+                'Briefing (opcional)',
+                'O que todo agente ${kind.ofThis} precisa saber antes de começar',
               ),
             ),
             const SizedBox(height: 10),
             Text(
-              'o briefing entra como --append-system-prompt em toda sessão aberta '
+              'O briefing entra como --append-system-prompt em toda sessão aberta '
               'aqui dentro — vale a conversa inteira, não só a primeira mensagem.',
               style: TextStyle(color: Mx.fgFaint, fontSize: 11),
             ),
@@ -1308,8 +1308,8 @@ Future<void> showNewFeatureOrHotfix(
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('criar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Criar')),
       ],
     ),
   );
@@ -1328,7 +1328,7 @@ Future<void> showFeatureOrHotfixBrief(BuildContext context, AppStore store, Feat
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('briefing de ${featureOrHotfix.name}', style: const TextStyle(fontSize: 15)),
+      title: Text('Briefing de ${featureOrHotfix.name}', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 560,
         child: Column(
@@ -1341,11 +1341,11 @@ Future<void> showFeatureOrHotfixBrief(BuildContext context, AppStore store, Feat
               minLines: 6,
               maxLines: 14,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('contexto', 'o que já foi decidido, o que não encostar'),
+              decoration: _field('Contexto', 'O que já foi decidido, o que não encostar'),
             ),
             const SizedBox(height: 10),
             Text(
-              'as sessões que já estão abertas não mudam — o briefing entra na linha '
+              'As sessões que já estão abertas não mudam — o briefing entra na linha '
               'de comando, então vale a partir da próxima que você abrir aqui.',
               style: TextStyle(color: Mx.fgFaint, fontSize: 11),
             ),
@@ -1353,8 +1353,8 @@ Future<void> showFeatureOrHotfixBrief(BuildContext context, AppStore store, Feat
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('salvar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Salvar')),
       ],
     ),
   );
@@ -1385,7 +1385,7 @@ Future<void> showFeatureOrHotfixMenu(
         mxItem(
           'setup',
           glyph: Icon(Icons.tune, size: 14, color: Mx.fgDim),
-          label: 'configuração do claude',
+          label: 'Configuração do Claude',
         ),
       // Uma worktree precisa de um repo pra ser worktree de -- ver
       // [MxKeys.run]. No projeto da bandeja a linha não aparece: ela abriria
@@ -1394,17 +1394,17 @@ Future<void> showFeatureOrHotfixMenu(
         mxItem(
           'task',
           glyph: Icon(Icons.call_split, size: 14, color: Mx.fgDim),
-          label: 'nova task ${kind.inThis}…',
+          label: 'Nova task ${kind.inThis}…',
         ),
       mxItem(
         'brief',
         glyph: Icon(Icons.assignment_outlined, size: 14, color: Mx.fgDim),
-        label: 'briefing…',
+        label: 'Briefing…',
       ),
       mxItem(
         'rename',
         glyph: Icon(Icons.drive_file_rename_outline, size: 14, color: Mx.fgDim),
-        label: 'renomear',
+        label: 'Renomear',
       ),
       // A mesma linha do menu do painel, um andar acima: aqui ela pinta as
       // quatro sessões do projeto de uma vez, que é o que faz "de que
@@ -1413,18 +1413,18 @@ Future<void> showFeatureOrHotfixMenu(
       mxItem(
         'kind',
         glyph: Icon(kind.other.icon, size: 14, color: Mx.fgDim),
-        label: 'virar ${kind.other.label}',
+        label: 'Virar ${kind.other.label}',
       ),
       mxDivider(),
       mxItem(
         'done',
         glyph: Icon(Icons.task_alt, size: 14, color: Mx.green),
-        label: 'concluir ${kind.label}',
+        label: 'Concluir ${kind.label}',
       ),
       mxItem(
         'dissolve',
         glyph: Icon(Icons.track_changes, size: 14, color: Mx.red),
-        label: 'dissolver ${kind.label}',
+        label: 'Dissolver ${kind.label}',
         color: Mx.red,
       ),
     ],
@@ -1444,9 +1444,9 @@ Future<void> showFeatureOrHotfixMenu(
     case 'rename':
       final name = await promptText(
         context,
-        title: 'renomear ${kind.label}',
+        title: 'Renomear ${kind.label}',
         initial: featureOrHotfix.name,
-        label: 'nome',
+        label: 'Nome',
       );
       if (name != null && name.trim().isNotEmpty) store.editFeatureOrHotfix(featureOrHotfix, name: name);
     case final pick when isTintChoice(pick):
@@ -1494,7 +1494,7 @@ Future<void> confirmCompleteFeatureOrHotfix(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('concluir "${featureOrHotfix.name}"?', style: const TextStyle(fontSize: 15)),
+      title: Text('Concluir "${featureOrHotfix.name}"?', style: const TextStyle(fontSize: 15)),
       content: SizedBox(
         width: 460,
         child: Column(
@@ -1505,8 +1505,8 @@ Future<void> confirmCompleteFeatureOrHotfix(
               icon: tabs.isEmpty ? Icons.check_rounded : Icons.close_rounded,
               color: tabs.isEmpty ? Mx.green : Mx.fgDim,
               text: tabs.isEmpty
-                  ? 'não tem painel aberto ${featureOrHotfix.kind.inThis}'
-                  : 'fecha ${tabs.length} painel(is) — as sessões terminam aqui',
+                  ? 'Não tem painel aberto ${featureOrHotfix.kind.inThis}'
+                  : 'Fecha ${tabs.length} painel(is) — as sessões terminam aqui',
             ),
             if (busy > 0)
               _Fact(
@@ -1524,22 +1524,22 @@ Future<void> confirmCompleteFeatureOrHotfix(
               _Fact(
                 icon: Icons.sticky_note_2_outlined,
                 color: Mx.fgDim,
-                text: 'o briefing vai junto — copie o texto antes se for reaproveitar',
+                text: 'O briefing vai junto — copie o texto antes se for reaproveitar',
               ),
             _Fact(
               icon: Icons.folder_outlined,
               color: Mx.fgFaint,
-              text: 'nada é mexido no repo: ${featureOrHotfix.kind.the} só existia aqui',
+              text: 'Nada é mexido no repo: ${featureOrHotfix.kind.the} só existia aqui',
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('cancelar')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Mx.green),
           onPressed: () => Navigator.pop(ctx, true),
-          child: Text(busy + waiting > 0 ? 'concluir de qualquer forma' : 'concluir'),
+          child: Text(busy + waiting > 0 ? 'Concluir de qualquer forma' : 'Concluir'),
         ),
       ],
     ),
@@ -1562,8 +1562,8 @@ Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxT
   if (featuresOrHotfixes.isEmpty) {
     store.showBanner(
       folder.isLoose
-          ? 'os avulsos ainda não têm feature nem hotfix — crie pelo + da bandeja'
-          : 'essa pasta ainda não tem feature nem hotfix — crie pelo + da pasta',
+          ? 'Os avulsos ainda não têm feature nem hotfix — crie pelo + da bandeja'
+          : 'Essa pasta ainda não tem feature nem hotfix — crie pelo + da pasta',
     );
     return;
   }
@@ -1572,7 +1572,7 @@ Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxT
     context: context,
     builder: (ctx) => SimpleDialog(
       backgroundColor: Mx.bgSidebar,
-      title: Text('mover "${tab.title}" pra…', style: const TextStyle(fontSize: 15)),
+      title: Text('Mover "${tab.title}" pra…', style: const TextStyle(fontSize: 15)),
       children: [
         for (final p in featuresOrHotfixes)
           SimpleDialogOption(
@@ -1596,7 +1596,7 @@ Future<void> showMoveToFeatureOrHotfix(BuildContext context, AppStore store, MxT
               Icon(Icons.remove_circle_outline, size: 15, color: Mx.fgFaint),
               const SizedBox(width: 9),
               Text(
-                folder.isLoose ? 'nenhum — solto na bandeja' : 'nenhum — solto na pasta',
+                folder.isLoose ? 'Nenhum — solto na bandeja' : 'Nenhum — solto na pasta',
                 style: TextStyle(fontSize: 13, color: Mx.fgDim),
               ),
             ],
@@ -1656,7 +1656,7 @@ class _FilterSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (store.folders.isNotEmpty || loose.isNotEmpty) ...[
-            const _FilterLabel('onde'),
+            const _FilterLabel('Onde'),
             for (final f in store.folders) ...[
               _FilterRow(
                 label: f.name,
@@ -1736,7 +1736,7 @@ class _FilterSheet extends StatelessWidget {
                     Icon(Icons.filter_list_off_rounded, size: 14, color: Mx.fgDim),
                     const SizedBox(width: 8),
                     Text(
-                      'mostrar tudo de novo',
+                      'Mostrar tudo de novo',
                       style: TextStyle(fontSize: 12, color: Mx.fgDim),
                     ),
                   ],
@@ -1956,7 +1956,7 @@ class _ChatHistoryState extends State<_ChatHistory> {
 
     return AlertDialog(
       backgroundColor: Mx.bgSidebar,
-      title: const Text('todas as conversas', style: TextStyle(fontSize: 15)),
+      title: const Text('Todas as conversas', style: TextStyle(fontSize: 15)),
       content: SizedBox(
         width: width,
         child: FutureBuilder<List<ChatEntry>>(
@@ -1977,7 +1977,7 @@ class _ChatHistoryState extends State<_ChatHistory> {
             final chats = snap.data ?? const <ChatEntry>[];
             if (chats.isEmpty) {
               return Text(
-                'o claude não guardou nenhuma conversa ainda.',
+                'O Claude não guardou nenhuma conversa ainda.',
                 style: TextStyle(fontSize: 12, color: Mx.fgDim),
               );
             }
@@ -2006,11 +2006,11 @@ class _ChatHistoryState extends State<_ChatHistory> {
                       more: switch (section.folder) {
                         final folder? when _deep.containsKey(folder.root) => null,
                         final folder? when _loading.contains(folder.root) => (
-                          label: 'buscando…',
+                          label: 'Buscando…',
                           onTap: null,
                         ),
                         final folder? => (
-                          label: 'todas as conversas em ${folder.name}',
+                          label: 'Todas as conversas em ${folder.name}',
                           onTap: () => _deepen(folder),
                         ),
                         null => null,
@@ -2024,7 +2024,7 @@ class _ChatHistoryState extends State<_ChatHistory> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('fechar')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar')),
       ],
     );
   }
@@ -2175,7 +2175,7 @@ class _ChatRowState extends State<_ChatRow> {
     // [ChatStanding.gone] -- ela também não tem onde ser retomada --, mas por
     // outro motivo, e o aviso é o do motivo.
     final note = standing == ChatStanding.gone && chat.cwd.isEmpty
-        ? 'não sei onde ela rodou'
+        ? 'Não sei onde ela rodou'
         : standing.note;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -2262,7 +2262,7 @@ typedef LauncherDraft = ({String name, String command, LauncherIcon icon});
 /// Quem chama decide o que fazer em seguida -- o menu do + abre um painel com
 /// ele na hora, a tela de configurações só o acrescenta à lista.
 Future<Launcher?> showNewLauncher(BuildContext context, AppStore store) async {
-  final draft = await _launcherForm(context, title: 'novo programa');
+  final draft = await _launcherForm(context, title: 'Novo programa');
   if (draft == null) return null;
   return store.addLauncher(name: draft.name, command: draft.command, icon: draft.icon);
 }
@@ -2270,7 +2270,7 @@ Future<Launcher?> showNewLauncher(BuildContext context, AppStore store) async {
 /// O mesmo formulário sobre um programa que já existe. Vale na hora e em todo
 /// painel dele: ver [AppStore.editLauncher].
 Future<void> showEditLauncher(BuildContext context, AppStore store, Launcher launcher) async {
-  final draft = await _launcherForm(context, title: 'editar programa', initial: launcher);
+  final draft = await _launcherForm(context, title: 'Editar programa', initial: launcher);
   if (draft == null) return;
   store.editLauncher(
     launcher,
@@ -2350,12 +2350,12 @@ class _LauncherFormState extends State<_LauncherForm> {
               controller: _command,
               autofocus: true,
               style: TextStyle(fontSize: 13, fontFamily: Mx.mono),
-              decoration: _field('comando', 'btop, lazygit, npm run dev…'),
+              decoration: _field('Comando', 'Btop, lazygit, npm run dev…'),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 4),
             Text(
-              'roda no painel como você digitaria no terminal — e o painel '
+              'Roda no painel como você digitaria no terminal — e o painel '
               'abre já dentro dele, sem prompt no caminho.',
               style: TextStyle(color: Mx.fgFaint, fontSize: 11, height: 1.35),
             ),
@@ -2363,11 +2363,11 @@ class _LauncherFormState extends State<_LauncherForm> {
             TextField(
               controller: _name,
               style: const TextStyle(fontSize: 13),
-              decoration: _field('nome', 'como ele aparece no menu e na lateral'),
+              decoration: _field('Nome', 'Como ele aparece no menu e na lateral'),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 16),
-            Text('desenho', style: TextStyle(color: Mx.fgDim, fontSize: 12)),
+            Text('Desenho', style: TextStyle(color: Mx.fgDim, fontSize: 12)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
@@ -2385,8 +2385,8 @@ class _LauncherFormState extends State<_LauncherForm> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
-        FilledButton(onPressed: _submit, child: const Text('salvar')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(onPressed: _submit, child: const Text('Salvar')),
       ],
     );
   }
