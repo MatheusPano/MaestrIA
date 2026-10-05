@@ -628,11 +628,10 @@ extension ClaudeStatusUi on ClaudeStatus {
   /// em que um passo de fluxo pode sair.
   ///
   /// [ClaudeStatus.waitingInput] entra junto com [ClaudeStatus.idle] porque é
-  /// o mesmo lugar visto mais tarde: o aviso de ociosidade chega um minuto
-  /// depois do `Stop` e reescreve o estado por cima dele. Sem ele aqui, uma
-  /// fila que estivesse esperando os agentes da sessão terminar ficava presa
-  /// pra sempre -- o estado mudou embaixo dela enquanto ela esperava. As duas
-  /// esperas que ficam de fora são as que têm uma decisão sua no meio:
+  /// o mesmo lugar: a sessão está no prompt, só que com um recado pra você
+  /// (o `agent_needs_input` do Claude Code). O aviso de ociosidade, que chega
+  /// um minuto depois do `Stop`, já não muda o estado -- ver `HookReducer`.
+  /// As duas esperas que ficam de fora são as que têm uma decisão sua no meio:
   /// escrever no prompt de quem está pedindo permissão é responder por você.
   bool get atRest => this == ClaudeStatus.idle || this == ClaudeStatus.waitingInput;
 
