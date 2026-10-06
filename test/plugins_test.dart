@@ -983,15 +983,24 @@ void main() {
       store.dispose();
     });
 
-    testWidgets('sem plugin nenhum, a faixa fica, e o "+" do fim abre o instalar', (tester) async {
+    testWidgets('sem plugin nenhum, a faixa fica, e o "+" do fim abre o catálogo', (tester) async {
       final store = AppStore();
       expect(store.railPlugins, isEmpty);
 
       await tester.pumpWidget(host(store, () => SidebarRail(store: store)));
       expect(find.byIcon(Icons.space_dashboard_outlined), findsOneWidget);
 
+      // Sem pumpAndSettle: o catálogo gira enquanto baixa, e num teste a rede
+      // não responde.
       await tester.tap(find.byIcon(Icons.add));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Catálogo de plugins'), findsOneWidget);
+
+      // E de lá, o instalar de uma URL.
+      await tester.tap(find.text('De uma URL, .zip ou pasta…'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Instalar plugin'), findsWidgets);
       store.dispose();
     });

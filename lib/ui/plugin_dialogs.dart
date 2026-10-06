@@ -1,10 +1,13 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../services/notify.dart';
+import '../services/plugin_catalog.dart';
 import '../services/plugins.dart';
 import '../services/store.dart';
+import '../services/updater.dart' show compareVersions;
 import '../theme.dart';
 import 'panel.dart';
 
@@ -75,7 +78,7 @@ class _InstallState extends State<_Install> {
     if (staged == null || _busy) return;
     setState(() => _busy = true);
     try {
-      final plugin = await widget.store.installPlugin(staged);
+      final plugin = await widget.store.pluginUpdates.finish(staged);
       _staged = null;
       widget.store.showBanner(
         staged.replacing == null
@@ -177,6 +180,332 @@ class _InstallState extends State<_Install> {
       ],
     );
   }
+}
+
+/// O catálogo: os plugins que dá pra instalar com um clique, cada um com o que
+/// ele é e o que pede. Ver [PluginUpdates].
+///
+/// Quem instala escolhe um por um: os outros nem chegam ao disco. E o que
+/// entra por aqui recebe as versões novas de lá.
+Future<void> showPluginCatalog(BuildContext context, AppStore store) => showDialog<void>(
+  context: context,
+  builder: (ctx) => _Catalog(store: store),
+);
+
+class _Catalog extends StatefulWidget {
+  const _Catalog({required this.store});
+
+  final AppStore store;
+
+  @override
+  State<_Catalog> createState() => _CatalogState();
+}
+
+class _CatalogState extends State<_Catalog> {
+  static const _url = mxOfficialCatalog;
+
+  bool _loading = false;
+  String? _error;
+
+  /// O que deu errado com cada plugin, debaixo dele.
+  final Map<String, String> _failed = {};
+
+  /// Os que estão sendo baixados por este diálogo.
+  final Set<String> _busy = {};
+
+  AppStore get store => widget.store;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// Sempre do servidor: o que ficou na memória da última procura aparece
+  /// enquanto isso, mas pode ser de horas atrás.
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await store.pluginUpdates.load(_url);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Não deu pra ler o catálogo: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _install(CatalogEntry e) async {
+    setState(() {
+      _busy.add(e.id);
+      _failed.remove(e.id);
+    });
+    try {
+      final staged = await store.pluginUpdates.stageEntry(e, _url);
+      if (!mounted) {
+        await store.plugins.discard(staged);
+        return;
+      }
+      await confirmStagedPlugin(context, store, staged);
+    } catch (err) {
+      if (mounted) setState(() => _failed[e.id] = '$err');
+    } finally {
+      if (mounted) setState(() => _busy.remove(e.id));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final catalog = store.pluginUpdates.loaded(_url);
+        return AlertDialog(
+          backgroundColor: Mx.bgSidebar,
+          title: Row(
+            children: [
+              const Expanded(child: Text('Catálogo de plugins', style: TextStyle(fontSize: 15))),
+              if (_loading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          content: SizedBox(
+            width: 560,
+            height: 460,
+            child: catalog == null
+                ? Center(
+                    child: _error == null
+                        ? const SizedBox()
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 12, color: Mx.red, height: 1.4),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton(onPressed: _load, child: const Text('Tentar de novo')),
+                            ],
+                          ),
+                  )
+                : ListView(children: [for (final e in catalog.plugins) _entry(e)]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                showInstallPlugin(context, store);
+              },
+              child: const Text('De uma URL, .zip ou pasta…'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar')),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _entry(CatalogEntry e) {
+    final installed = store.plugins.byId(e.id);
+    final have = installed?.manifest?.version;
+    final line = TextStyle(fontSize: 11.5, color: Mx.fgDim, height: 1.4);
+    final perms = [for (final id in e.permissions) PluginPermission.byId(id)?.label ?? id];
+    final busy = _busy.contains(e.id) || store.pluginUpdates.busy.contains(e.id);
+
+    final Widget action;
+    if (busy) {
+      action = const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else if (installed?.linked == true) {
+      action = Text('Desenvolvimento', style: TextStyle(fontSize: 11.5, color: Mx.purple));
+    } else if (!e.fits) {
+      action = Text('Pede uma MaestrIA\nmais nova', textAlign: TextAlign.end, style: line);
+    } else if (have != null && compareVersions(e.version, have) <= 0) {
+      action = Text('Instalado', style: line);
+    } else {
+      action = FilledButton.tonal(
+        onPressed: () => _install(e),
+        child: Text(have == null ? 'Instalar' : 'Atualizar'),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: Mx.bg,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: Mx.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _CatalogGlyph(url: e.icon),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            e.name,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Mx.fg,
+                            ),
+                          ),
+                          Text(
+                            have != null && have != e.version ? '$have → ${e.version}' : e.version,
+                            style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                          ),
+                          if (e.git != null)
+                            Text('De fora', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (e.description.isNotEmpty)
+                        Text(
+                          e.description,
+                          style: line,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (perms.isNotEmpty)
+                        Text(
+                          'Pode ${perms.join('; ')}',
+                          style: line.copyWith(color: Mx.yellow),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (_failed[e.id] case final why?)
+                        Text(why, style: line.copyWith(color: Mx.red)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          action,
+        ],
+      ),
+    );
+  }
+}
+
+/// O ícone de um plugin do catálogo: o `.svg` dele, numa cor só como o
+/// `PluginGlyph` -- ou o genérico, enquanto não chega ou quando não há.
+class _CatalogGlyph extends StatelessWidget {
+  const _CatalogGlyph({this.url});
+
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Icon(Icons.extension_outlined, size: 17, color: Mx.fgDim);
+    final u = url;
+    if (u == null || !u.toLowerCase().endsWith('.svg')) return fallback;
+    return SvgPicture.network(
+      u,
+      width: 17,
+      height: 17,
+      colorFilter: ColorFilter.mode(Mx.fgDim, BlendMode.srcIn),
+      placeholderBuilder: (_) => fallback,
+      errorBuilder: (_, _, _) => fallback,
+      excludeFromSemantics: true,
+    );
+  }
+}
+
+/// O "confio" de um plugin já baixado: o que ele é e pede, e instalar. Desistir
+/// apaga o rascunho.
+Future<MxPlugin?> confirmStagedPlugin(
+  BuildContext context,
+  AppStore store,
+  StagedPlugin staged,
+) async {
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text(
+        staged.replacing == null
+            ? 'Instalar ${staged.manifest.name}?'
+            : 'Atualizar ${staged.manifest.name}?',
+        style: const TextStyle(fontSize: 15),
+      ),
+      content: SizedBox(
+        width: 480,
+        child: PluginTrust(manifest: staged.manifest, staged: staged),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(staged.replacing == null ? 'Confio, instalar' : 'Confio, atualizar'),
+        ),
+      ],
+    ),
+  );
+  if (go != true) {
+    await store.plugins.discard(staged);
+    return null;
+  }
+  final plugin = await store.pluginUpdates.finish(staged);
+  store.showBanner(_installedText(plugin, staged));
+  return plugin;
+}
+
+String _installedText(MxPlugin plugin, StagedPlugin staged) => staged.replacing == null
+    ? '${plugin.name} ${plugin.manifest?.version ?? ''} instalado'
+    : '${plugin.name} atualizado de ${staged.replacing} pra ${plugin.manifest?.version}';
+
+/// O "atualizar" pedido na tela: baixa a versão nova e instala. Pergunta antes
+/// quando ela pede mais do que a instalada pedia, ou quando vem de outro lugar
+/// -- passar a receber pelo catálogo é instalar um pacote de outra origem.
+Future<void> updatePlugin(BuildContext context, AppStore store, PluginUpdate u) async {
+  final StagedPlugin staged;
+  try {
+    staged = await store.pluginUpdates.prepare(u);
+  } catch (e) {
+    store.showBanner('Não deu pra baixar a ${u.to}: $e', sticky: true);
+    return;
+  }
+  final old = store.plugins.byId(u.id)?.manifest;
+  final switching = store.plugins.origins[u.id] != u.origin;
+  if (!switching && old != null && !PluginUpdates.asksMore(old, staged.manifest)) {
+    final plugin = await store.pluginUpdates.finish(staged);
+    store.showBanner(_installedText(plugin, staged));
+    return;
+  }
+  if (!context.mounted) {
+    await store.plugins.discard(staged);
+    return;
+  }
+  await confirmStagedPlugin(context, store, staged);
 }
 
 /// O que um plugin é e o que ele pede, do jeito que se lê antes de confiar.

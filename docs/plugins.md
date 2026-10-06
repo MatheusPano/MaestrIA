@@ -28,6 +28,10 @@ em `examples/plugins/`:
 
 Configurações → **plugins**:
 
+- **catálogo**: os plugins do repositório
+  [`maestria-plugins`](https://github.com/MatheusPano/maestria-plugins), um por
+  um — quem instala o Git não baixa o Flutter. O "+" no fim da faixa da lateral
+  abre o mesmo catálogo.
 - **instalar…**: aceita uma URL de git (`git clone --depth 1`), um `.zip` ou uma
   pasta. Antes de instalar, a tela mostra o que o plugin roda e as permissões
   que ele pede. Instalar de novo um id que já existe atualiza o plugin.
@@ -38,6 +42,58 @@ Configurações → **plugins**:
 Os plugins ficam em `~/.maestria/plugins/<id>/`, e o que cada um guarda fica em
 `~/.maestria/plugin-data/<id>/`. Quem você desliga é lembrado no config da
 janela, então atualizar um plugin não o liga de volta.
+
+### Versões novas
+
+Cada plugin lembra de onde veio, e é de lá que as versões novas vêm: do catálogo
+em que ele estava, ou do repositório de git de onde foi clonado (a MaestrIA
+olha o commit do ramo com `git ls-remote` e só clona quando ele andou). Um
+`.zip` ou uma pasta não têm de onde receber nada, e a pasta de desenvolvimento
+nunca é tocada. A procura roda uns segundos depois de abrir e a cada 6 horas, ou
+no **procurar agora**.
+
+Com **atualizar os plugins sozinho** ligado (o padrão), a versão nova entra sem
+perguntar, e o processo do plugin sobe de novo com ela. Duas exceções, que
+esperam o "atualizar" do menu do plugin:
+
+- a versão que pede mais do que a instalada pedia — uma permissão nova, ou um
+  programa onde só havia declarações. Ela mostra o "confio" da instalação, e
+  isso é conferido no manifesto que chegou, e não só no que o catálogo diz;
+- o plugin que você tirou da atualização sozinho no menu dele.
+
+Desligado, a linha do plugin mostra "1.9.0 disponível" e o menu tem o
+**atualizar**. Um plugin instalado de git (ou de um `.zip`) que aparece no
+catálogo ganha no menu o **receber pelo catálogo**: instala a versão de lá, e
+as próximas vêm de lá também.
+
+Pra uma versão sua chegar em quem instalou, suba o `version` do manifesto. No
+`maestria-plugins`, é isso que solta a release e refaz o catálogo; num
+repositório seu, é o que a MaestrIA compara depois de ver o commit novo.
+
+### O catálogo
+
+Um `catalog.json` com uma entrada por plugin: o que a tela mostra antes de
+baixar, e de onde baixar — um `.zip` com o sha256 dele (recusado se não
+conferir), ou um repositório de git que mora em outro lugar.
+
+```json
+{
+  "schema": 1,
+  "plugins": [
+    {
+      "id": "maestria.git", "name": "Git", "version": "1.2.1", "maestria": 1,
+      "description": "…", "author": "…", "permissions": ["sessions.create"],
+      "icon": "https://…/git.svg",
+      "url": "https://github.com/…/releases/download/git-v1.2.1/git-1.2.1.zip",
+      "sha256": "2f2c3c8f84…"
+    },
+    { "id": "com.lucas.foo", "version": "0.3.0", "git": "https://github.com/lucas/maestria-foo", "ref": "main" }
+  ]
+}
+```
+
+O `maestria-plugins` gera o dele sozinho; o README de lá diz como um plugin de
+outra pessoa entra.
 
 ## O manifesto
 
