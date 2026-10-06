@@ -44,6 +44,13 @@ O apt puxa o que falta. Depois é "maestria" no menu de aplicativos, ou
 `maestria` no terminal. Detalhes e as diferenças em relação ao Mac estão em
 [INSTALAR.md](https://github.com/MatheusPano/MaestrIA/blob/main/packaging/linux/INSTALAR.md).
 
+## Atualizações
+
+Daqui em diante o app se atualiza sozinho: quando sai versão nova, ele baixa em
+segundo plano e mostra o número dela na barra de baixo, ao lado do sino. No Mac
+ela entra quando você fecha o app; no Linux, quando você clica (o sistema pede a
+senha pra instalar o pacote). Nada reinicia sem você pedir.
+
 ## Primeiro uso
 
 Não vem com pasta nenhuma: **adicionar pasta** e aponte pra um repo git seu. As

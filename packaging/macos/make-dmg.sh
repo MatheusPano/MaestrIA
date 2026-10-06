@@ -25,8 +25,11 @@ if [ "${1:-}" != "--no-build" ]; then
   # `--no-tree-shake-icons`: o rfw monta `IconData` em tempo de execução (o ícone
   # que um plugin pede pelo número), e com isso o build não consegue enxugar a
   # fonte de ícones -- recusa em vez de sair sem os glifos. Vai a fonte inteira.
+  # `MAESTRIA_VERSION`: é por ela que o app sabe quem é e pergunta ao GitHub se
+  # há outra mais nova. Sem ela, a atualização fica desligada -- ver
+  # `lib/services/updater.dart`.
   echo "==> flutter build macos --release --no-tree-shake-icons"
-  flutter build macos --release --no-tree-shake-icons
+  flutter build macos --release --no-tree-shake-icons --dart-define=MAESTRIA_VERSION="$VERSION"
 fi
 
 test -d "$APP" || { echo "não achei $APP -- rode sem --no-build." >&2; exit 1; }

@@ -111,12 +111,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: anexos, merge-multiple: true }
 
+      # O SHA256SUMS é o que o app confere antes de se atualizar: release sem
+      # ele não é instalada -- ver `lib/services/updater.dart`.
+      #
       # `--clobber` porque o workflow_dispatch existe justamente pra reempacotar
       # uma tag já publicada: sem ele a segunda rodada morre no anexo repetido.
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          (cd anexos && sha256sum *.dmg *.deb > SHA256SUMS && cat SHA256SUMS)
           ls -lh anexos
           gh release view "$TAG" >/dev/null 2>&1 \
             && gh release upload "$TAG" anexos/* --clobber \

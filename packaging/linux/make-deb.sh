@@ -32,8 +32,10 @@ flutter pub get
 # `--no-tree-shake-icons`: o rfw monta `IconData` em tempo de execução (o ícone
 # que um plugin pede pelo número), e com isso o build não consegue enxugar a
 # fonte de ícones -- recusa em vez de sair sem os glifos. Vai a fonte inteira.
+# `MAESTRIA_VERSION`: a versão que a atualização compara com a do GitHub --
+# ver `lib/services/updater.dart`.
 echo "==> flutter build linux --release --no-tree-shake-icons"
-flutter build linux --release --no-tree-shake-icons
+flutter build linux --release --no-tree-shake-icons --dart-define=MAESTRIA_VERSION="$VERSION"
 
 BUNDLE=$(echo build/linux/*/release/bundle)
 test -x "$BUNDLE/maestria" || { echo "bundle não saiu em $BUNDLE"; exit 1; }

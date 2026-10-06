@@ -32,6 +32,7 @@ import 'setup.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
 import 'task_mcp.dart';
+import 'updater.dart';
 import 'workspace.dart';
 
 /// O que um painel é.
@@ -528,6 +529,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   final HookServer hooks = HookServer();
   final AgentsWatcher agents = AgentsWatcher();
+
+  /// A release nova do GitHub, baixada em segundo plano. Ver [Updater].
+  final Updater updater = Updater();
   final Notifier notifier = Notifier();
 
   /// Os plugins instalados. Ver `services/plugins.dart`.
@@ -968,6 +972,8 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     // pé pra ter o que mostrar.
     _syncSidebar(announce: true);
     agents.start();
+    updater.addListener(notifyListeners);
+    updater.start();
     Timer.periodic(const Duration(seconds: 1), (_) {
       // O relógio da fila: um passo só sai quando a sessão está parada há um
       // tempo, e "há um tempo" é uma condição que ninguém avisa -- ela chega
@@ -5185,6 +5191,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     _bannerTimer?.cancel();
     _revealTimer?.cancel();
     _clearToasts();
+    updater.dispose();
     floats.dispose();
     agents.stop();
     hooks.stop();
