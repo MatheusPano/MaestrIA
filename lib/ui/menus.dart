@@ -55,6 +55,45 @@ const double _rowHeight = 36;
 const double _tallRow = 48;
 const double _pad = 14;
 
+/// O recuo do realce de uma linha: ele acende como um cartão de canto redondo
+/// dentro do menu, igual às linhas da lateral, em vez de uma faixa de borda a
+/// borda. Sai de dentro do [_pad], então o nome não anda.
+const double _inset = 5;
+
+/// O contorno onde a tinta de uma linha de menu pinta.
+///
+/// O [InkWell] de um [PopupMenuItem] pinta no [Material] do menu, num
+/// retângulo da largura dele. Um [Material] transparente e recortado no meio
+/// do caminho vira o dono da tinta, e o recorte é o que dá o canto.
+Widget _menuInk(Widget child) => Padding(
+  padding: const EdgeInsets.symmetric(horizontal: _inset),
+  child: Material(
+    type: MaterialType.transparency,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    clipBehavior: Clip.antiAlias,
+    child: child,
+  ),
+);
+
+/// Um [PopupMenuItem] com o realce recuado. Ver [_menuInk].
+class _MxMenuItem<T> extends PopupMenuItem<T> {
+  const _MxMenuItem({
+    super.value,
+    super.enabled,
+    super.height,
+    super.padding,
+    required super.child,
+  });
+
+  @override
+  PopupMenuItemState<T, _MxMenuItem<T>> createState() => _MxMenuItemState<T>();
+}
+
+class _MxMenuItemState<T> extends PopupMenuItemState<T, _MxMenuItem<T>> {
+  @override
+  Widget build(BuildContext context) => _menuInk(super.build(context));
+}
+
 /// A calha do desenho, à esquerda do nome.
 ///
 /// Reservada mesmo na linha que não tem desenho: é ela que faz um menu de dez
@@ -114,10 +153,10 @@ PopupMenuItem<String> mxItem(
   Widget? trailing,
   String? chord,
   bool enabled = true,
-}) => PopupMenuItem(
+}) => _MxMenuItem(
   value: value,
   height: subtitle == null ? _rowHeight : _tallRow,
-  padding: const EdgeInsets.symmetric(horizontal: _pad),
+  padding: const EdgeInsets.symmetric(horizontal: _pad - _inset),
   enabled: enabled,
   child: MouseRegion(
     onEnter: (_) => _closeSubmenu(),
@@ -330,16 +369,18 @@ class _MxSubmenuItemState extends State<MxSubmenuItem> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => _openSubmenu(),
-      child: InkWell(
-        onTap: _openSubmenu,
-        child: Container(
-          height: widget.height,
-          padding: const EdgeInsets.symmetric(horizontal: _pad),
-          alignment: Alignment.centerLeft,
-          child: mxMenuRow(
-            label: widget.label,
-            glyph: widget.glyph,
-            trailing: Icon(Icons.chevron_right, size: 14, color: Mx.fgFaint),
+      child: _menuInk(
+        InkWell(
+          onTap: _openSubmenu,
+          child: Container(
+            height: widget.height,
+            padding: const EdgeInsets.symmetric(horizontal: _pad - _inset),
+            alignment: Alignment.centerLeft,
+            child: mxMenuRow(
+              label: widget.label,
+              glyph: widget.glyph,
+              trailing: Icon(Icons.chevron_right, size: 14, color: Mx.fgFaint),
+            ),
           ),
         ),
       ),
@@ -379,13 +420,15 @@ class _Submenu extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4, horizontal: _pad),
                   child: Divider(height: 1, thickness: 1, color: Mx.border),
                 ),
-              InkWell(
-                onTap: () => onPick(row.value),
-                child: Container(
-                  height: _rowHeight,
-                  padding: const EdgeInsets.symmetric(horizontal: _pad),
-                  alignment: Alignment.centerLeft,
-                  child: mxMenuRow(label: row.label, glyph: row.glyph, color: row.color),
+              _menuInk(
+                InkWell(
+                  onTap: () => onPick(row.value),
+                  child: Container(
+                    height: _rowHeight,
+                    padding: const EdgeInsets.symmetric(horizontal: _pad - _inset),
+                    alignment: Alignment.centerLeft,
+                    child: mxMenuRow(label: row.label, glyph: row.glyph, color: row.color),
+                  ),
                 ),
               ),
             ],

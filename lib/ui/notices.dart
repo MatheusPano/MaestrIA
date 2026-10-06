@@ -1010,9 +1010,18 @@ class _NoticeRowState extends State<_NoticeRow> {
             showSuggestion(context, widget.store, tab, suggestion);
           }
         },
+        // Na lista o realce é um cartão recuado de canto redondo, como as
+        // linhas da lateral; no cartão da tela ele já é o cartão inteiro, que
+        // corta a própria curva.
         child: Container(
-          color: _hover && !gone ? Mx.bgHover : Colors.transparent,
-          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+          margin: widget.toast ? null : const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          padding: widget.toast
+              ? const EdgeInsets.fromLTRB(12, 10, 6, 10)
+              : const EdgeInsets.fromLTRB(6, 7, 0, 7),
+          decoration: BoxDecoration(
+            color: _hover && !gone ? Mx.bgHover : Colors.transparent,
+            borderRadius: widget.toast ? null : BorderRadius.circular(7),
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

@@ -747,7 +747,7 @@ class _FolderGroup extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(top: 6),
             child: _Hoverable(
-              builder: (hovered) => InkWell(
+              builder: (hovered) => MxHover(
                 onTap: () => store.toggleFolderCollapsed(folder, within: within),
                 // The whole header is the target the worktrees hang off now, not
                 // just the ⋯ at the end of it.
@@ -760,8 +760,10 @@ class _FolderGroup extends StatelessWidget {
                       d.globalPosition,
                       within: within,
                     ),
+                // O chevron fica onde estava: o recuo do cartão sai do respiro
+                // da esquerda.
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  padding: const EdgeInsets.fromLTRB(3, 8, 3, 8),
                   child: Row(
                     children: [
                       Icon(
@@ -1366,37 +1368,41 @@ class _GroupTray extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Hoverable(
-          builder: (hovered) => InkWell(
-            // A régua inteira dobra e desdobra, como o cabeçalho de uma pasta.
-            onTap: store.toggleGroupsCollapsed,
-            child: Padding(
-              // O galho ocupa a calha à esquerda pra palavra continuar onde
-              // ela estava -- alinhada com "avulsos", que é a outra régua.
-              padding: const EdgeInsets.only(left: 4, right: 8, top: 4),
-              child: Row(
-                children: [
-                  Icon(
-                    collapsed ? Icons.chevron_right : Icons.expand_more,
-                    size: 14,
-                    color: Mx.fgFaint,
-                  ),
-                  Text(
-                    'Grupos',
-                    style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(child: Container(height: 1, color: Mx.border)),
-                  // Quantos são -- e dobrada, é o que a régua tem pra dizer
-                  // sobre o que ela está escondendo.
-                  const SizedBox(width: 8),
-                  Text('${store.groups.length}', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
-                  const SizedBox(width: 6),
-                  _ClearButton(
-                    tooltip: 'Esquecer todos os grupos',
-                    shown: hovered,
-                    onTap: () => confirmClearGroups(context, store),
-                  ),
-                ],
+          builder: (hovered) => Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: MxHover(
+              // A régua inteira dobra e desdobra, como o cabeçalho de uma pasta.
+              onTap: store.toggleGroupsCollapsed,
+              margin: const EdgeInsets.only(left: 2, right: 7),
+              child: Padding(
+                // O galho ocupa a calha à esquerda pra palavra continuar onde
+                // ela estava -- alinhada com "avulsos", que é a outra régua.
+                padding: const EdgeInsets.only(left: 2, right: 1),
+                child: Row(
+                  children: [
+                    Icon(
+                      collapsed ? Icons.chevron_right : Icons.expand_more,
+                      size: 14,
+                      color: Mx.fgFaint,
+                    ),
+                    Text(
+                      'Grupos',
+                      style: TextStyle(fontSize: 10.5, color: Mx.fgFaint, letterSpacing: 0.5),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(child: Container(height: 1, color: Mx.border)),
+                    // Quantos são -- e dobrada, é o que a régua tem pra dizer
+                    // sobre o que ela está escondendo.
+                    const SizedBox(width: 8),
+                    Text('${store.groups.length}', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+                    const SizedBox(width: 6),
+                    _ClearButton(
+                      tooltip: 'Esquecer todos os grupos',
+                      shown: hovered,
+                      onTap: () => confirmClearGroups(context, store),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1562,12 +1568,15 @@ class _FeatureOrHotfixGroup extends StatelessWidget {
           store: store,
           featureOrHotfix: featureOrHotfix,
           child: _Hoverable(
-            builder: (hovered) => InkWell(
+            builder: (hovered) => MxHover(
               onTap: () => store.toggleFeatureOrHotfixCollapsed(featureOrHotfix),
               onSecondaryTapDown: (d) =>
                   showFeatureOrHotfixMenu(context, store, folder, featureOrHotfix, d.globalPosition),
+              // Recuo menor que o das linhas: o chevron do projeto já mora
+              // perto da trilha, e o cartão não pode empurrá-lo.
+              margin: const EdgeInsets.symmetric(horizontal: 4),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(7, 8, 4, 8),
+                padding: const EdgeInsets.fromLTRB(3, 8, 3, 8),
                 child: Row(
                   children: [
                     Icon(
@@ -2757,10 +2766,14 @@ class _RowState extends State<_Row> {
         onSecondaryTapDown: widget.onSecondary == null
             ? null
             : (d) => widget.onSecondary!(d.globalPosition),
-        child: InkWell(
+        // A margem fica fora da tinta: com ela dentro do InkWell, o hover do
+        // Material pintava um retângulo da largura da lateral por trás do
+        // cartão, vazando em volta da curva. O fundo aceso é o do cartão.
+        child: MxHover(
           onTap: widget.onTap,
+          margin: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          hoverColor: Colors.transparent,
           child: Container(
-            margin: const EdgeInsets.only(left: 7, right: 7, top: 3, bottom: 3),
             padding: const EdgeInsets.fromLTRB(11, 11, 9, 11),
             decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(9)),
             child: Row(
