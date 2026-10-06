@@ -926,6 +926,7 @@ class _CapState extends State<_Cap> {
                   child: _hover && widget.onRemove != null
                       ? InkWell(
                           onTap: widget.onRemove,
+                          borderRadius: BorderRadius.circular(4),
                           child: Icon(Icons.close, size: 12, color: Mx.fgFaint),
                         )
                       : const SizedBox.shrink(),

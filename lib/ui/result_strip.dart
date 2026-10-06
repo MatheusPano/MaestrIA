@@ -166,8 +166,12 @@ class _FileRowState extends State<_FileRow> {
       child: GestureDetector(
         onTap: _open,
         child: Container(
-          color: _hover ? Mx.bgHover : Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          margin: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: _hover ? Mx.bgHover : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
           child: Row(
             children: [
               Icon(

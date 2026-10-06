@@ -177,3 +177,49 @@ class PanePinButton extends StatelessWidget {
     );
   }
 }
+
+/// O realce de hover da janela: um cartão recuado de canto redondo.
+///
+/// Um [InkWell] cru pinta o hover num retângulo do tamanho dele, de borda a
+/// borda do que o contém -- e onde a linha já desenha o próprio cartão por
+/// dentro, o retângulo vazava pelas margens em volta da curva. Aqui a margem
+/// fica fora da tinta e o canto é o mesmo das linhas de sessão, então tudo que
+/// acende sob o mouse acende no mesmo desenho.
+class MxHover extends StatelessWidget {
+  const MxHover({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.onSecondaryTapDown,
+    this.onHover,
+    this.margin = const EdgeInsets.symmetric(horizontal: 7),
+    this.radius = 9,
+    this.hoverColor,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+  final GestureTapDownCallback? onSecondaryTapDown;
+  final ValueChanged<bool>? onHover;
+
+  /// O ar entre a borda do que contém a linha e o cartão aceso.
+  final EdgeInsetsGeometry margin;
+  final double radius;
+
+  /// [Mx.bgHover] quando nulo. [Colors.transparent] pra linha que já pinta o
+  /// próprio fundo aceso e só quer o clique e a onda no mesmo contorno.
+  final Color? hoverColor;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: margin,
+    child: InkWell(
+      onTap: onTap,
+      onSecondaryTapDown: onSecondaryTapDown,
+      onHover: onHover,
+      borderRadius: BorderRadius.circular(radius),
+      hoverColor: hoverColor ?? Mx.bgHover,
+      child: child,
+    ),
+  );
+}

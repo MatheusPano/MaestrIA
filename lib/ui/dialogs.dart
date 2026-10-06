@@ -21,6 +21,7 @@ import 'claude_mark.dart';
 import 'confetti.dart';
 import 'flow.dart';
 import 'menus.dart';
+import 'panel.dart';
 
 InputDecoration _field(String label, [String? hint]) => InputDecoration(
   labelText: label,
@@ -1743,13 +1744,15 @@ class _FilterSheet extends StatelessWidget {
           ],
           if (store.filtering) ...[
             Container(height: 1, margin: const EdgeInsets.symmetric(vertical: 5), color: Mx.border),
-            InkWell(
+            MxHover(
               onTap: () {
                 store.clearSearch();
                 Navigator.pop(context);
               },
+              margin: const EdgeInsets.fromLTRB(5, 0, 5, 3),
+              radius: 6,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                padding: const EdgeInsets.fromLTRB(7, 8, 7, 7),
                 child: Row(
                   children: [
                     Icon(Icons.filter_list_off_rounded, size: 14, color: Mx.fgDim),
@@ -1822,8 +1825,12 @@ class _FilterRowState extends State<_FilterRow> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: Container(
-          color: _hover ? Mx.bgHover : Colors.transparent,
-          padding: EdgeInsets.fromLTRB(10 + widget.indent, 6, 12, 6),
+          margin: const EdgeInsets.symmetric(horizontal: 5),
+          padding: EdgeInsets.fromLTRB(5 + widget.indent, 6, 7, 6),
+          decoration: BoxDecoration(
+            color: _hover ? Mx.bgHover : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
           child: Row(
             children: [
               Icon(
@@ -2141,13 +2148,14 @@ class _MoreChats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return MxHover(
       onTap: onTap,
-      hoverColor: Mx.bgHover,
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      radius: 7,
       child: Padding(
         // A calha da esquerda é a das linhas de conversa, pro glifo cair na
         // mesma coluna das marcas do claude que ele continua.
-        padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+        padding: const EdgeInsets.fromLTRB(4, 7, 6, 7),
         child: Row(
           children: [
             Icon(
@@ -2203,8 +2211,12 @@ class _ChatRowState extends State<_ChatRow> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: Container(
-          color: _hover ? Mx.bgHover : Colors.transparent,
-          padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+          margin: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.fromLTRB(4, 7, 6, 7),
+          decoration: BoxDecoration(
+            color: _hover ? Mx.bgHover : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

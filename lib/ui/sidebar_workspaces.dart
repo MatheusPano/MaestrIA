@@ -36,12 +36,12 @@ class _WorkspaceSection extends StatelessWidget {
           // ele junto e a linha aparecia descentrada no realce.
           child: Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: InkWell(
+            child: MxHover(
               onTap: () => store.toggleWorkspaceCollapsed(workspace),
               onSecondaryTapDown: (d) =>
                   showWorkspaceMenu(context, store, workspace, d.globalPosition),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                padding: const EdgeInsets.fromLTRB(3, 8, 3, 8),
                 child: Row(
                   children: [
                     Icon(

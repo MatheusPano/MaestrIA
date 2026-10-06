@@ -6,6 +6,7 @@ import '../services/notify.dart';
 import '../services/plugins.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'panel.dart';
 
 /// Instalar um plugin, em dois passos: de onde, e se você confia nele.
 ///
@@ -467,13 +468,17 @@ class _QuickPickState extends State<_QuickPick> {
                       itemBuilder: (context, i) {
                         final it = shown[i];
                         final lit = i == _at;
-                        return InkWell(
+                        // O aceso é o da linha (`_at`), que o teclado também
+                        // move; a tinta só acompanha o mesmo contorno.
+                        return MxHover(
                           onTap: () => Navigator.pop(context, it.value),
                           onHover: (h) {
                             if (h && _at != i) setState(() => _at = i);
                           },
+                          margin: const EdgeInsets.symmetric(horizontal: 6),
+                          radius: 6,
+                          hoverColor: Colors.transparent,
                           child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                             decoration: BoxDecoration(
                               color: lit ? Mx.bgActive : null,
