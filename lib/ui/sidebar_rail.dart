@@ -21,7 +21,7 @@ import 'plugin_pane.dart';
 /// lateral escondida, que é quando ela também serve de caminho de volta.
 ///
 /// Aparece sempre, mesmo sem plugin nenhum: no fim dela há um "+" apagado que
-/// abre o [showInstallPlugin]. Sem ele, a faixa de quem não instalou nada seria
+/// abre o [showPluginCatalog]. Sem ele, a faixa de quem não instalou nada seria
 /// um ícone solitário das sessões, uma coluna que não troca nada.
 class SidebarRail extends StatelessWidget {
   const SidebarRail({super.key, required this.store});
@@ -93,7 +93,7 @@ class SidebarRail extends StatelessWidget {
               selected: false,
               faint: true,
               tooltip: 'Instalar plugin',
-              onTap: () => showInstallPlugin(context, store),
+              onTap: () => showPluginCatalog(context, store),
               builder: (color) => Icon(Icons.add, size: 16, color: color),
             ),
           ],

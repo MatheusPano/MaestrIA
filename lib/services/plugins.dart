@@ -844,6 +844,44 @@ class PluginConnection {
   }
 }
 
+/// De onde um plugin instalado veio -- e, por isso, de onde vêm as versões
+/// novas dele. Ver `PluginUpdates`.
+///
+/// Só dois lugares têm versão nova pra dar: um catálogo (o `catalog.json` de
+/// um repositório de plugins) e um repositório de git. Um `.zip` ou uma pasta
+/// do disco não têm origem: são uma foto, e quem os instalou atualiza na mão.
+class PluginOrigin {
+  const PluginOrigin.catalog(String this.catalog) : git = null, ref = null;
+  const PluginOrigin.git(String this.git, {this.ref}) : catalog = null;
+
+  /// A URL do `catalog.json`.
+  final String? catalog;
+
+  /// A URL do repositório, e o ramo quando não é o padrão dele.
+  final String? git;
+  final String? ref;
+
+  static PluginOrigin? fromJson(Object? j) {
+    if (j is! Map) return null;
+    if (j['catalog'] case final String url) return PluginOrigin.catalog(url);
+    if (j['git'] case final String url) return PluginOrigin.git(url, ref: j['ref'] as String?);
+    return null;
+  }
+
+  Map<String, dynamic> toJson() => {
+    if (catalog != null) 'catalog': catalog,
+    if (git != null) 'git': git,
+    if (ref != null) 'ref': ref,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is PluginOrigin && other.catalog == catalog && other.git == git && other.ref == ref;
+
+  @override
+  int get hashCode => Object.hash(catalog, git, ref);
+}
+
 /// Um plugin baixado e lido, esperando o "instalar" de quem vai confiar nele.
 ///
 /// Separado da instalação de propósito: é entre um e outro que a tela mostra
@@ -855,6 +893,7 @@ class StagedPlugin {
     required this.dir,
     required this.manifest,
     required this.source,
+    this.origin,
     this.replacing,
   });
 
@@ -866,6 +905,10 @@ class StagedPlugin {
   final String dir;
   final PluginManifest manifest;
   final String source;
+
+  /// De onde as próximas versões vão vir, depois de instalado. Null pra um
+  /// `.zip` ou uma pasta.
+  final PluginOrigin? origin;
 
   /// A versão já instalada com o mesmo id, quando há uma: instalar é
   /// atualizar.
@@ -995,11 +1038,36 @@ class Plugins extends ChangeNotifier {
   /// versão nova do plugin tem que chegar em quem nunca mexeu.
   final Map<String, Map<String, Object?>> _settings = {};
 
+  /// De onde cada plugin instalado veio, por id. Ver [PluginOrigin].
+  final Map<String, PluginOrigin> origins = {};
+
+  /// O interruptor das configurações: as versões novas entram sozinhas, ou
+  /// esperam o seu "atualizar". Ligado por padrão -- é um plugin que você já
+  /// confiou, e a versão que pede mais do que ele pedia pergunta de qualquer
+  /// jeito (ver `PluginUpdates`).
+  bool autoUpdate = true;
+
+  /// Os que você quer atualizar só na mão, mesmo com [autoUpdate] ligado.
+  final Set<String> manualUpdate = {};
+
   void load(Object? json) {
     disabled.clear();
     _settings.clear();
+    origins.clear();
+    manualUpdate.clear();
+    autoUpdate = !(json is Map && json['autoUpdate'] == false);
     if (json is Map && json['disabled'] is List) {
       disabled.addAll((json['disabled'] as List).whereType<String>());
+    }
+    if (json is Map && json['manualUpdate'] is List) {
+      manualUpdate.addAll((json['manualUpdate'] as List).whereType<String>());
+    }
+    if (json is Map && json['origins'] is Map) {
+      for (final e in (json['origins'] as Map).entries) {
+        if (PluginOrigin.fromJson(e.value) case final o? when e.key is String) {
+          origins[e.key as String] = o;
+        }
+      }
     }
     if (json is Map && json['settings'] is Map) {
       for (final e in (json['settings'] as Map).entries) {
@@ -1012,6 +1080,10 @@ class Plugins extends ChangeNotifier {
 
   Map<String, dynamic> toJson() => {
     if (disabled.isNotEmpty) 'disabled': disabled.toList()..sort(),
+    if (!autoUpdate) 'autoUpdate': false,
+    if (manualUpdate.isNotEmpty) 'manualUpdate': manualUpdate.toList()..sort(),
+    if (origins.isNotEmpty)
+      'origins': {for (final id in origins.keys.sorted()) id: origins[id]!.toJson()},
     if (_settings.values.any((m) => m.isNotEmpty))
       'settings': {
         for (final e in _settings.entries)
@@ -1399,8 +1471,9 @@ class Plugins extends ChangeNotifier {
   /// Baixa (ou copia) [source] pra uma pasta de rascunho e lê o manifesto.
   ///
   /// [source] é uma URL de git, um `.zip` ou uma pasta no disco. Nada é
-  /// instalado aqui -- ver [StagedPlugin].
-  Future<StagedPlugin> stage(String source) async {
+  /// instalado aqui -- ver [StagedPlugin]. Uma URL de git vira a [origin] do
+  /// plugin; quem baixa de um catálogo passa a dele.
+  Future<StagedPlugin> stage(String source, {PluginOrigin? origin, String? ref}) async {
     final src = expandHome(source.trim()).replaceFirst(RegExp(r'/+$'), '');
     if (src.isEmpty) throw const PluginInstallError('Diga de onde instalar');
     final base = Directory('$root/.staging');
@@ -1410,7 +1483,8 @@ class Plugins extends ChangeNotifier {
     try {
       final ShResult r;
       if (_isGit(src)) {
-        r = await Sh.run('git clone --depth 1 ${Sh.q(src)} ${Sh.q(into)}');
+        final branch = ref == null ? '' : '--branch ${Sh.q(ref)} ';
+        r = await Sh.run('git clone --depth 1 $branch${Sh.q(src)} ${Sh.q(into)}');
       } else if (src.toLowerCase().endsWith('.zip') && File(src).existsSync()) {
         r = Platform.isMacOS
             ? await Sh.run('ditto -x -k ${Sh.q(src)} ${Sh.q(into)}')
@@ -1439,6 +1513,7 @@ class Plugins extends ChangeNotifier {
         dir: dir,
         manifest: manifest,
         source: source.trim(),
+        origin: origin ?? (_isGit(src) ? PluginOrigin.git(src, ref: ref) : null),
         replacing: byId(manifest.id)?.manifest?.version,
       );
     } catch (_) {
@@ -1471,6 +1546,13 @@ class Plugins extends ChangeNotifier {
     } finally {
       await _rm(staged.staging);
     }
+    // A origem é a da instalação mais recente: quem troca um plugin do
+    // catálogo por um .zip escolheu deixar de recebê-lo de lá.
+    if (staged.origin case final o?) {
+      origins[id] = o;
+    } else {
+      origins.remove(id);
+    }
     scan();
     final plugin = byId(id)!;
     plugin.note('instalado de ${staged.source}');
@@ -1498,6 +1580,7 @@ class Plugins extends ChangeNotifier {
     }
     await Directory(root).create(recursive: true);
     await Link('$root/${manifest.id}').create(Directory(src).absolute.path);
+    origins.remove(manifest.id);
     scan();
     final plugin = byId(manifest.id)!;
     plugin.note('carregado de $src (desenvolvimento)');
@@ -1510,6 +1593,8 @@ class Plugins extends ChangeNotifier {
     await _remove(p);
     await _rm(p.dataDir);
     disabled.remove(p.id);
+    origins.remove(p.id);
+    manualUpdate.remove(p.id);
     scan();
   }
 

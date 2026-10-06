@@ -8,6 +8,7 @@ import '../models.dart';
 // Ver o cabeçalho de `services/dictation.dart`.
 // import '../services/dictation.dart';
 import '../services/notify.dart';
+import '../services/plugin_catalog.dart';
 import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
@@ -1296,6 +1297,11 @@ class _Plugins extends StatelessWidget {
           runSpacing: 4,
           children: [
             TextButton.icon(
+              icon: const Icon(Icons.storefront_outlined, size: 15),
+              label: const Text('Catálogo'),
+              onPressed: () => showPluginCatalog(context, store),
+            ),
+            TextButton.icon(
               icon: const Icon(Icons.add, size: 15),
               label: const Text('Instalar…'),
               onPressed: () => showInstallPlugin(context, store),
@@ -1318,6 +1324,7 @@ class _Plugins extends StatelessWidget {
             ),
           ],
         ),
+        _AutoUpdate(store: store),
         const SizedBox(height: 10),
         if (plugins.all.isEmpty)
           Container(
@@ -1349,6 +1356,57 @@ class _Plugins extends StatelessWidget {
           label: const Text('Escrevendo um plugin? Carregar pasta de desenvolvimento…'),
           onPressed: () => linkDevPlugin(store),
         ),
+      ],
+    );
+  }
+}
+
+/// O interruptor de atualizar os plugins sozinho, e quando se procurou.
+class _AutoUpdate extends StatelessWidget {
+  const _AutoUpdate({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final updates = store.pluginUpdates;
+    final at = updates.checkedAt;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final status = updates.checking
+        ? 'Procurando…'
+        : at == null
+        ? null
+        : 'Procurado às ${two(at.hour)}:${two(at.minute)}';
+    final faint = TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SwitchListTile(
+          value: store.plugins.autoUpdate,
+          onChanged: store.setPluginAutoUpdate,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            'Atualizar os plugins sozinho',
+            style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          ),
+          subtitle: Text(
+            'Os que vieram do catálogo ou de um repositório de git ganham as '
+            'versões novas sem perguntar. A que pede uma permissão nova espera o '
+            'seu "confio". Dá pra deixar um plugin de fora no menu dele.',
+            style: faint,
+          ),
+        ),
+        Row(
+          children: [
+            if (status != null) Text(status, style: faint),
+            TextButton(
+              onPressed: updates.checking ? null : updates.check,
+              child: const Text('Procurar agora'),
+            ),
+          ],
+        ),
+        if (updates.error case final why?) Text(why, style: faint.copyWith(color: Mx.red)),
       ],
     );
   }
@@ -1386,6 +1444,15 @@ class _PluginRowState extends State<_PluginRow> {
         ),
       if (plugin.palettes.isNotEmpty)
         ('Temas: ${plugin.palettes.map((p) => p.label).join(', ')} — em aparência', 0),
+      if (store.plugins.origins[plugin.id] case final o?)
+        (
+          'Vem ${switch (o) {
+            PluginOrigin(catalog: mxOfficialCatalog) => 'do catálogo oficial',
+            PluginOrigin(catalog: final url?) => 'do catálogo $url',
+            PluginOrigin(git: final url, ref: final ref) => 'de $url${ref == null ? '' : ' ($ref)'}',
+          }}',
+          0,
+        ),
     ];
     if (parts.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(
@@ -1454,6 +1521,10 @@ class _PluginRowState extends State<_PluginRow> {
   Future<void> _menu(BuildContext context, PluginManifest? m) async {
     final box = context.findRenderObject() as RenderBox?;
     Icon glyph(IconData icon, [Color? color]) => Icon(icon, size: 14, color: color ?? Mx.fgDim);
+    final updates = store.pluginUpdates;
+    final update = updates.available[plugin.id];
+    final offer = updates.offers[plugin.id];
+    final manual = store.plugins.manualUpdate.contains(plugin.id);
     final choice = await mxMenu<String>(
       context,
       at: box == null ? Offset.zero : box.localToGlobal(box.size.bottomLeft(Offset.zero)),
@@ -1477,6 +1548,30 @@ class _PluginRowState extends State<_PluginRow> {
             },
             subtitleColor: Mx.yellow,
           ),
+        if (update != null && !updates.busy.contains(plugin.id))
+          mxItem(
+            'update',
+            glyph: glyph(Icons.system_update_alt, Mx.purple),
+            label: 'Atualizar pra ${update.to}',
+            subtitle: update.asksMore ? 'Pede mais do que a ${update.from} pedia' : null,
+            subtitleColor: Mx.yellow,
+          ),
+        if (offer != null && !updates.busy.contains(plugin.id))
+          mxItem(
+            'adopt',
+            glyph: glyph(Icons.storefront_outlined),
+            label: 'Receber pelo catálogo',
+            subtitle: offer.newer
+                ? 'Instala a ${offer.to} de lá'
+                : 'A mesma ${offer.to}, e as próximas de lá',
+          ),
+        if (store.plugins.origins.containsKey(plugin.id))
+          mxItem(
+            'auto',
+            glyph: glyph(manual ? Icons.check_box_outline_blank : Icons.check_box_outlined),
+            label: 'Atualizar sozinho',
+            subtitle: store.plugins.autoUpdate ? null : 'Desligado pra todos, acima',
+          ),
         mxItem('log', glyph: glyph(Icons.receipt_long_outlined), label: 'Log'),
         mxItem('reveal', glyph: glyph(Icons.folder_open_outlined), label: 'Mostrar no Finder'),
         mxDivider(),
@@ -1494,6 +1589,12 @@ class _PluginRowState extends State<_PluginRow> {
         store.plugins.restart(plugin);
       case 'settings':
         showPluginSettings(context, store, plugin);
+      case 'update':
+        updatePlugin(context, store, update!);
+      case 'adopt':
+        updatePlugin(context, store, offer!);
+      case 'auto':
+        store.setPluginManualUpdate(plugin, !manual);
       case 'log':
         showPluginLog(context, store, plugin);
       case 'reveal':
@@ -1549,6 +1650,13 @@ class _PluginRowState extends State<_PluginRow> {
                           Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
                           if (plugin.linked)
                             Text('Desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
+                          if (store.pluginUpdates.busy.contains(plugin.id))
+                            Text('Atualizando…', style: TextStyle(fontSize: 11, color: Mx.purple))
+                          else if (store.pluginUpdates.available[plugin.id] case final u?)
+                            Text(
+                              u.asksMore ? '${u.to} pede permissão nova' : '${u.to} disponível',
+                              style: TextStyle(fontSize: 11, color: u.asksMore ? Mx.yellow : Mx.purple),
+                            ),
                         ],
                       ),
                     ),
