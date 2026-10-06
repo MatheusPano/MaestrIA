@@ -8,6 +8,7 @@ import '../theme.dart';
 import 'claude_mark.dart';
 import 'sidebar_rail.dart';
 import 'suggestions.dart';
+import 'update_chip.dart';
 
 /// O grupo de toque do sino: o botão e a lista contam como um lugar só, então
 /// clicar no botão com a lista aberta fecha pelo botão -- e não fecha pelo
@@ -55,6 +56,7 @@ class StatusBar extends StatelessWidget {
                 child: _SessionSummary(store: store),
               ),
             ),
+            UpdateChip(store: store),
             NoticeBell(store: store),
           ],
         ),

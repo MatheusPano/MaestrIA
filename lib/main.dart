@@ -62,6 +62,9 @@ class _MaestriaAppState extends State<MaestriaApp> {
 
   Future<AppExitResponse> _onExitRequested() async {
     await store.shutdown();
+    // Depois das sessões, e não antes: quem troca o app espera este processo
+    // sumir, e ele só some quando a última sessão foi desligada.
+    await store.updater.onQuit();
     return AppExitResponse.exit;
   }
 
