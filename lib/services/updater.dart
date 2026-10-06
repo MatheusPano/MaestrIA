@@ -135,6 +135,11 @@ class Updater extends ChangeNotifier {
 
   final String current;
 
+  /// O interruptor das configurações. Desligado por padrão: tem quem não
+  /// queira o app buscando e trocando versão sozinho, e quem quer liga uma vez.
+  /// Ver [setActive].
+  bool active = false;
+
   UpdateStage stage = UpdateStage.idle;
 
   /// A release baixada, quando [stage] é [UpdateStage.ready] ou depois.
@@ -181,10 +186,46 @@ class Updater extends ChangeNotifier {
   void start() {
     if (!enabled) return;
     _cleanup();
-    _timer = Timer(firstDelay, () {
+    if (active) _schedule(firstDelay);
+  }
+
+  void _schedule(Duration delay) {
+    _timer?.cancel();
+    _timer = Timer(delay, () {
       check();
       _timer = Timer.periodic(every, (_) => check());
     });
+  }
+
+  /// Liga ou desliga a atualização.
+  ///
+  /// Ligar já pergunta, sem esperar a primeira volta. Desligar descarta o que
+  /// estava baixado esperando: no Mac aquilo entraria na saída, e desligado
+  /// quer dizer que não entra. O que já foi instalado (Linux) fica -- foi
+  /// pedido num clique, antes.
+  void setActive(bool on) {
+    if (on == active) return;
+    active = on;
+    _timer?.cancel();
+    _timer = null;
+    if (!enabled) return;
+    if (on) {
+      _schedule(Duration.zero);
+    } else if (stage == UpdateStage.ready) {
+      _discard();
+    }
+    notifyListeners();
+  }
+
+  void _discard() {
+    _staged = null;
+    release = null;
+    _relaunch = false;
+    // Sem isto, religar ouviria um 304 da mesma release que acabou de ser
+    // jogada fora, e ela não voltaria a ser baixada.
+    _etag = null;
+    _set(UpdateStage.idle);
+    _cleanup();
   }
 
   @override
@@ -205,12 +246,14 @@ class Updater extends ChangeNotifier {
   /// atualização é uma conveniência, e um aviso de erro a cada seis horas no
   /// Wi-Fi do aeroporto não seria.
   Future<void> check() async {
-    if (!enabled || stage != UpdateStage.idle) return;
+    if (!enabled || !active || stage != UpdateStage.idle) return;
     try {
       final latest = await _latest();
       if (latest == null || compareVersions(latest.version, current) <= 0) return;
       _set(UpdateStage.fetching);
       _staged = await _fetch(latest);
+      // Desligada no meio do download: o que chegou não fica esperando.
+      if (!active) return _discard();
       release = latest;
       _set(UpdateStage.ready);
     } catch (e) {

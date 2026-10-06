@@ -25,6 +25,7 @@ import 'links.dart';
 import 'notify.dart';
 import 'paths.dart';
 import 'plugin_api.dart';
+import 'plugin_catalog.dart';
 import 'plugin_floats.dart';
 import 'plugins.dart';
 import 'pty.dart';
@@ -532,6 +533,10 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   /// A release nova do GitHub, baixada em segundo plano. Ver [Updater].
   final Updater updater = Updater();
+
+  /// O catálogo de plugins e as versões novas dos instalados. Ver
+  /// [PluginUpdates].
+  late final PluginUpdates pluginUpdates = PluginUpdates(plugins, install: installPlugin);
   final Notifier notifier = Notifier();
 
   /// Os plugins instalados. Ver `services/plugins.dart`.
@@ -974,6 +979,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     agents.start();
     updater.addListener(notifyListeners);
     updater.start();
+    pluginUpdates.addListener(notifyListeners);
+    // Num teste, ninguém quer a rede nem um timer pendurado.
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) pluginUpdates.start();
     Timer.periodic(const Duration(seconds: 1), (_) {
       // O relógio da fila: um passo só sai quando a sessão está parada há um
       // tempo, e "há um tempo" é uma condição que ninguém avisa -- ela chega
@@ -1100,6 +1108,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       floats.readJson(j['floats']);
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
+      updater.active = j['autoUpdate'] as bool? ?? false;
       // Antes do tema: um tema de plugin só existe depois que o plugin é
       // lido, e o id salvo cairia no padrão.
       plugins.load(j['plugins']);
@@ -1334,6 +1343,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
           if (floats.toJson() case final f when f.isNotEmpty) 'floats': f,
           if (groupsCollapsed) 'groupsCollapsed': true,
           if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
+          if (updater.active) 'autoUpdate': true,
           'theme': Mx.palette.id,
           if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
@@ -1497,6 +1507,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   void setStatusBarTop(bool top) {
     if (top == statusBarTop) return;
     statusBarTop = top;
+    _save();
+    notifyListeners();
+  }
+
+  /// O interruptor da atualização automática. Ver [Updater.setActive].
+  void setAutoUpdate(bool on) {
+    if (on == updater.active) return;
+    updater.setActive(on);
     _save();
     notifyListeners();
   }
@@ -3194,6 +3212,23 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// Uma configuração de plugin, trocada na tela e guardada no config.
   void setPluginSetting(MxPlugin plugin, String id, Object? value) {
     plugins.setSetting(plugin, id, value);
+    _save();
+    notifyListeners();
+  }
+
+  /// O interruptor de atualizar os plugins sozinho. Ligar já procura.
+  void setPluginAutoUpdate(bool on) {
+    if (on == plugins.autoUpdate) return;
+    plugins.autoUpdate = on;
+    _save();
+    notifyListeners();
+    if (on) unawaited(pluginUpdates.check());
+  }
+
+  /// Um plugin que só atualiza quando você pede, mesmo com o interruptor
+  /// ligado.
+  void setPluginManualUpdate(MxPlugin plugin, bool manual) {
+    manual ? plugins.manualUpdate.add(plugin.id) : plugins.manualUpdate.remove(plugin.id);
     _save();
     notifyListeners();
   }
@@ -5192,6 +5227,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     _revealTimer?.cancel();
     _clearToasts();
     updater.dispose();
+    pluginUpdates.dispose();
     floats.dispose();
     agents.stop();
     hooks.stop();
