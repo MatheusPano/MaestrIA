@@ -7,6 +7,7 @@ import 'package:xterm/xterm.dart';
 
 import 'links.dart';
 import 'shell.dart';
+import 'sticky_selection.dart';
 import 'vt.dart';
 
 /// One real terminal: a pty child wired to an xterm buffer.
@@ -20,6 +21,8 @@ class TermSession {
   TermSession({int scrollback = 8000})
     : terminal = VtTerminal(maxLines: scrollback, mouseHandler: _mouseWithoutWheel) {
     links = TermLinks(terminal);
+    // Vive pendurada nos dois, e não precisa de mais ninguém: ver [StickySelection].
+    StickySelection(terminal, controller);
   }
 
   final VtTerminal terminal;
@@ -220,6 +223,12 @@ class TermSession {
   /// A program that never asked for mouse reports gets an arrow key instead,
   /// which is what a terminal does for a pager in the alternate screen.
   void wheel({required bool up, required int col, required int row}) {
+    // DEBUG temporário -- remover.
+    try {
+      File('/private/tmp/claude-501/-Volumes-Dev-Mac-repos-Pessoal-maestria-v2/496a86f6-3762-4829-9abc-be86eae0b0ed/scratchpad/sticky.log')
+          .writeAsStringSync('${DateTime.now().toIso8601String()} wheel up=$up alt=${terminal.isUsingAltBuffer} '
+              'report=${terminal.mouseMode.reportScroll} sel=${controller.selection?.begin}\n', mode: FileMode.append);
+    } catch (_) {}
     if (!terminal.mouseMode.reportScroll) {
       terminal.keyInput(up ? TerminalKey.arrowUp : TerminalKey.arrowDown);
       return;

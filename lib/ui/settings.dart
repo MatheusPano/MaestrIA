@@ -32,6 +32,7 @@ enum MxSection {
   launchers('Programas', Icons.rocket_launch_outlined),
   plugins('Plugins', Icons.extension_outlined),
   sessions('Sessões', Icons.bedtime_outlined),
+  updates('Atualizações', Icons.system_update_alt_rounded),
   account('Conta & uso', Icons.speed_outlined);
   // --- ditado (vocalização) — fora desta versão -------------------------------
   // O microfone era mais uma seção aqui. Ver o cabeçalho de
@@ -129,6 +130,7 @@ class _SettingsState extends State<_Settings> {
                               MxSection.launchers => _Launchers(store: widget.store),
                               MxSection.plugins => _Plugins(store: widget.store),
                               MxSection.sessions => _Sessions(store: widget.store),
+                              MxSection.updates => _Updates(store: widget.store),
                               MxSection.account => const _Account(),
                               // --- ditado (vocalização) — fora desta versão ---
                               // MxSection.dictation => _Dictation(store: widget.store),
@@ -411,6 +413,53 @@ class _Sessions extends StatelessWidget {
             onMore: minutes < 24 * 60 ? () => store.setHibernateMinutes(_more(minutes)) : null,
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// A atualização automática pelas releases do GitHub. Ver [Updater].
+class _Updates extends StatelessWidget {
+  const _Updates({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = store.updater;
+    final when = u.installsOnQuit
+        ? 'Entra quando você fecha o app.'
+        : 'Instala quando você clica nele (o sistema pede a senha).';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Heading(
+          'Atualizações',
+          hint: u.current.isEmpty
+              ? 'Build de desenvolvimento: sem número de versão, não há com o '
+                    'que comparar a release publicada.'
+              : 'Esta é a ${u.current}.',
+        ),
+        SwitchListTile(
+          value: u.active,
+          // Fora de um app instalado pelo pacote da release, não há o que
+          // trocar: o interruptor fica, mas apagado.
+          onChanged: u.enabled ? store.setAutoUpdate : null,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            'Atualizar sozinho',
+            style: TextStyle(fontSize: 12.5, color: Mx.fg),
+          ),
+          subtitle: Text(
+            u.enabled
+                ? 'Quando sai versão nova, ela é baixada em segundo plano e o '
+                      'número aparece na barra de status. $when Nada reinicia '
+                      'sem você pedir.'
+                : 'Só vale pro app instalado pelo pacote da release.',
+            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
+          ),
+        ),
       ],
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/layout.dart';
+import 'package:maestria/services/pty.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/services/vt.dart';
 import 'package:maestria/ui/terminal_pane.dart';
@@ -48,6 +49,28 @@ Offset centerOf(WidgetTester tester, CellOffset cell) {
 
 /// O que está escrito na linha [y], sem o resto da fileira que ninguém pintou.
 String lineText(Terminal terminal, int y) => terminal.buffer.lines[y].toString().trimRight();
+
+/// Uma tela de claude: a tela alternativa, com [rows] fileiras de transcript
+/// pintadas uma a uma a partir de [first] — `msg 7`, `msg 8`, ... —, do jeito
+/// que um TUI redesenha: posiciona o cursor, escreve, apaga o resto.
+String frame(int first, {int rows = 20}) =>
+    [for (var y = 0; y < rows; y++) '\x1b[${y + 1};1Hmsg ${first + y} do transcript\x1b[K'].join();
+
+/// Seleciona do começo da fileira [row] até o fim de [to] (ou da própria). A
+/// fileira inteira: o branco que sobra no fim [selectedText] já deixa de fora.
+void select(TermSession term, int row, {int? to}) {
+  final buffer = term.terminal.buffer;
+  final last = to ?? row;
+  term.controller.setSelection(
+    buffer.createAnchor(0, row),
+    buffer.createAnchor(buffer.lines[last].length, last),
+  );
+}
+
+String? selected(TermSession term) {
+  final range = term.controller.selection;
+  return range == null ? null : selectedText(term.terminal, range);
+}
 
 void main() {
   group('arrastar o mouse', () {
@@ -99,6 +122,120 @@ void main() {
       expect(selection, isNotNull);
       expect(selection!.begin.y, row);
       expect(selectedText(terminal, selection), text);
+    });
+  });
+
+  group('rolar com texto selecionado na tela alternativa', () {
+    // O relato: "seleciono um texto e scrollo, e a seleção não fica naquele
+    // texto, ela acompanha a tela". Ver `services/sticky_selection.dart`.
+    testWidgets('a seleção acompanha o texto quando o programa redesenha', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0)}');
+      select(term, 5);
+      expect(selected(term), 'msg 5 do transcript');
+
+      // Três notches pra baixo: o claude pinta as mesmas fileiras, três
+      // mensagens adiante.
+      term.terminal.write(frame(3));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(selected(term), 'msg 5 do transcript');
+      expect(term.controller.selection!.begin.y, 2);
+
+      // E de volta pra cima, mais longe do que veio.
+      term.terminal.write(frame(-4));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(selected(term), 'msg 5 do transcript');
+      expect(term.controller.selection!.begin.y, 9);
+    });
+
+    // O que o log do app mostrou: o claude pula o cursor por cima de um
+    // espaço na primeira vez e o escreve na seguinte, e pro xterm a mesma
+    // frase vira outra.
+    testWidgets('um espaço pulado e um espaço escrito são o mesmo texto', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0)}');
+      term.terminal.write('\x1b[6;1H\x1b[2Kuma\x1b[6;5Hfrase\x1b[6;11Hcom\x1b[6;15Hburacos\x1b[K');
+      select(term, 5);
+
+      term.terminal.write(frame(3));
+      term.terminal.write('\x1b[3;1Huma frase com buracos\x1b[K');
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(term.controller.selection, isNotNull);
+      expect(term.controller.selection!.begin.y, 2);
+      expect(selected(term), 'uma frase com buracos');
+    });
+
+    testWidgets('várias fileiras andam juntas', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0)}');
+      select(term, 4, to: 6);
+      final before = selected(term);
+
+      term.terminal.write(frame(2));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(selected(term), before);
+      expect(term.controller.selection!.begin.y, 2);
+      expect(term.controller.selection!.end.y, 4);
+    });
+
+    testWidgets('e também quando ele rola com sequência de scroll', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0, rows: 24)}');
+      select(term, 10);
+
+      // `CSI 3 S`: o xterm move as linhas, e no caminho desanexa as âncoras.
+      term.terminal.write('\x1b[3S');
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(selected(term), 'msg 10 do transcript');
+      expect(term.controller.selection!.begin.y, 7);
+    });
+
+    testWidgets('um quadro que chega em dois pedaços não derruba a seleção', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0)}');
+      select(term, 12);
+
+      // O claude apaga a tela antes de repintar: no meio do caminho o texto
+      // selecionado não está em lugar nenhum.
+      final next = frame(3);
+      final half = next.indexOf('\x1b[6;1H');
+      term.terminal.write('\x1b[2J${next.substring(0, half)}');
+      await tester.pump(const Duration(milliseconds: 50));
+      term.terminal.write(next.substring(half));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(selected(term), 'msg 12 do transcript');
+      expect(term.controller.selection!.begin.y, 9);
+    });
+
+    testWidgets('o texto que saiu da tela leva a seleção com ele', (tester) async {
+      final term = TermSession();
+      term.terminal.write('\x1b[?1049h${frame(0)}');
+      select(term, 1);
+
+      term.terminal.write(frame(10));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(term.controller.selection, isNull);
+    });
+
+    testWidgets('na tela principal a seleção é do xterm, e fica onde está', (tester) async {
+      final term = TermSession();
+      for (var i = 0; i < 10; i++) {
+        term.terminal.write('linha $i\r\n');
+      }
+      select(term, 3);
+
+      term.terminal.write('\x1b[4;1Houtra coisa\x1b[K');
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(term.controller.selection, isNotNull);
+      expect(term.controller.selection!.begin.y, 3);
     });
   });
 }

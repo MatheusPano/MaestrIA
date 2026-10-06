@@ -1108,6 +1108,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       floats.readJson(j['floats']);
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
+      updater.active = j['autoUpdate'] as bool? ?? false;
       // Antes do tema: um tema de plugin só existe depois que o plugin é
       // lido, e o id salvo cairia no padrão.
       plugins.load(j['plugins']);
@@ -1342,6 +1343,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
           if (floats.toJson() case final f when f.isNotEmpty) 'floats': f,
           if (groupsCollapsed) 'groupsCollapsed': true,
           if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
+          if (updater.active) 'autoUpdate': true,
           'theme': Mx.palette.id,
           if (Mx.type.toJson() case final type when type.isNotEmpty) 'type': type,
           if (keymap.toJson() case final binds when binds.isNotEmpty) 'shortcuts': binds,
@@ -1505,6 +1507,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   void setStatusBarTop(bool top) {
     if (top == statusBarTop) return;
     statusBarTop = top;
+    _save();
+    notifyListeners();
+  }
+
+  /// O interruptor da atualização automática. Ver [Updater.setActive].
+  void setAutoUpdate(bool on) {
+    if (on == updater.active) return;
+    updater.setActive(on);
     _save();
     notifyListeners();
   }

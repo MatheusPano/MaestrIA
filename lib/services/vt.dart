@@ -67,9 +67,22 @@
 ///    and so does the shell's `clear`. [VtTerminal] puts every line back on
 ///    the row it is on.
 ///
+///  * **A scroll, and the lines that no longer know they are on screen.**
+///    `Buffer.scrollUp` moves the lines one by one with
+///    `lines[i] = lines[i + n]`, and writing to the list detaches whatever was
+///    there before (`_adoptChild`): so each assignment detaches the line the
+///    previous one has just moved. `scrollDown` and `deleteLines` do the same.
+///    The lines stay in the list and paint as usual, but every one of them
+///    believes it is gone — and an anchor on a detached line is no anchor at
+///    all, so a selection made there vanishes and an `OSC 8` link there is
+///    never found. It takes a scroll *inside* the screen to get there: `CSI S`
+///    and `CSI T`, a line feed under a `DECSTBM` region, or any line feed at
+///    the bottom of the alternate screen, which has no scrollback to push
+///    into. [VtTerminal] attaches them again.
+///
 /// None has a hook to override, so one is fixed on the stream, before the
 /// parser gets to see it, two on the terminal on the way out, one on the way
-/// in, one by putting the buffer back in order after the sequence that
+/// in, two by putting the buffer back in order after the sequence that
 /// disarranged it — and the last one by reading the buffer here instead of
 /// asking it.
 library;
@@ -131,6 +144,21 @@ class VtTerminal extends Terminal {
   void resize(int newWidth, int newHeight, [int? pixelWidth, int? pixelHeight]) {
     super.resize(newWidth, newHeight, pixelWidth, pixelHeight);
     _reseat();
+  }
+
+  /// Depois de cada pedaço, as linhas da tela que um scroll desanexou de volta
+  /// à lista — ver o sétimo item no topo.
+  ///
+  /// Só a tela: as margens de um scroll nunca passam dela, e o scrollback que
+  /// fica acima nenhum scroll toca. Uma volta curta, e quase sempre sem
+  /// nenhuma atribuição.
+  @override
+  void write(String data) {
+    super.write(data);
+    final lines = buffer.lines;
+    for (var i = lines.length - viewHeight; i < lines.length; i++) {
+      if (i >= 0 && !lines[i].attached) lines[i] = lines[i];
+    }
   }
 
   /// Cada linha de volta à fila em que ela de fato está.
