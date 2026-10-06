@@ -32,6 +32,51 @@ class MxKeys {
     // ver [Plugins.chordHits].
   };
 
+  /// Um evento contra [bindings], com a vez do campo de texto respeitada.
+  ///
+  /// No lugar de um [CallbackShortcuts], por dois motivos. Ele fica entre o
+  /// campo em foco e os atalhos de edição do Flutter (que moram lá em cima,
+  /// no app), então pegava a tecla primeiro: ⌘⌫ na busca da lateral, que é
+  /// "apagar até o começo da linha", fechava o painel em foco e matava a
+  /// sessão dele. E ele roda *todo* binding que casa, de modo que um ⌘1
+  /// dado a uma ação disparava ela e a primeira sessão juntas -- aqui o
+  /// primeiro que casa é o que vale, e as ações vêm antes das sessões, como
+  /// no terminal.
+  static KeyEventResult dispatch(Map<ShortcutActivator, VoidCallback> bindings, KeyEvent event) {
+    if (_typing && _editing.contains(event.logicalKey)) return KeyEventResult.ignored;
+    for (final b in bindings.entries) {
+      if (b.key.accepts(event, HardwareKeyboard.instance)) {
+        b.value();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// As teclas que um campo de texto usa com modificador: apagar, andar,
+  /// selecionar, copiar, colar, desfazer.
+  static final _editing = {
+    LogicalKeyboardKey.backspace,
+    LogicalKeyboardKey.delete,
+    LogicalKeyboardKey.arrowLeft,
+    LogicalKeyboardKey.arrowRight,
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+    LogicalKeyboardKey.home,
+    LogicalKeyboardKey.end,
+    LogicalKeyboardKey.keyA,
+    LogicalKeyboardKey.keyC,
+    LogicalKeyboardKey.keyV,
+    LogicalKeyboardKey.keyX,
+    LogicalKeyboardKey.keyZ,
+  };
+
+  static bool get _typing {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx == null) return false;
+    return ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
   static void run(MxAction action, AppStore store, BuildContext context) {
     // A pasta a que um painel novo pertence: a que você está olhando, ou a
     // bandeja solta — por isso nenhum destes atalhos exige uma pasta existir.

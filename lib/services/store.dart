@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 // Só a `Color`, pro [AppStore.tintOf]: o `foundation` não a reexporta, e o
 // `material` inteiro traria uma janela de widgets pra dentro da store.
 import 'dart:ui' show Color;
@@ -30,6 +31,7 @@ import 'pty.dart';
 import 'setup.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
+import 'task_mcp.dart';
 import 'workspace.dart';
 
 /// O que um painel é.
@@ -241,6 +243,11 @@ class MxTab {
   /// pergunta é [AppStore.isPinned], não este campo.
   bool pinned = false;
 
+  /// A janela de um plugin com tela própria que você levou pra tela das
+  /// sessões: a tarefa do Wiboor ao lado do claude que trabalha nela. Mora lá
+  /// até você devolver -- ver [AppStore.releaseView] e [AppStore.screenOf].
+  bool onSessions = false;
+
   /// Sem processo de propósito: a conversa fica, a memória volta.
   ///
   /// Uma sessão do claude parada no prompt custa uns 200MB de RAM pra não
@@ -423,6 +430,10 @@ class MxTab {
     // que sobreviveu ao turno, e o hook que o trouxe não acontece de novo. Um
     // restart que o esquecesse apagaria a única cópia que existe dele.
     if (hooks.plans.isNotEmpty) 'plans': hooks.plans.map((n) => n.toJson()).toList(),
+    // Uma sugestão é um lembrete que você ainda não decidiu: some no restart e
+    // o que a sessão viu de passagem vira algo que ninguém lembra que viu.
+    if (hooks.suggestions.isNotEmpty)
+      'suggestions': hooks.suggestions.map((t) => t.toJson()).toList(),
     // Worth the trip through the config: it is the one thing about a panel
     // that only you knew, and a restart that forgot it would be asking you
     // to read four sessions again to find out which three were settled.
@@ -498,7 +509,7 @@ String? featureOrHotfixIdIn(Map<String, dynamic> pane) =>
 /// saber de qual das aparições ela saiu: é o [within] -- null na raiz.
 typedef RowPlace = ({SidebarRow row, Workspace? within});
 
-class AppStore extends ChangeNotifier {
+class AppStore extends ChangeNotifier implements TaskDesk {
   // --- ditado (vocalização) — fora desta versão ------------------------------
   // Sem o ditado o construtor não tem mais o que ligar.
   // /// [dictation] entra pela porta porque é a única peça daqui que um teste não
@@ -531,6 +542,21 @@ class AppStore extends ChangeNotifier {
     required List<({String value, String label, String? detail})> items,
   })?
   quickPick;
+
+  /// Quem mostra o campo de texto de um plugin (`window.input`), ligado pelo
+  /// `main.dart` como o [quickPick].
+  Future<String?> Function({
+    required String title,
+    String? placeholder,
+    String? value,
+    String? prompt,
+  })?
+  quickInput;
+
+  /// Quem mostra o formulário em modal de um plugin (`window.form`), ligado
+  /// pelo `main.dart` como o [quickPick]. Volta a ação do botão e os valores,
+  /// ou null quando você cancelou.
+  Future<({String action, Map<String, String> values})?> Function(PluginForm form)? quickForm;
 
   final List<Folder> folders = [];
 
@@ -588,6 +614,21 @@ class AppStore extends ChangeNotifier {
   /// Qual painel o teclado está escutando, pelo id da sessão que ele mostra.
   String? focusedPaneId;
 
+  /// De quem é a tela em [panes]: null pras sessões, ou o id do plugin com
+  /// tela própria (ver [PluginManifest.screen]) cujo ícone está aceso na faixa.
+  ///
+  /// Uma árvore por tela, e não as janelas do plugin misturadas na grade dos
+  /// terminais: o quadro do Wiboor quer a janela inteira, e a grade que você
+  /// montou com quatro sessões não pode ser o preço de olhar pra ele. Trocar de
+  /// tela guarda a de agora em [_parked] e traz a outra de volta como estava.
+  /// [panes] continua sendo a tela que você vê, então tudo que mexe nela --
+  /// cortar, soltar, focar -- não precisa saber que existem outras.
+  String? get screen => _screen;
+  String? _screen;
+
+  /// As telas fora da vista, cada uma com o foco que tinha.
+  final Map<String?, ({PaneNode? tree, String? focus})> _parked = {};
+
   /// A janela está na frente?
   ///
   /// Quem conta é o `AppLifecycleListener` do `main.dart`; começa em true
@@ -639,6 +680,15 @@ class AppStore extends ChangeNotifier {
   /// Lembrado, como a lateral escondida: é um jeito de trabalhar, não um
   /// humor de cinco minutos.
   bool doNotDisturb = false;
+
+  /// O switch do cartão de tarefa sugerida: iniciar pelo plugin que leva a
+  /// sugestão a um tracker, em vez de pedir o id. Ver
+  /// [PluginManifest.suggestions].
+  ///
+  /// Lembrado pelo mesmo motivo do [doNotDisturb]: quem cria as tasks pelo
+  /// Wiboor cria todas por lá, e religar o switch a cada cartão seria o
+  /// cartão esquecendo como você trabalha.
+  bool suggestionsToPlugin = false;
 
   final Map<MxNotice, Timer> _toastTimers = {};
 
@@ -694,7 +744,24 @@ class AppStore extends ChangeNotifier {
   // final Dictation dictation;
 
   int _seq = 0;
+
+  /// O carimbo desta execução no id de cada painel.
+  ///
+  /// O endereço do hook é `/hook/<tabId>`, congelado no lançamento, e o
+  /// [HookServer] reaproveita a porta da vez anterior. Uma sessão que
+  /// sobreviveu ao app (um crash, um claude que foi pro background) continua
+  /// postando ali -- e com o `tab2` desta execução sendo outra conversa, os
+  /// eventos dela pintavam o painel errado e trocavam o `sessionId` dele.
+  final String _run = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+
+  String _nextId() => 'tab${_run}_${_seq++}';
+
   bool _restoring = false;
+
+  /// O ⌘Q já começou -- ver [shutdown]. Cada pty que morre ali chama
+  /// [_save], e o save que caísse no meio das mortes gravaria um layout
+  /// sem os painéis que já saíram.
+  bool _quitting = false;
 
   /// A janela já foi embora?
   ///
@@ -726,6 +793,139 @@ class AppStore extends ChangeNotifier {
 
   bool isOpen(MxTab tab) => Panes.has(panes, tab.id);
 
+  /// Em que tela [tab] mora: a janela de um plugin com tela própria, e o
+  /// terminal que é dele (`owned`, ver [MxTab.owner]), na dele; todo o resto --
+  /// sessões, terminais, leitor, configuração --, na das sessões. É o que faz
+  /// "trabalhar nesta tarefa" sair do quadro e cair na sessão nova, e o que
+  /// deixa a conexão do SSH ao lado da grade de hosts, com a lista do SSH na
+  /// lateral -- um terminal com dono não aparece na lista das sessões, então
+  /// levá-lo pra lá seria abrir um painel que a lateral não mostra. Ver [screen].
+  String? screenOf(MxTab tab) => switch (tab.view?.pluginId ?? tab.owner) {
+    _ when tab.onSessions => null,
+    final id? when _hasScreen(id) => id,
+    _ => null,
+  };
+
+  /// A tela própria do plugin de [tab], esteja ela onde estiver -- a que
+  /// [returnView] devolve. Null pra quem não é janela de plugin com tela.
+  String? homeScreenOf(MxTab tab) => switch (tab.view?.pluginId) {
+    final id? when _hasScreen(id) => id,
+    _ => null,
+  };
+
+  /// Leva a janela de plugin [tab] pra tela das sessões, ao lado do painel que
+  /// estava em foco lá, e vai junto pra ela.
+  ///
+  /// É o "soltar" da tela própria: o quadro do Wiboor quer a janela inteira,
+  /// mas a tarefa que você está fazendo quer ficar do lado do claude. Ao lado,
+  /// e não no lugar: trocar levaria embora a sessão que é a razão de vir.
+  void releaseView(MxTab tab) {
+    if (tab.onSessions || homeScreenOf(tab) == null) return;
+    _drop(tab);
+    tab.onSessions = true;
+    _enter(null);
+    final beside = focusedTab;
+    if (panes == null || beside == null) {
+      panes = PaneLeaf(tab.id);
+    } else {
+      panes = Panes.insert(panes!, tabId: tab.id, targetId: beside.id, side: DropSide.right);
+    }
+    focusedPaneId = tab.id;
+    _save();
+    notifyListeners();
+  }
+
+  /// O contrário de [releaseView]: a janela volta pra tela do plugin, ao lado
+  /// do que estiver em foco lá, e você vai junto.
+  void returnView(MxTab tab) {
+    final home = homeScreenOf(tab);
+    if (!tab.onSessions || home == null) return;
+    _drop(tab);
+    tab.onSessions = false;
+    _enter(home);
+    final beside = focusedTab;
+    if (panes == null || beside == null) {
+      panes = PaneLeaf(tab.id);
+    } else {
+      panes = Panes.insert(panes!, tabId: tab.id, targetId: beside.id, side: DropSide.right);
+    }
+    focusedPaneId = tab.id;
+    _save();
+    notifyListeners();
+  }
+
+  bool _hasScreen(String pluginId) {
+    final p = plugins.byId(pluginId);
+    return p != null && p.active && p.manifest!.screen;
+  }
+
+  PaneNode? _treeOf(String? screen) => screen == _screen ? panes : _parked[screen]?.tree;
+
+  /// Na tela dela, mesmo que essa tela esteja guardada agora.
+  ///
+  /// [isOpen] é "na tela que você está vendo". O pin e a hibernação querem
+  /// outra coisa: a sessão que ficou na grade das sessões enquanto você foi
+  /// ao quadro continua sendo dessa grade, e ela tem que estar lá, presa e
+  /// acordada, quando você voltar.
+  bool _placed(MxTab tab) => Panes.has(_treeOf(screenOf(tab)), tab.id);
+
+  /// Troca a tela inteira: guarda a de agora com o foco dela e traz [screen]
+  /// como ficou. Não salva nem repinta -- quem chama faz isso.
+  ///
+  /// A lateral vai junto. Entrar na tela de um plugin é estar na aba dele; sair
+  /// dela pra uma sessão é voltar pra lista das sessões -- a não ser que a aba
+  /// na lateral seja a de um plugin sem tela (o git), que já é das sessões.
+  void _enter(String? screen) {
+    if (screen == _screen) return;
+    _parked[_screen] = (tree: panes, focus: focusedPaneId);
+    final back = _parked.remove(screen);
+    panes = back?.tree;
+    focusedPaneId = back?.focus;
+    // O buraco é um lugar de uma árvore; na outra ele não quer dizer nada.
+    // Ver [_hole].
+    _hole = null;
+    _screen = screen;
+    if (screen != null) {
+      sidebarView = screen;
+    } else if (shownPlugin case final p? when _hasScreen(p.id)) {
+      sidebarView = null;
+    }
+    _syncSidebar();
+  }
+
+  /// Põe na vista a tela que a aba da lateral pede, e esquece a de quem não
+  /// tem mais tela (um plugin desligado, um manifesto que mudou).
+  void _syncScreen() {
+    final shown = shownPlugin;
+    final want = shown != null && _hasScreen(shown.id) ? shown.id : null;
+    if (want != _screen) {
+      _enter(want);
+      _save();
+    }
+    _parked.removeWhere((id, _) => id != null && !_hasScreen(id));
+  }
+
+  /// [_syncScreen], e o comando de abertura do plugin quando a tela dele
+  /// chega vazia: o clique no ícone do Wiboor é pra ver o quadro, não uma
+  /// tela em branco.
+  ///
+  /// Só aqui, e não a cada [_enter]: a janela de uma tarefa que traz você pra
+  /// tela do plugin já é o que você pediu pra ver, e um quadro abrindo do lado
+  /// dela tomaria o foco.
+  void _landScreen() {
+    _syncScreen();
+    if (_screen != null && panes == null) openScreenHome();
+  }
+
+  /// Roda o comando que monta a tela do plugin na vista ([PluginManifest.screenHome]).
+  void openScreenHome() {
+    final id = _screen;
+    if (id == null) return;
+    final home = plugins.byId(id)?.manifest?.screenHome;
+    final command = plugins.commands.firstWhereOrNull((c) => c.pluginId == id && c.id == home);
+    if (command != null) unawaited(runPluginCommand(command));
+  }
+
   /// Preso e na tela -- ver [MxTab.pinned].
   bool isPinned(MxTab tab) => tab.pinned && isOpen(tab);
 
@@ -745,11 +945,15 @@ class AppStore extends ChangeNotifier {
     await hooks.start();
     hooks.events.listen(applyHook);
     hooks.statuses.listen(applyStatus);
+    hooks.desk = this;
     agents.updates.listen(applyAgents);
     plugins.onCall = PluginApi(this).handle;
     // Ligar, desligar ou ver um plugin cair muda o que os menus oferecem e o
     // que o teclado faz. O log não passa por aqui -- ver [Plugins.logs].
-    plugins.addListener(notifyListeners);
+    plugins.addListener(() {
+      _syncScreen();
+      notifyListeners();
+    });
     await _loadConfig();
     // Um config que não existe ainda não leu a pasta de plugins no caminho.
     if (!plugins.scanned) plugins.scan();
@@ -757,6 +961,9 @@ class AppStore extends ChangeNotifier {
       if (p.id == _sidebarLive) plugins.tell(p, 'sidebar.shown');
     };
     plugins.startup();
+    // A tela de plugin que ficou na vista da última vez abre com ele: o layout
+    // restaurado acima é o das sessões, e fica guardado até você voltar.
+    _landScreen();
     // A aba de plugin que ficou na tela da última vez precisa do processo de
     // pé pra ter o que mostrar.
     _syncSidebar(announce: true);
@@ -814,14 +1021,21 @@ class AppStore extends ChangeNotifier {
     final rawFolders = ((legacy ? j['projects'] : j['folders']) as List? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList();
+    // Uma entrada por vez: os `fromJson` daqui fazem cast duro, e uma pasta
+    // sem `name` derrubava a leitura inteira no meio -- e o próximo save
+    // gravava essa metade por cima do arquivo bom.
     for (final p in rawFolders) {
-      folders.add(Folder.fromJson(p));
+      try {
+        folders.add(Folder.fromJson(p));
+      } catch (_) {}
     }
     if (!legacy) {
       // Até a 2.4.0 a chave era `projects`, e é o que está no disco de quem
       // atualizou.
       for (final p in ((j['featuresOrHotfixes'] ?? j['projects']) as List? ?? const [])) {
-        featuresOrHotfixes.add(FeatureOrHotfix.fromJson(p as Map<String, dynamic>));
+        try {
+          featuresOrHotfixes.add(FeatureOrHotfix.fromJson(p as Map<String, dynamic>));
+        } catch (_) {}
       }
     }
     for (final w in (j['workspaces'] as List? ?? const [])) {
@@ -837,7 +1051,8 @@ class AppStore extends ChangeNotifier {
         w = Workspace(id: newWorkspaceId(), name: CodeWorkspace.nameOf(path), codeWorkspacePath: path);
         workspaces.add(w);
       }
-      final root = p['root'] as String;
+      final root = p['root'];
+      if (root is! String) continue;
       if (!w.folderRoots.contains(root)) w.folderRoots.add(root);
       // O `collapsed` era um por pasta. Dentro de um workspace ele passa a ser
       // da aparição ali -- e é ali que a pasta carimbada aparecia.
@@ -875,6 +1090,7 @@ class AppStore extends ChangeNotifier {
       ];
       sidebarView = j['sidebarView'] as String?;
       doNotDisturb = j['doNotDisturb'] as bool? ?? false;
+      suggestionsToPlugin = j['suggestionsToPlugin'] as bool? ?? false;
       floats.readJson(j['floats']);
       groupsCollapsed = j['groupsCollapsed'] as bool? ?? false;
       hibernateMinutes = (j['hibernateMinutes'] as num?)?.toInt() ?? defaultHibernateMinutes;
@@ -889,7 +1105,13 @@ class AppStore extends ChangeNotifier {
       // dictation.config = DictationConfig.fromJson(j['dictation']);
       await refreshGit();
       await _restoreLayout(j['layout'] as Map<String, dynamic>?);
-    } catch (_) {}
+    } catch (_) {
+      // O que não deu pra ler vai ser sobrescrito pelo próximo save com o que
+      // deu. Uma cópia ao lado é o que separa isso de perder a lateral.
+      try {
+        _configFile.copySync('${_configFile.path}.bak');
+      } catch (_) {}
+    }
   }
 
   /// Bring back the panels from last time, processes and all.
@@ -906,22 +1128,32 @@ class AppStore extends ChangeNotifier {
     // folhas da árvore são índices desta lista, então uma lista que só junta
     // os que vingaram deslocaria todas as folhas depois do painel que faltou.
     final restored = <MxTab?>[];
-    for (final pane in saved) {
-      final tab = _openPane(pane);
-      restored.add(tab);
-      if (tab == null) continue;
-      tab.hooks.touched.addAll((pane['touched'] as List? ?? const []).whereType<String>());
-      tab.hooks.plans.addAll(
-        (pane['plans'] as List? ?? const []).map(PlanNote.fromJson).whereType<PlanNote>(),
-      );
-      tab.done = pane['done'] == true;
-      tab.pinned = pane['pinned'] == true;
-      // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
-      // deixaria as linhas coloridas de um conjunto que não abre mais.
-      final group = pane['group'] as String?;
-      if (groups.any((g) => g.id == group)) tab.groupId = group;
+    // O `finally` é o que impede um painel que estourou aqui de deixar
+    // [_restoring] ligado -- e todo save da sessão inteira em silêncio.
+    try {
+      for (final pane in saved) {
+        final tab = _openPane(pane);
+        restored.add(tab);
+        if (tab == null) continue;
+        tab.hooks.touched.addAll((pane['touched'] as List? ?? const []).whereType<String>());
+        tab.hooks.plans.addAll(
+          (pane['plans'] as List? ?? const []).map(PlanNote.fromJson).whereType<PlanNote>(),
+        );
+        tab.hooks.suggestions.addAll(
+          (pane['suggestions'] as List? ?? const [])
+              .map(SuggestedTask.fromJson)
+              .whereType<SuggestedTask>(),
+        );
+        tab.done = pane['done'] == true;
+        tab.pinned = pane['pinned'] == true;
+        // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
+        // deixaria as linhas coloridas de um conjunto que não abre mais.
+        final group = pane['group'] as String?;
+        if (groups.any((g) => g.id == group)) tab.groupId = group;
+      }
+    } finally {
+      _restoring = false;
     }
-    _restoring = false;
 
     final count = restored.nonNulls.length;
     if (count == 0) return;
@@ -931,6 +1163,10 @@ class AppStore extends ChangeNotifier {
     MxTab? at(int? i) => i != null && i >= 0 && i < restored.length ? restored[i] : null;
     if (layout['tree'] case final tree?) {
       panes = Panes.fromJson(tree, (i) => at(i)?.id);
+    } else if (!layout.containsKey('active')) {
+      // Sem árvore e sem o slot antigo: a tela foi deixada limpa. O que o
+      // `_place` de cada painel restaurado montou no caminho não é dela.
+      panes = null;
     } else if (at((layout['active'] as int?) ?? 0) case final left?) {
       // Um config escrito antes da grade existir: dois slots, esquerda e
       // direita. Vira a fileira de dois que ele sempre foi.
@@ -1029,13 +1265,13 @@ class AppStore extends ChangeNotifier {
   }
 
   void _save() {
-    if (_restoring || _gone) return;
+    if (_restoring || _gone || _quitting) return;
     // Quem saiu da tela deixa de estar preso, por qualquer caminho que tenha
     // saído -- o x, um grupo que tomou a tela, outra sessão solta em cima.
     // Aqui porque todo gesto que mexe na árvore passa por aqui, e senão a
     // sessão voltaria presa num lugar que você nunca prendeu.
     for (final t in tabs) {
-      if (t.pinned && !isOpen(t)) t.pinned = false;
+      if (t.pinned && !_placed(t)) t.pinned = false;
     }
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 400), _writeConfig);
@@ -1052,7 +1288,10 @@ class AppStore extends ChangeNotifier {
       final open = tabs
           .where((t) => !t.isPluginView && t.owner == null && (!t.exited || t.resumable))
           .toList();
-      final tree = Panes.toJson(panes, (id) => open.indexWhere((t) => t.id == id));
+      // A grade das sessões, mesmo com a tela de um plugin na vista: as janelas
+      // de plugin não voltam com o app, e a tela dele se monta de novo sozinha.
+      final tree = Panes.toJson(_treeOf(null), (id) => open.indexWhere((t) => t.id == id));
+      final focused = _screen == null ? focusedPaneId : _parked[null]?.focus;
       // Escrito ao lado e movido pra cima, em vez de escrito em cima: um
       // `writeAsString` direto cria o arquivo, trunca e só depois escreve, e
       // quem ler nessa fresta acha zero byte. Ler o config é o [_loadConfig],
@@ -1085,6 +1324,7 @@ class AppStore extends ChangeNotifier {
           if (railOrder.isNotEmpty) 'railOrder': railOrder,
           if (sidebarView != null) 'sidebarView': sidebarView,
           if (doNotDisturb) 'doNotDisturb': true,
+          if (suggestionsToPlugin) 'suggestionsToPlugin': true,
           if (floats.toJson() case final f when f.isNotEmpty) 'floats': f,
           if (groupsCollapsed) 'groupsCollapsed': true,
           if (hibernateMinutes != defaultHibernateMinutes) 'hibernateMinutes': hibernateMinutes,
@@ -1099,7 +1339,7 @@ class AppStore extends ChangeNotifier {
           'layout': {
             'panes': open.map((t) => t.toJson()).toList(),
             if (tree != null) 'tree': tree,
-            'focused': open.indexWhere((t) => t.id == focusedPaneId),
+            'focused': open.indexWhere((t) => t.id == focused),
           },
         }),
       );
@@ -1266,6 +1506,7 @@ class AppStore extends ChangeNotifier {
     if (!sidebarHidden && current == pluginId) return setSidebarHidden(true);
     sidebarHidden = false;
     sidebarView = pluginId;
+    _landScreen();
     _save();
     // Todo clique avisa, mesmo o que volta pra aba que já era a dela: é a
     // deixa pro plugin olhar de novo -- o git relê o status, o flutter os
@@ -1435,6 +1676,7 @@ class AppStore extends ChangeNotifier {
       for (final p in plugins.all)
         if ((p.active &&
                 (p.manifest!.sidebar ||
+                    p.manifest!.screen ||
                     (p.manifest!.icon != null && p.manifest!.commands.isNotEmpty))) ||
             tabs.any((t) => t.view?.pluginId == p.id || t.owner == p.id))
           p,
@@ -1926,7 +2168,9 @@ class AppStore extends ChangeNotifier {
   bool hasHitsInWorkspace(Workspace w) => foldersOf(w).any(hasHits);
 
   Future<void> refreshGit() async {
-    for (final p in folders) {
+    // Cópias: entre um `await` e outro uma pasta entra ou um painel fecha, e
+    // o iterador da lista viva estourava `ConcurrentModificationError`.
+    for (final p in [...folders]) {
       final list = await Git.worktrees(p.root);
       // A call that could not answer keeps the last answer. Writing an empty
       // list here on a lost `git` call is what made the sidebar fold a
@@ -1940,7 +2184,8 @@ class AppStore extends ChangeNotifier {
       p.isRepo = list.isNotEmpty;
       p.branch = list.firstWhereOrNull((w) => w.isMain)?.branch ?? '';
     }
-    for (final t in tabs) {
+    for (final t in [...tabs]) {
+      if (!tabs.contains(t)) continue;
       t.dirty = await Git.dirtyCount(t.cwd) ?? t.dirty;
       if (t.branch.isEmpty) t.branch = await Git.branchOf(t.cwd);
     }
@@ -2202,7 +2447,7 @@ class AppStore extends ChangeNotifier {
     bool place = true,
   }) {
     final tab = MxTab(
-      id: 'tab${_seq++}',
+      id: _nextId(),
       folder: f,
       kind: TabKind.shell,
       cwd: cwd ?? f.root,
@@ -2241,7 +2486,7 @@ class AppStore extends ChangeNotifier {
     bool start = true,
   }) {
     final tab = MxTab(
-      id: 'tab${_seq++}',
+      id: _nextId(),
       folder: f,
       kind: TabKind.claude,
       cwd: cwd,
@@ -2284,6 +2529,9 @@ class AppStore extends ChangeNotifier {
     final opening = prompt?.trim() ?? '';
     final parts = [
       'claude',
+      // Antes de tudo: `--mcp-config` aceita vários valores e engoliria o
+      // prompt posicional do fim. O `--name` logo depois é o que o encerra.
+      '--mcp-config ${Sh.q(hooks.mcpConfigFor(tab.id))}',
       '--name ${Sh.q(name)}',
       '--settings ${Sh.q(hooks.settingsFor(tab.id, cwd: tab.cwd))}',
       if (brief.isNotEmpty) '--append-system-prompt ${Sh.q(brief)}',
@@ -2297,7 +2545,7 @@ class AppStore extends ChangeNotifier {
       parts.join(' '),
       tab.cwd,
       display:
-          'claude --name ${Sh.q(name)} '
+          'claude --mcp-config <tarefas :${hooks.port}> --name ${Sh.q(name)} '
           '--settings <hooks :${hooks.port}>'
           '${brief.isEmpty ? '' : ' --append-system-prompt <briefing de ${joined!.name}>'}'
           '${resumeId == null ? '' : ' --resume …'}'
@@ -2614,7 +2862,7 @@ class AppStore extends ChangeNotifier {
 
   MxTab _newReader(MxDoc doc, {required Folder folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final tab = MxTab(
-      id: 'tab${_seq++}',
+      id: _nextId(),
       folder: folder,
       kind: TabKind.reader,
       cwd: cwd ?? folder.root,
@@ -2631,7 +2879,7 @@ class AppStore extends ChangeNotifier {
 
   MxTab _newSetup(MxSetup setup, {required Folder folder, String? cwd, FeatureOrHotfix? featureOrHotfix}) {
     final tab = MxTab(
-      id: 'tab${_seq++}',
+      id: _nextId(),
       folder: folder,
       kind: TabKind.setup,
       cwd: cwd ?? folder.root,
@@ -2688,6 +2936,7 @@ class AppStore extends ChangeNotifier {
   /// meio, e o preso é justamente o que não pode perder o lugar nem o tamanho.
   /// Sem solto nenhum na tela, é o [_place] que decide.
   void _placeBeside(MxTab tab, MxTab? beside) {
+    _enter(screenOf(tab));
     if (beside != null && isPinned(beside)) {
       beside = openPanes.firstWhereOrNull((t) => !isPinned(t));
     }
@@ -2702,7 +2951,38 @@ class AppStore extends ChangeNotifier {
   // --- plugins ------------------------------------------------------------
 
   MxTab? _pluginTab(String pluginId, String viewId) =>
-      tabs.firstWhereOrNull((t) => t.view?.pluginId == pluginId && t.view?.id == viewId);
+      tabs.firstWhereOrNull((t) => t.view?.pluginId == pluginId && t.view?.id == viewId) ??
+      switch (pluginModal) {
+        final m? when m.view?.pluginId == pluginId && m.view?.id == viewId => m,
+        _ => null,
+      };
+
+  /// A janela de plugin aberta em modal (`view.open` com `modal: true`), por
+  /// cima da tela, ou `null`. Ela não entra em [tabs] enquanto é modal: não é
+  /// painel de grade nenhuma, e nada que olha os painéis (o lugar dela, a tela,
+  /// o "fechou o último, põe outro") precisa saber dela. [dockModal] a põe na
+  /// grade como uma janela qualquer.
+  MxTab? pluginModal;
+
+  /// Fecha o modal. O plugin fica sabendo no próximo `view.update`, que volta
+  /// `open: false`, como com uma janela fechada.
+  void closeModal() {
+    if (pluginModal == null) return;
+    pluginModal = null;
+    notifyListeners();
+  }
+
+  /// O modal vira painel: entra na grade ao lado do que está em foco, como um
+  /// `view.open` sem `modal`, com o mesmo conteúdo e o mesmo `viewId`.
+  void dockModal() {
+    final tab = pluginModal;
+    if (tab == null) return;
+    pluginModal = null;
+    tabs.add(tab);
+    _placeBeside(tab, focusedTab);
+    focusedPaneId = tab.id;
+    notifyListeners();
+  }
 
   /// A janela [viewId] do plugin, aberta ao lado do painel em foco.
   ///
@@ -2716,13 +2996,26 @@ class AppStore extends ChangeNotifier {
     required String title,
     required List<Map<String, dynamic>> blocks,
     PluginRfwUpdate? rfw,
+    bool modal = false,
   }) {
     final source = focusedTab;
+    // A que está em modal continua em modal: só troca o conteúdo.
+    if (pluginModal case final m? when m.view?.pluginId == plugin.id && m.view?.id == viewId) {
+      m.view!
+        ..title = title
+        ..setBlocks(blocks);
+      if (rfw != null) m.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+      notifyListeners();
+      return m;
+    }
     if (_pluginTab(plugin.id, viewId) case final open?) {
       open.view!
         ..title = title
         ..setBlocks(blocks);
       if (rfw != null) open.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+      // Pra tela dela antes de olhar se está na tela: a tarefa que você levou
+      // pras sessões está lá, e não na árvore do quadro de onde veio o clique.
+      _enter(screenOf(open));
       if (!Panes.has(panes, open.id)) _placeBeside(open, source);
       focusedPaneId = open.id;
       notifyListeners();
@@ -2732,7 +3025,7 @@ class AppStore extends ChangeNotifier {
     // daquela pasta (ver [tabsOf]), e herdar a cor ou o projeto dela diria
     // que é.
     final tab = MxTab(
-      id: 'tab${_seq++}',
+      id: _nextId(),
       folder: loose,
       kind: TabKind.plugin,
       cwd: loose.root,
@@ -2746,6 +3039,13 @@ class AppStore extends ChangeNotifier {
       ),
     );
     if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+    // Em modal ela fica fora da grade (ver [pluginModal]); um segundo modal
+    // toma o lugar do primeiro.
+    if (modal) {
+      pluginModal = tab;
+      notifyListeners();
+      return tab;
+    }
     // Fora do [_register], como o leitor: não há processo pra subir.
     tabs.add(tab);
     _placeBeside(tab, source);
@@ -2783,10 +3083,13 @@ class AppStore extends ChangeNotifier {
           .console(consoleId);
 
   void closePluginView(MxPlugin plugin, String viewId) {
-    if (_pluginTab(plugin.id, viewId) case final tab?) closeTab(tab);
+    if (_pluginTab(plugin.id, viewId) case final tab?) {
+      tab == pluginModal ? closeModal() : closeTab(tab);
+    }
   }
 
   void _closePluginViewsOf(String pluginId) {
+    if (pluginModal?.view?.pluginId == pluginId) closeModal();
     for (final t in tabs.where((t) => t.view?.pluginId == pluginId).toList()) {
       closeTab(t);
     }
@@ -2866,6 +3169,8 @@ class AppStore extends ChangeNotifier {
   Future<void> setPluginEnabled(MxPlugin plugin, bool on) async {
     await plugins.setEnabled(plugin, on);
     if (!on) _closePluginViewsOf(plugin.id);
+    // Com a tela dele na vista, desligar é voltar pras sessões.
+    _syncScreen();
     // O tema em uso pode ter sido dele: [MxThemes.byId] cai no padrão.
     if (!on) Mx.applyId(Mx.palette.id);
     _save();
@@ -2906,6 +3211,7 @@ class AppStore extends ChangeNotifier {
     String? baseRef,
     String? setupCommand,
     FeatureOrHotfix? featureOrHotfix,
+    String? prompt,
   }) async {
     final base = baseRef ?? await Git.defaultRemoteRef(p.root) ?? 'origin/master';
     final branch = branchPattern.replaceAll('{id}', taskId);
@@ -2926,8 +3232,242 @@ class AppStore extends ChangeNotifier {
     }
 
     await refreshGit();
-    return openClaude(p, cwd: outcome.path, label: taskId, featureOrHotfix: featureOrHotfix);
+    return openClaude(
+      p,
+      cwd: outcome.path,
+      label: taskId,
+      featureOrHotfix: featureOrHotfix,
+      prompt: prompt,
+    );
   }
+
+  // --- tarefas sugeridas ----------------------------------------------------
+
+  /// Guarda uma sugestão que a sessão de [tabId] mandou por [TaskMcp].
+  @override
+  SuggestionQueued? suggest(
+    String tabId, {
+    required String title,
+    required String tldr,
+    required String prompt,
+  }) {
+    final tab = _byId(tabId);
+    if (tab == null || tab.kind != TabKind.claude) return null;
+    final list = tab.hooks.suggestions;
+    final task = SuggestedTask(id: _taskId(), title: title, tldr: tldr, prompt: prompt);
+    list.add(task);
+    final evicted = <SuggestedTask>[];
+    while (list.length > HookState.maxSuggestions) {
+      final old = list.removeAt(0);
+      _settled[old.id] = SuggestionEnd.dismissed;
+      evicted.add(old);
+    }
+    _notice(
+      tab,
+      MxNoticeKind.suggested,
+      suggestionId: task.id,
+      detail: task.title.isEmpty ? null : task.title,
+    );
+    _save();
+    notifyListeners();
+    return SuggestionQueued(task, pending: List.of(list), evicted: evicted);
+  }
+
+  /// Retira uma sugestão a pedido da sessão que a fez (`dismiss_task`).
+  @override
+  ({bool withdrawn, SuggestionEnd? already}) withdraw(String tabId, String taskId) {
+    final tab = _byId(tabId);
+    final task = tab?.hooks.suggestions.firstWhereOrNull((t) => t.id == taskId);
+    if (tab == null || task == null) return (withdrawn: false, already: _settled[taskId]);
+    _settle(tab, task, SuggestionEnd.dismissed);
+    return (withdrawn: true, already: null);
+  }
+
+  /// Como saíram as sugestões que já não estão na fila, pra sessão que tentar
+  /// retirar uma ouvir "você já iniciou" em vez de "nunca vi". Só desta
+  /// execução: depois de um restart a resposta honesta é a segunda.
+  final Map<String, SuggestionEnd> _settled = {};
+
+  static final _taskRandom = Random.secure();
+
+  /// O mesmo formato do Desktop, `task_` e oito hexadecimais.
+  static String _taskId() {
+    final hex = List.generate(4, (_) => _taskRandom.nextInt(256).toRadixString(16).padLeft(2, '0'));
+    return 'task_${hex.join()}';
+  }
+
+  void _settle(MxTab tab, SuggestedTask task, SuggestionEnd end) {
+    tab.hooks.suggestions.remove(task);
+    _settled[task.id] = end;
+    _save();
+    notifyListeners();
+  }
+
+  /// A sugestão que [notice] anuncia, se ela ainda estiver de pé.
+  ///
+  /// Null pra todo aviso que não é de sugestão, e pra sugestão que já saiu da
+  /// fila -- iniciada, descartada, retirada pela sessão --, ou cujo painel
+  /// fechou: aí o clique no aviso volta a ser só levar ao painel.
+  SuggestedTask? suggestionOf(MxNotice notice) {
+    final id = notice.suggestionId;
+    if (id == null) return null;
+    return _byId(notice.tabId)?.hooks.suggestions.firstWhereOrNull((t) => t.id == id);
+  }
+
+  /// Descarta o cartão: o "x" dele.
+  void dismissSuggestion(MxTab tab, SuggestedTask task) =>
+      _settle(tab, task, SuggestionEnd.dismissed);
+
+  /// "Fazer aqui": o prompt da sugestão vira o próximo pedido desta sessão.
+  ///
+  /// Mandado mesmo com a sessão trabalhando -- o claude enfileira o que chega
+  /// no meio de um turno, que é o que o Desktop faz com o mesmo botão.
+  ///
+  /// [prompt] no lugar do da sugestão quando um tracker já criou a tarefa
+  /// dela: aí o pedido leva junto o número e o link. Ver [suggestionTracked].
+  Future<bool> runSuggestionHere(MxTab tab, SuggestedTask task, {String? prompt}) async {
+    if (tab.exited || tab.hibernated) {
+      showBanner('${tab.title} não está rodando — retome a conversa antes', sticky: true);
+      return false;
+    }
+    _settle(tab, task, SuggestionEnd.started);
+    await tab.term.submit(prompt ?? task.prompt);
+    return true;
+  }
+
+  /// "Iniciar localmente": uma sessão nova na mesma pasta, já com o prompt.
+  ///
+  /// Na mesma checkout, sem worktree -- as duas sessões mexem nos mesmos
+  /// arquivos, e quem escolhe isto escolhe isso. Pra trabalhar separado é
+  /// [newTask], que pede o id da task antes, porque a branch leva o id.
+  MxTab startSuggestionHere(MxTab tab, SuggestedTask task, {String? prompt, String? label}) {
+    _settle(tab, task, SuggestionEnd.started);
+    final opened = openClaude(
+      tab.folder,
+      cwd: tab.cwd,
+      label: label ?? (task.title.isEmpty ? null : task.title),
+      featureOrHotfix: featureOrHotfixOf(tab),
+      prompt: prompt ?? task.prompt,
+    );
+    select(opened);
+    return opened;
+  }
+
+  /// O plugin que o switch do cartão usaria, se houver um. O primeiro que se
+  /// ofereceu: dois trackers ligados ao mesmo tempo não é o caso de quem usa
+  /// isto, e um seletor no cartão pra esse caso seria peso pra todo mundo.
+  MxPlugin? get suggestionTaker => plugins.suggestionTakers.firstOrNull;
+
+  void setSuggestionsToPlugin(bool on) {
+    if (on == suggestionsToPlugin) return;
+    suggestionsToPlugin = on;
+    _save();
+    notifyListeners();
+  }
+
+  /// Qualquer saída do cartão com o switch ligado: a sugestão vai pro plugin,
+  /// que cria a tarefa no tracker. Ver [Plugins.offerSuggestion].
+  ///
+  /// Só a tarefa: *onde* trabalhar nela continua sendo a escolha que você fez
+  /// no cartão, e quem executa é a Maestria, quando o plugin responder com o
+  /// que criou ([suggestionTracked]). Até lá a sugestão fica na fila -- você
+  /// pode desistir no formulário dele, e o cartão continua aqui.
+  Future<void> startSuggestionInPlugin(
+    MxPlugin plugin,
+    MxTab tab,
+    SuggestedTask task,
+    SuggestionChoice choice,
+  ) async {
+    _tracking[task.id] = (plugin: plugin.id, tabId: tab.id, choice: choice);
+    try {
+      await plugins.offerSuggestion(plugin, {
+        'suggestion': {
+          'id': task.id,
+          'title': task.title,
+          'tldr': task.tldr,
+          'prompt': task.prompt,
+        },
+        // O que vai ser feito depois de criada -- pro formulário dizer.
+        'choice': choice.name,
+        'origin': {
+          'tabId': tab.id,
+          'cwd': tab.cwd,
+          'root': tab.folder.root,
+          'folder': tab.folder.name,
+          'isRepo': tab.folder.isRepo,
+          'branch': tab.branch,
+        },
+      });
+    } on PluginRpcError catch (e) {
+      _tracking.remove(task.id);
+      showBanner('${plugin.name}: ${e.message}', sticky: true);
+    }
+  }
+
+  /// As sugestões entregues a um plugin e ainda sem tarefa criada: quem as
+  /// mandou, de qual painel, e o que fazer quando a tarefa existir. Só desta
+  /// execução, como o [_settled].
+  final Map<String, ({String plugin, String tabId, SuggestionChoice choice})> _tracking = {};
+
+  /// O plugin criou a tarefa de uma sugestão (`suggestion.created`): agora é
+  /// fazer o que você escolheu no cartão, com a tarefa no pedido.
+  ///
+  /// [intro] é a primeira linha do pedido, nas palavras do plugin ("Vamos
+  /// trabalhar na TASK#123 do Wiboor…"); [ref] é o nome da tarefa (`TASK#123`),
+  /// que vira o nome do painel; [branch] e [dir] são como o tracker nomeia a
+  /// worktree dela. Devolve o painel em que o trabalho foi parar, ou null se
+  /// não deu -- a sugestão sumiu, o painel fechou, a worktree não saiu.
+  Future<MxTab?> suggestionTracked(
+    MxPlugin plugin, {
+    required String suggestionId,
+    required String ref,
+    String intro = '',
+    String? branch,
+    String? dir,
+  }) async {
+    final pending = _tracking[suggestionId];
+    if (pending == null || pending.plugin != plugin.id) return null;
+    _tracking.remove(suggestionId);
+    final tab = _byId(pending.tabId);
+    final task = tab?.hooks.suggestions.firstWhereOrNull((t) => t.id == suggestionId);
+    if (tab == null || task == null) {
+      showBanner('a tarefa $ref foi criada, mas a sugestão já não estava mais no cartão');
+      return null;
+    }
+    String prompt({String? onBranch}) => [
+      if (intro.trim().isNotEmpty) intro.trim(),
+      task.prompt,
+      if (onBranch != null)
+        'Você está na branch `$onBranch`. Leia o código antes de propor o plano.',
+    ].join('\n\n');
+
+    switch (pending.choice) {
+      case SuggestionChoice.here:
+        return await runSuggestionHere(tab, task, prompt: prompt()) ? tab : null;
+      case SuggestionChoice.local:
+        return startSuggestionHere(tab, task, prompt: prompt(), label: ref);
+      case SuggestionChoice.worktree:
+        final on = branch ?? 'feature/$ref';
+        final opened = await newTask(
+          tab.folder,
+          taskId: ref,
+          branchPattern: on,
+          dirPattern: dir ?? ref,
+          featureOrHotfix: featureOrHotfixOf(tab),
+          prompt: prompt(onBranch: on),
+        );
+        if (opened == null) return null;
+        _settle(tab, task, SuggestionEnd.started);
+        select(opened);
+        return opened;
+      case SuggestionChoice.dismiss:
+        return null;
+    }
+  }
+
+  /// O fim do "iniciar com worktree", depois que [newTask] abriu a sessão.
+  void startedSuggestion(MxTab tab, SuggestedTask task) =>
+      _settle(tab, task, SuggestionEnd.started);
 
   // --- worktrees ----------------------------------------------------------
 
@@ -2971,6 +3511,7 @@ class AppStore extends ChangeNotifier {
     Folder p,
     WorktreeInfo w, {
     bool force = false,
+    bool? forceBranch,
     bool deleteBranch = false,
   }) async {
     if (tabAt(w.path) != null) {
@@ -2981,6 +3522,7 @@ class AppStore extends ChangeNotifier {
       root: p.root,
       worktree: w,
       force: force,
+      forceBranch: forceBranch,
       deleteBranch: deleteBranch,
     );
     showBanner(outcome.message, sticky: !outcome.ok);
@@ -3020,6 +3562,10 @@ class AppStore extends ChangeNotifier {
     // lives inside a plugin window (see [MxTab.embedded]).
     if (place) _place(tab);
     tab.term.onExit = () {
+      // Fechado por quem usa: o hangup é a saída, e ela chega depois do
+      // painel ter ido embora. Um painel aberto sem querer e fechado na hora
+      // ganhava um "saiu na largada" sobre algo que não existe mais.
+      if (!tabs.contains(tab)) return;
       // Dying in the first seconds is not the same as being closed: it means
       // the launch itself failed, and the reason is sitting in that panel's
       // own buffer.
@@ -3058,6 +3604,7 @@ class AppStore extends ChangeNotifier {
     if (tab.embedded) return;
     // O clique numa hibernada é o "retomar" -- ver [MxTab.hibernated].
     if (tab.hibernated) unawaited(wake(tab));
+    _enter(screenOf(tab));
     final group = activeGroup;
     // Um painel preso segura a grade: trocar o grupo inteiro levaria junto
     // o painel que você prendeu justamente pra ele ficar.
@@ -3085,14 +3632,21 @@ class AppStore extends ChangeNotifier {
   /// lugar novo é o que o último solto deixou (ver [_hole]), ou a borda
   /// direita da tela: nunca a metade de um preso.
   void _place(MxTab tab) {
+    _enter(screenOf(tab));
     if (panes == null) {
       panes = PaneLeaf(tab.id);
     } else if (!Panes.has(panes, tab.id)) {
       final focused = focusedTab;
-      final loose = focused != null && !isPinned(focused)
+      // Na tela de um plugin, a janela dele é a casa da tela: o terminal que
+      // chega troca outro terminal, e sem nenhum na tela abre ao lado dela --
+      // conectar a um host não pode sumir com a grade de onde você conectou.
+      bool keeps(MxTab t) => _screen != null && t.isPluginView && !tab.isPluginView;
+      final loose = focused != null && !isPinned(focused) && !keeps(focused)
           ? focused.id
-          : openPanes.firstWhereOrNull((t) => !isPinned(t))?.id;
-      if (loose != null) {
+          : openPanes.firstWhereOrNull((t) => !isPinned(t) && !keeps(t))?.id;
+      if (loose == null && focused != null && keeps(focused) && !isPinned(focused)) {
+        panes = Panes.insert(panes!, tabId: tab.id, targetId: focused.id, side: DropSide.right);
+      } else if (loose != null) {
         Panes.swap(panes, loose, tab.id);
       } else if (!_fillHole(tab.id)) {
         panes = Panes.edge(panes!, tabId: tab.id, side: DropSide.right);
@@ -3126,6 +3680,15 @@ class AppStore extends ChangeNotifier {
 
   /// Tira a folha da árvore e reencosta o foco em quem ficou no lugar dela.
   void _drop(MxTab tab) {
+    // Fechar uma sessão com a tela do quadro na vista também a tira da grade
+    // guardada das sessões -- senão ela voltaria lá como um buraco.
+    for (final MapEntry(:key, :value) in _parked.entries.toList()) {
+      if (!Panes.has(value.tree, tab.id)) continue;
+      _parked[key] = (
+        tree: Panes.remove(value.tree, tab.id),
+        focus: value.focus == tab.id ? null : value.focus,
+      );
+    }
     // Um solto que sai de perto de presos deixa o lugar marcado: ver [_hole].
     final loose = Panes.has(panes, tab.id) && !isPinned(tab);
     final tree = loose ? Panes.copy(panes) : null;
@@ -3182,8 +3745,13 @@ class AppStore extends ChangeNotifier {
     // Encerrar o último painel com sessões vivas na lateral deixaria a tela
     // limpa no meio do trabalho: quando não sobra painel nenhum, a última
     // sessão aberta ocupa o lugar.
+    //
+    // Da mesma tela: fechar a última janela do quadro não pode jogar você numa
+    // sessão, nem fechar a última sessão te levar pro quadro.
     if (panes == null) {
-      if (tabs.lastWhereOrNull((t) => !t.embedded) case final next?) _place(next);
+      if (tabs.lastWhereOrNull((t) => !t.embedded && screenOf(t) == _screen) case final next?) {
+        _place(next);
+      }
     }
     _save();
     notifyListeners();
@@ -3327,7 +3895,9 @@ class AppStore extends ChangeNotifier {
   PaneGroup? saveGroup(String name) {
     final title = name.trim();
     final open = openPanes;
-    if (title.isEmpty || open.isEmpty) return null;
+    // Um grupo é uma grade de sessões. As janelas de plugin não voltam com o
+    // app, então uma grade da tela de um plugin seria um grupo que não abre.
+    if (title.isEmpty || open.isEmpty || _screen != null) return null;
     final at = groups.indexWhere((g) => g.name.toLowerCase() == title.toLowerCase());
     final group = PaneGroup(
       // Numa atualização, o id do grupo que estava ali: é o mesmo grupo, com
@@ -3363,7 +3933,7 @@ class AppStore extends ChangeNotifier {
   /// Null com menos de dois painéis na tela: um painel sozinho não é grade.
   PaneGroup? groupPanes() {
     final open = openPanes;
-    if (open.length < 2) return null;
+    if (open.length < 2 || _screen != null) return null;
     final base = PaneGroup.summarize([for (final t in open) t.recipe]);
     // Nome novo e não o de um grupo existente: cair no nome de outro faria
     // [saveGroup] atualizar aquele grupo em vez de criar este.
@@ -3556,7 +4126,7 @@ class AppStore extends ChangeNotifier {
     final patience = Duration(minutes: hibernateMinutes);
     var changed = false;
     for (final tab in [...tabs]) {
-      if (!canHibernate(tab) || isOpen(tab)) continue;
+      if (!canHibernate(tab) || _placed(tab)) continue;
       final status = tab.status;
       if (status != ClaudeStatus.ready && !status.atRest) continue;
       if (tab.armed || tab.followUps.isNotEmpty || tab.hooks.busyForks) continue;
@@ -3688,20 +4258,24 @@ class AppStore extends ChangeNotifier {
   /// vista, e clicar numa sessão da lateral continua sendo o que sempre foi:
   /// aquela sessão no lugar em foco.
   void openGroup(PaneGroup group) {
+    _enter(null);
     // Suspende a gravação como faz a restauração da última execução: abrir
     // seis painéis seriam seis gravações do config, e a que interessa é a do
     // arranjo pronto, no fim.
     _restoring = true;
     final taken = <String>{};
     final panels = <MxTab?>[];
-    for (final pane in group.panes) {
-      final tab = _adopt(pane, taken) ?? _openPane(pane);
-      // Uma posição por receita, com null onde nada abriu: as folhas da árvore
-      // são índices desta lista. Ver [_restoreLayout].
-      panels.add(tab);
-      if (tab != null) taken.add(tab.id);
+    try {
+      for (final pane in group.panes) {
+        final tab = _adopt(pane, taken) ?? _openPane(pane);
+        // Uma posição por receita, com null onde nada abriu: as folhas da
+        // árvore são índices desta lista. Ver [_restoreLayout].
+        panels.add(tab);
+        if (tab != null) taken.add(tab.id);
+      }
+    } finally {
+      _restoring = false;
     }
-    _restoring = false;
 
     final first = panels.nonNulls.firstOrNull;
     if (first == null) {
@@ -3796,6 +4370,9 @@ class AppStore extends ChangeNotifier {
       focusPane(tab);
       return;
     }
+    // Uma sessão não entra na tela do quadro, nem uma janela dele na grade das
+    // sessões: soltar é escolher, e ela vai pra tela que é a dela.
+    if (screenOf(tab) != _screen) return select(tab);
     _drop(tab);
     if (side == DropSide.center) {
       // Soltar em cima de um preso é trocar o que está no lugar preso, de
@@ -3912,11 +4489,16 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Move the focused pane through the panel list.
+  ///
+  /// Só pelos da tela na vista: andar pelas sessões não pode cair no quadro
+  /// do Wiboor no meio do caminho, nem andar pelas tarefas abertas cair numa
+  /// sessão. Ver [screen].
   void cycle(int delta) {
-    if (tabs.isEmpty) return;
-    final current = tabs.indexWhere((t) => t.id == focusedTab?.id);
-    final next = (current + delta) % tabs.length;
-    select(tabs[next < 0 ? next + tabs.length : next]);
+    final ring = tabs.where((t) => screenOf(t) == _screen).toList();
+    if (ring.isEmpty) return;
+    final current = ring.indexWhere((t) => t.id == focusedTab?.id);
+    final next = (current + delta) % ring.length;
+    select(ring[next < 0 ? next + ring.length : next]);
   }
 
   /// Os painéis de uma pasta. As janelas de plugin ficam fora: elas moram na
@@ -3976,11 +4558,18 @@ class AppStore extends ChangeNotifier {
   /// Entra mesmo lida: o sino é também o histórico do dia, e "o que terminou
   /// na última hora" inclui o que terminou na sua frente. O que ela não faz,
   /// lida, é contar no número do sino.
-  void _notice(MxTab tab, MxNoticeKind kind) {
+  void _notice(MxTab tab, MxNoticeKind kind, {String? suggestionId, String? detail}) {
     // Um aviso novo do mesmo painel aposenta os de antes: a pergunta que ele
-    // fez já foi respondida, ou ele não estaria parando de novo.
-    readNoticesOf(tab.id, notify: false);
-    final notice = MxNotice(tabId: tab.id, kind: kind, title: tab.title)..read = watching(tab);
+    // fez já foi respondida, ou ele não estaria parando de novo. Uma sugestão
+    // não é uma parada, e não responde nada.
+    if (kind != MxNoticeKind.suggested) readNoticesOf(tab.id, notify: false);
+    final notice = MxNotice(
+      tabId: tab.id,
+      kind: kind,
+      title: tab.title,
+      suggestionId: suggestionId,
+      detail: detail,
+    )..read = watching(tab);
     notices.insert(0, notice);
     if (notices.length > noticeCap) {
       for (final old in notices.sublist(noticeCap)) {
@@ -4060,9 +4649,13 @@ class AppStore extends ChangeNotifier {
   void toggleDoNotDisturb() => setDoNotDisturb(!doNotDisturb);
 
   /// Dá por lidos os avisos de um painel. Devolve se apagou algum.
-  bool readNoticesOf(String tabId, {bool notify = true}) {
+  ///
+  /// Com [suggestions] falso, as sugestões ficam: a sessão que sugere segue
+  /// trabalhando logo depois, e "voltou a trabalhar" não é você ter visto.
+  bool readNoticesOf(String tabId, {bool notify = true, bool suggestions = true}) {
     var changed = false;
     for (final n in notices) {
+      if (!suggestions && n.kind == MxNoticeKind.suggested) continue;
       if (n.tabId == tabId && !n.read) {
         n.read = true;
         _dropToast(n);
@@ -4220,7 +4813,7 @@ class AppStore extends ChangeNotifier {
         _notice(tab, MxNoticeKind.finished);
       } else if (!after.needsHuman && !after.atRest) {
         // Voltou a trabalhar: o que ele pedia já foi dado.
-        readNoticesOf(tab.id, notify: false);
+        readNoticesOf(tab.id, notify: false, suggestions: false);
       }
     }
     if (!before.atRest && tab.hooks.status.atRest) {
@@ -4552,7 +5145,10 @@ class AppStore extends ChangeNotifier {
   Future<void> shutdown() async {
     // A gravação vem antes das mortes, não depois: [_writeConfig] só salva
     // painel que ainda roda, então um save que caísse depois dos hangups
-    // restauraria uma janela vazia na próxima abertura.
+    // restauraria uma janela vazia na próxima abertura. E nenhuma depois
+    // delas: o shell que morre na hora agenda um save, e ele disparava
+    // enquanto o claude ao lado ainda gastava a carência dele.
+    _quitting = true;
     if (_saveDebounce?.isActive ?? false) {
       _saveDebounce!.cancel();
       await _writeConfig();

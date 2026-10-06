@@ -13,6 +13,7 @@ import 'ui/notices.dart';
 import 'ui/panes.dart';
 import 'ui/plugin_dialogs.dart';
 import 'ui/plugin_float.dart';
+import 'ui/plugin_modal.dart';
 import 'ui/sidebar.dart';
 import 'ui/sidebar_rail.dart';
 
@@ -93,6 +94,14 @@ class _MaestriaAppState extends State<MaestriaApp> {
                 // do navegador, e é aqui que há um. Ver [AppStore.quickPick].
                 store.quickPick = ({required title, placeholder, required items}) =>
                     showQuickPick(ctx, title: title, placeholder: placeholder, items: items);
+                store.quickForm = (form) => showQuickForm(ctx, form);
+                store.quickInput = ({required title, placeholder, value, prompt}) => showQuickInput(
+                  ctx,
+                  title: title,
+                  placeholder: placeholder,
+                  value: value,
+                  prompt: prompt,
+                );
                 final top = store.statusBarTop;
                 final banner = _Banner(
                   // A chave é o texto: recado novo é widget novo, e a entrada
@@ -227,6 +236,9 @@ class _MaestriaAppState extends State<MaestriaApp> {
                             // cima de tudo o que fica acima da barra: a lateral e os
                             // painéis. Ver [PluginFloatLayer].
                             Positioned.fill(child: PluginFloatLayer(store: store)),
+                            // A janela de plugin em modal, por cima de tudo, até dos
+                            // flutuantes. Ver [PluginModalLayer].
+                            Positioned.fill(child: PluginModalLayer(store: store)),
                           ],
                         ),
                       ),
@@ -309,8 +321,12 @@ class _Keys extends StatelessWidget {
 
   @override
   Widget build(BuildContext _) {
-    return CallbackShortcuts(
-      bindings: MxKeys.bindings(store, context),
+    final bindings = MxKeys.bindings(store, context);
+    // Ver [MxKeys.dispatch] pro porquê de não ser um [CallbackShortcuts].
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (_, event) => MxKeys.dispatch(bindings, event),
       // A focus node of our own, always in the subtree.
       //
       // Key events travel up from whatever holds primary focus; with no panel

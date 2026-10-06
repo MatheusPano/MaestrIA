@@ -319,6 +319,7 @@ class PluginPane extends StatefulWidget {
     this.showFocus = false,
     this.onFocus,
     this.bare = false,
+    this.framed = true,
   });
 
   final AppStore store;
@@ -331,6 +332,10 @@ class PluginPane extends StatefulWidget {
   /// plugin desenha na lateral (`sidebar.update`). Mais apertado e numa letra
   /// um passo menor, que é o corpo da lateral -- os blocos são os mesmos.
   final bool bare;
+
+  /// `false`: o corpo de uma janela, no tamanho de janela, mas sem a moldura
+  /// nem o cabeçalho de painel -- quem os põe é o modal ([PluginModalLayer]).
+  final bool framed;
 
   @override
   State<PluginPane> createState() => _PluginPaneState();
@@ -438,54 +443,57 @@ class _PluginPaneState extends State<PluginPane> {
         ],
       );
     }
+    final body = Column(
+      children: [
+        if (widget.framed)
+          _Header(
+            store: widget.store,
+            tab: widget.tab,
+            dimmed: widget.showFocus && !widget.focused,
+          ),
+        if (down)
+          _Stopped(
+            why: plugin?.crash ?? 'O plugin não está mais instalado',
+            onRestart: plugin == null ? null : () => widget.store.plugins.restart(plugin),
+          ),
+        Expanded(
+          child:
+              _rfw() ??
+              _expanding() ??
+              (_view.blocks.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Nada pra mostrar ainda',
+                        style: TextStyle(fontSize: 13, color: Mx.fgFaint),
+                      ),
+                    )
+                  : Scrollbar(
+                      controller: _scroll,
+                      child: SingleChildScrollView(
+                        controller: _scroll,
+                        padding: const EdgeInsets.fromLTRB(22, 18, 22, 32),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 760),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [for (final b in _view.blocks) _block(b)],
+                            ),
+                          ),
+                        ),
+                      ),
+                    )),
+        ),
+      ],
+    );
+    if (!widget.framed) return body;
     return Listener(
       onPointerDown: (_) => widget.onFocus?.call(),
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,
         tint: widget.store.tintOf(widget.tab),
-        child: Column(
-          children: [
-            _Header(
-              store: widget.store,
-              tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
-            ),
-            if (down)
-              _Stopped(
-                why: plugin?.crash ?? 'O plugin não está mais instalado',
-                onRestart: plugin == null ? null : () => widget.store.plugins.restart(plugin),
-              ),
-            Expanded(
-              child:
-                  _rfw() ??
-                  _expanding() ??
-                  (_view.blocks.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Nada pra mostrar ainda',
-                            style: TextStyle(fontSize: 13, color: Mx.fgFaint),
-                          ),
-                        )
-                      : Scrollbar(
-                          controller: _scroll,
-                          child: SingleChildScrollView(
-                            controller: _scroll,
-                            padding: const EdgeInsets.fromLTRB(22, 18, 22, 32),
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 760),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [for (final b in _view.blocks) _block(b)],
-                                ),
-                              ),
-                            ),
-                          ),
-                        )),
-            ),
-          ],
-        ),
+        child: body,
       ),
     );
   }
@@ -648,7 +656,8 @@ class _PluginPaneState extends State<PluginPane> {
             children: [
               Text(
                 (b['title'] as String?) ?? '',
-                maxLines: 1,
+                // `wrap`: o título longo quebra (até três linhas) em vez de cortar.
+                maxLines: b['wrap'] == true ? 3 : 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: _size + (widget.bare ? 2.5 : 5),
@@ -2263,6 +2272,25 @@ class _Header extends StatelessWidget {
                 style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 onPressed: () => showPluginSettings(context, store, plugin),
                 icon: Icon(Icons.tune, color: Mx.fgDim),
+              ),
+            ),
+          // A janela de um plugin com tela própria vai e volta entre a tela
+          // dele e a das sessões -- a tarefa do Wiboor ao lado do claude.
+          if (store.homeScreenOf(tab) case final home?)
+            _faded(
+              IconButton(
+                tooltip: tab.onSessions
+                    ? 'devolver pra tela do ${store.plugins.byId(home)?.name ?? 'plugin'}'
+                    : 'levar pra tela das sessões, ao lado do painel em foco lá',
+                iconSize: 15,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                onPressed: () => tab.onSessions ? store.returnView(tab) : store.releaseView(tab),
+                icon: Icon(
+                  tab.onSessions ? Icons.keyboard_return : Icons.vertical_split_outlined,
+                  color: Mx.fgDim,
+                ),
               ),
             ),
           if (store.isPinned(tab) || store.paneCount > 1)

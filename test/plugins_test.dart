@@ -1974,6 +1974,93 @@ void main() {
       expect(store.actions, ['act'], reason: 'a escolha vai no onMenu');
     });
 
+    testWidgets('alvo dentro de alvo: a coluna arrastada cai no de fora, o cartão no de dentro', (tester) async {
+      const board = '''
+        import core.widgets;
+        import maestria;
+        widget root = Row(children: [
+          ...for col in data.cols:
+            Expanded(
+              child: DropTarget(
+                id: col.slot,
+                onDrop: event "drop" {},
+                child: DropTarget(
+                  id: col.id,
+                  onDrop: event "drop" {},
+                  child: Column(children: [
+                    Draggable(payload: col.slot, targets: col.slots, width: 120.0, child: SizedBox(height: 30.0, child: Text(text: col.title))),
+                    ...for card in col.cards:
+                      Draggable(payload: card.id, targets: card.targets, width: 120.0, child: SizedBox(height: 40.0, child: Text(text: card.title))),
+                    SizedBox(height: 200.0),
+                  ]),
+                ),
+              ),
+            ),
+        ]);
+      ''';
+      final store = _ActionsStore();
+      final tab = rfwTab({
+        'cols': [
+          {'id': 'todo', 'slot': 'col:todo', 'slots': ['col:doing'], 'title': 'A fazer', 'cards': [{'id': 't1', 'title': 'cartão', 'targets': ['doing']}]},
+          {'id': 'doing', 'slot': 'col:doing', 'slots': ['col:todo'], 'title': 'Fazendo', 'cards': []},
+        ],
+      }, text: board);
+      await pump(tester, store, tab);
+      await tester.pump();
+
+      Future<void> drag(String from, String to) async {
+        final g = await tester.startGesture(tester.getCenter(find.text(from)));
+        await g.moveBy(const Offset(20, 0));
+        await g.moveTo(tester.getCenter(find.text(to)) + const Offset(0, 60));
+        await tester.pump();
+        await g.up();
+        await tester.pumpAndSettle();
+      }
+
+      await drag('A fazer', 'Fazendo');
+      await drag('cartão', 'Fazendo');
+      expect(store.values, [
+        {'payload': 'col:todo', 'to': 'col:doing'},
+        {'payload': 't1', 'to': 'doing'},
+      ]);
+    });
+
+    testWidgets('o alvo tem o tamanho do filho, até numa lista horizontal sem fim', (tester) async {
+      // A coluna de um quadro mora num ListView horizontal: a largura que ele
+      // dá é infinita. Um alvo que tirasse o tamanho do pai quebrava o layout,
+      // e o mouse em cima virava uma enxurrada de "Null check" no hit test.
+      const board = '''
+        import core.widgets;
+        import maestria;
+        widget root = ListView(scrollDirection: "horizontal", children: [
+          ...for col in data.cols:
+            DropTarget(
+              id: col.slot,
+              hint: "solte",
+              onDrop: event "drop" {},
+              child: DropTarget(id: col.id, onDrop: event "drop" {}, child: SizedBox(width: 200.0, child: Text(text: col.id))),
+            ),
+        ]);
+      ''';
+      final store = _ActionsStore();
+      final tab = rfwTab({
+        'cols': [
+          {'id': 'todo', 'slot': 'col:todo'},
+          {'id': 'doing', 'slot': 'col:doing'},
+        ],
+      }, text: board);
+      await pump(tester, store, tab);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(find.text('todo')).width, 200);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(find.text('todo')));
+      await mouse.moveTo(tester.getCenter(find.text('doing')));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await mouse.removePointer();
+    });
+
     testWidgets('um erro no texto aparece na janela, pra quem escreveu o plugin', (tester) async {
       final store = AppStore();
       final tab = rfwTab({}, text: 'widget root = Column(children: [');

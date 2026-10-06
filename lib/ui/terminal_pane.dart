@@ -16,6 +16,7 @@ import 'dialogs.dart';
 import 'keys.dart';
 import 'panel.dart';
 import 'result_strip.dart';
+import 'suggestions.dart';
 
 /// One pane: header that says what this panel is, then the pty.
 ///
@@ -91,10 +92,31 @@ class _TerminalPaneState extends State<TerminalPane> {
               onToggleResult: () => setState(() => _resultOpen = !_resultOpen),
             ),
             Expanded(
-              child: _TerminalSurface(
-                store: widget.store,
-                tab: widget.tab,
-                focused: widget.focused,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: _TerminalSurface(
+                      store: widget.store,
+                      tab: widget.tab,
+                      focused: widget.focused,
+                    ),
+                  ),
+                  // O que a sessão viu de passagem e deixou pra você decidir,
+                  // por cima do terminal e não abaixo dele. Ver
+                  // [SuggestionCard].
+                  if (SuggestionCard.has(widget.tab))
+                    // Presa dos dois lados: num painel estreito o cartão
+                    // encolhe em vez de vazar pela esquerda.
+                    Positioned(
+                      left: SuggestionCard.inset,
+                      right: SuggestionCard.inset,
+                      bottom: SuggestionCard.inset,
+                      child: Align(
+                        alignment: Alignment.bottomRight,
+                        child: SuggestionCard(store: widget.store, tab: widget.tab),
+                      ),
+                    ),
+                ],
               ),
             ),
             // Colada no rodapé do terminal, e sem clique nenhum: o documento
@@ -529,8 +551,8 @@ class _PaneHeader extends StatelessWidget {
             // // estreito que engole as fichas: um microfone aberto é a única
             // // coisa neste cabeçalho que precisa ser vista sempre.
             // if (store.dictation.phaseOf(tab.id) case final phase
-                // when phase != DictationPhase.idle)
-              // _DictationMark(store: store, phase: phase),
+            // when phase != DictationPhase.idle)
+            // _DictationMark(store: store, phase: phase),
             _faded(
               Row(
                 mainAxisSize: MainAxisSize.min,

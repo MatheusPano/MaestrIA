@@ -109,8 +109,17 @@ class _DocPaneState extends State<DocPane> {
   /// O que é daqui é a base: um caminho relativo escrito num `.md` é relativo
   /// à pasta do próprio arquivo, e não à da sessão — é o que o autor do link
   /// quis dizer.
-  void _follow(String? href) {
-    if (href == null) return;
+  void _follow(String? link) {
+    if (link == null) return;
+    var href = link;
+    // O markdown entrega o destino já codificado: `decisões.md` chega como
+    // `decis%C3%B5es.md`, e esse arquivo não existe. Só o que é caminho --
+    // uma URL vai pro navegador do jeito que veio.
+    if (!RegExp(r'^[A-Za-z][A-Za-z0-9+.-]*:').hasMatch(href)) {
+      try {
+        href = Uri.decodeFull(href);
+      } catch (_) {}
+    }
     widget.store.followLink(
       href,
       from: widget.tab,

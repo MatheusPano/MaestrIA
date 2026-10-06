@@ -87,6 +87,17 @@ void main() {
       expect(linkAt('(veja https://x.dev/a)', 10), 'https://x.dev/a');
     });
 
+    test('o parêntese dentro do endereço é dele, e clicar depois dele também vale', () {
+      const line = 'veja https://en.wikipedia.org/wiki/Rust_(programming_language).';
+      const url = 'https://en.wikipedia.org/wiki/Rust_(programming_language)';
+      expect(linkAt(line, 10), url);
+      expect(linkAt(line, line.indexOf('programming')), url);
+      expect(
+        linkAt('(veja https://en.wikipedia.org/wiki/Rust_(x))', 10),
+        'https://en.wikipedia.org/wiki/Rust_(x)',
+      );
+    });
+
     test('um mailto é link; um ftp:// não, porque o app não sabe abrir', () {
       expect(linkAt('escreva pra mailto:eu@marrow.com.br', 20), 'mailto:eu@marrow.com.br');
       expect(linkAt('pegue em ftp://x.dev/a', 15), isNull);

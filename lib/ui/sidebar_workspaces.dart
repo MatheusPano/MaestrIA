@@ -32,44 +32,53 @@ class _WorkspaceSection extends StatelessWidget {
           store: store,
           place: (row: workspace, within: null),
           acceptsInto: true,
-          child: InkWell(
-            onTap: () => store.toggleWorkspaceCollapsed(workspace),
-            onSecondaryTapDown: (d) =>
-                showWorkspaceMenu(context, store, workspace, d.globalPosition),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    collapsed ? Icons.chevron_right : Icons.expand_more,
-                    size: 20,
-                    color: Mx.fgDim,
-                  ),
-                  const SizedBox(width: 3),
-                  // Nem o glifo de repo nem o da feature: um workspace não é um
-                  // checkout e não é um trabalho com nome.
-                  Icon(Icons.hexagon_outlined, size: 15, color: workspace.tint?.color ?? Mx.accent),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      workspace.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+          // O respiro de cima fica fora do InkWell: dentro, o hover pintava
+          // ele junto e a linha aparecia descentrada no realce.
+          child: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: InkWell(
+              onTap: () => store.toggleWorkspaceCollapsed(workspace),
+              onSecondaryTapDown: (d) =>
+                  showWorkspaceMenu(context, store, workspace, d.globalPosition),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      collapsed ? Icons.chevron_right : Icons.expand_more,
+                      size: 20,
+                      color: Mx.fgDim,
                     ),
-                  ),
-                  // Fechada, a seção é a única linha que sobra de tudo que está
-                  // lá dentro: o aviso de uma sessão parada tem que atravessar.
-                  if (collapsed && alerts > 0) _Badge(count: alerts),
-                  Text(
-                    count == 1 ? '1 pasta' : '$count pastas',
-                    style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
-                  ),
-                  _RowButton(
-                    tooltip: 'O que fazer com esse workspace',
-                    icon: Icons.more_horiz,
-                    onTap: (anchor) => showWorkspaceMenu(context, store, workspace, anchor),
-                  ),
-                ],
+                    const SizedBox(width: 3),
+                    // Nem o glifo de repo nem o da feature: um workspace não é um
+                    // checkout e não é um trabalho com nome.
+                    Icon(
+                      Icons.hexagon_outlined,
+                      size: 15,
+                      color: workspace.tint?.color ?? Mx.accent,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        workspace.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      ),
+                    ),
+                    // Fechada, a seção é a única linha que sobra de tudo que está
+                    // lá dentro: o aviso de uma sessão parada tem que atravessar.
+                    if (collapsed && alerts > 0) _Badge(count: alerts),
+                    Text(
+                      count == 1 ? '1 pasta' : '$count pastas',
+                      style: TextStyle(color: Mx.fgFaint, fontSize: 11.5),
+                    ),
+                    _RowButton(
+                      tooltip: 'O que fazer com esse workspace',
+                      icon: Icons.more_horiz,
+                      onTap: (anchor) => showWorkspaceMenu(context, store, workspace, anchor),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

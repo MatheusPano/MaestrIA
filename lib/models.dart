@@ -659,13 +659,21 @@ enum MxNoticeKind {
   permission,
 
   /// Terminou o turno: a virada pra [ClaudeStatusUi.atRest].
-  finished;
+  finished,
+
+  /// Deixou uma tarefa sugerida. Ver [SuggestedTask].
+  ///
+  /// O único aviso que não é uma parada: a sessão segue trabalhando depois de
+  /// sugerir. Por isso ele não aposenta os outros do painel nem é aposentado
+  /// quando a sessão volta a trabalhar -- ver [AppStore.readNoticesOf].
+  suggested;
 
   /// O verbo da linha, depois do nome do painel.
   String get verb => switch (this) {
     MxNoticeKind.question => 'te fez uma pergunta',
     MxNoticeKind.permission => 'quer aprovação',
     MxNoticeKind.finished => 'terminou o trabalho',
+    MxNoticeKind.suggested => 'sugeriu uma tarefa',
   };
 
   /// A cor e o glifo são os da lateral pro mesmo estado: a linha do sino e a
@@ -674,12 +682,14 @@ enum MxNoticeKind {
     MxNoticeKind.question => Mx.yellow,
     MxNoticeKind.permission => Mx.red,
     MxNoticeKind.finished => Mx.green,
+    MxNoticeKind.suggested => Mx.accent,
   };
 
   IconData get icon => switch (this) {
     MxNoticeKind.question => Icons.question_mark_rounded,
     MxNoticeKind.permission => Icons.lock_rounded,
     MxNoticeKind.finished => Icons.check_rounded,
+    MxNoticeKind.suggested => Icons.lightbulb_outline_rounded,
   };
 }
 
@@ -689,13 +699,29 @@ enum MxNoticeKind {
 /// o painel *agora* -- renomear depois do aviso tem que renomear o aviso. O
 /// [title] é só o que sobra pra mostrar quando o painel já foi fechado.
 class MxNotice {
-  MxNotice({required this.tabId, required this.kind, required this.title, DateTime? at})
-    : at = at ?? DateTime.now();
+  MxNotice({
+    required this.tabId,
+    required this.kind,
+    required this.title,
+    this.suggestionId,
+    this.detail,
+    DateTime? at,
+  }) : at = at ?? DateTime.now();
 
   final String tabId;
   final MxNoticeKind kind;
   final String title;
   final DateTime at;
+
+  /// A sugestão que este aviso anuncia, num [MxNoticeKind.suggested]: o
+  /// clique abre o cartão dela, e não só o painel. Ver
+  /// [AppStore.suggestionOf].
+  final String? suggestionId;
+
+  /// O que vem depois do verbo -- o título da sugestão. Guardado no aviso e
+  /// não lido da sugestão: depois de iniciada ela sai do painel, e a linha do
+  /// sino continua tendo que dizer o que foi sugerido.
+  final String? detail;
 
   /// Você já viu: abriu pelo sino, ou ficou olhando o painel. Ver
   /// [AppStore.readNoticesOf].
@@ -732,6 +758,58 @@ class PlanNote {
     final text = j['text'] as String?;
     if (text == null || text.trim().isEmpty) return null;
     return PlanNote(text: text, at: DateTime.tryParse(j['at'] as String? ?? ''));
+  }
+}
+
+/// O que dá pra fazer com uma sugestão. Os mesmos quatro do Desktop, menos a
+/// nuvem. Ver [SuggestedTask].
+enum SuggestionChoice { worktree, local, here, dismiss }
+
+/// Um trabalho que a sessão viu de passagem e deixou pra depois.
+///
+/// O cartão de "tarefa sugerida" do Claude Desktop, trazido pra cá. Lá ele vem
+/// de uma ferramenta que o app injeta nas sessões que abre; o CLI não tem
+/// nada parecido, então a Maestria oferece a sua -- ver `services/task_mcp.dart`.
+/// A sessão chama `suggest_task` em vez de ampliar o escopo do que você pediu,
+/// e o que sobra é isto: um título, um resumo pra decidir, e o prompt inteiro
+/// com que a sessão nova vai começar.
+class SuggestedTask {
+  SuggestedTask({
+    required this.id,
+    required this.title,
+    required this.tldr,
+    required this.prompt,
+    DateTime? at,
+  }) : at = at ?? DateTime.now();
+
+  /// `task_` e oito hexadecimais: o que a sessão guarda pra retirar a
+  /// sugestão depois com `dismiss_task`.
+  final String id;
+  final String title;
+  final String tldr;
+  final String prompt;
+  final DateTime at;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'tldr': tldr,
+    'prompt': prompt,
+    'at': at.toIso8601String(),
+  };
+
+  static SuggestedTask? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final id = j['id'] as String?;
+    final prompt = j['prompt'] as String?;
+    if (id == null || prompt == null || prompt.trim().isEmpty) return null;
+    return SuggestedTask(
+      id: id,
+      title: (j['title'] as String?) ?? '',
+      tldr: (j['tldr'] as String?) ?? '',
+      prompt: prompt,
+      at: DateTime.tryParse(j['at'] as String? ?? ''),
+    );
   }
 }
 
@@ -858,6 +936,14 @@ class HookState {
 
   /// O plano da vez, que é o que o cabeçalho do painel oferece.
   PlanNote? get plan => plans.isEmpty ? null : plans.last;
+
+  /// As tarefas que a sessão sugeriu e você ainda não iniciou nem descartou,
+  /// na ordem em que vieram. Ver [SuggestedTask].
+  final List<SuggestedTask> suggestions = [];
+
+  /// O mesmo teto do Desktop. Uma sessão que sugere mais que isso não está
+  /// anotando o que viu de passagem: está fatiando o próprio trabalho.
+  static const maxSuggestions = 20;
 
   /// The session came up and has nothing to report. Answers false when the
   /// panel had already moved on, so a late caller cannot walk a working

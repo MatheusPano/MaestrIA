@@ -403,6 +403,7 @@ Future<void> showPanelMenu(
         ),
       if (store.paneCount > 1 &&
           store.isOpen(tab) &&
+          store.screen == null &&
           (grouped == null || !store.showing(grouped)))
         mxItem(
           'group',
@@ -738,11 +739,17 @@ Future<void> showLooseIn(BuildContext context, AppStore store) async {
 }
 
 /// The "nova task" flow: worktree with the team's naming, then a session in it.
-Future<void> showNewTask(
+///
+/// Com [prompt], a sessão já nasce com ele mandado -- é como uma tarefa
+/// sugerida vira uma worktree. A sugestão não traz o id: ele é do tracker, e
+/// a branch e o commit dependem dele, então quem dá é você, aqui.
+Future<MxTab?> showNewTask(
   BuildContext context,
   AppStore store,
   Folder folder, {
   FeatureOrHotfix? featureOrHotfix,
+  String? prompt,
+  String? heading,
 }) async {
   final id = TextEditingController();
   final branch = TextEditingController(text: 'feature/TASK#{id}');
@@ -755,7 +762,7 @@ Future<void> showNewTask(
     builder: (ctx) => AlertDialog(
       backgroundColor: Mx.bgSidebar,
       title: Text(
-        'Nova task em ${featureOrHotfix?.name ?? folder.name}',
+        heading ?? 'Nova task em ${featureOrHotfix?.name ?? folder.name}',
         style: const TextStyle(fontSize: 15),
       ),
       content: SizedBox(
@@ -820,8 +827,8 @@ Future<void> showNewTask(
     ),
   );
 
-  if (go != true || id.text.trim().isEmpty) return;
-  await store.newTask(
+  if (go != true || id.text.trim().isEmpty) return null;
+  return store.newTask(
     folder,
     taskId: id.text.trim(),
     branchPattern: branch.text.trim(),
@@ -829,6 +836,7 @@ Future<void> showNewTask(
     baseRef: base.text.trim().isEmpty ? null : base.text.trim(),
     setupCommand: setup.text,
     featureOrHotfix: featureOrHotfix,
+    prompt: prompt,
   );
 }
 
@@ -959,9 +967,12 @@ Future<void> confirmRemoveWorktree(
                 _Fact(
                   icon: safety.dirty == 0 ? Icons.check_rounded : Icons.warning_amber_rounded,
                   color: safety.dirty == 0 ? Mx.green : Mx.yellow,
-                  text: safety.dirty == 0
-                      ? 'Nada não commitado'
-                      : '${safety.dirty} arquivo(s) não commitado(s) — isso se perde',
+                  text: switch (safety.dirty) {
+                    null => 'Não deu pra ler o git status — pode haver trabalho não commitado',
+                    0 => 'Nada não commitado',
+                    1 => '1 arquivo não commitado — isso se perde',
+                    final n => '$n arquivos não commitados — isso se perde',
+                  },
                 ),
                 _Fact(
                   icon: safety.base == null
@@ -978,7 +989,9 @@ Future<void> confirmRemoveWorktree(
                       ? 'Sem base pra comparar os commits'
                       : safety.unmerged == 0
                       ? 'Todo commit daqui já está em ${safety.base}'
-                      : '${safety.unmerged} commit(s) que não estão em ${safety.base}',
+                      : safety.unmerged == 1
+                      ? '1 commit que não está em ${safety.base}'
+                      : '${safety.unmerged} commits que não estão em ${safety.base}',
                 ),
               ],
               if (!worktree.isMain && worktree.branch != '(detached)') ...[
@@ -1018,7 +1031,13 @@ Future<void> confirmRemoveWorktree(
     ),
   );
   if (go != true) return;
-  await store.removeWorktree(folder, worktree, force: safety.risky, deleteBranch: deleteBranch);
+  await store.removeWorktree(
+    folder,
+    worktree,
+    force: safety.risky,
+    forceBranch: safety.forceBranch,
+    deleteBranch: deleteBranch,
+  );
 }
 
 /// One line of "here is what is true about this worktree".

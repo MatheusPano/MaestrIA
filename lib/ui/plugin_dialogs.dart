@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -498,6 +499,302 @@ class _QuickPickState extends State<_QuickPick> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// O campo de texto rápido de um plugin (`window.input`): o `showInputBox` do
+/// VS Code.
+///
+/// Existe porque perguntar um nome -- o de um grupo novo -- abria uma janela
+/// inteira na grade pra um campo só. Aqui é o mesmo cartão do [showQuickPick],
+/// no mesmo lugar: o enter confirma, e o esc ou o clique fora devolvem null.
+/// O texto volta como foi digitado, sem os espaços das pontas; vazio é null.
+Future<String?> showQuickInput(
+  BuildContext context, {
+  required String title,
+  String? placeholder,
+  String? value,
+  String? prompt,
+}) => showDialog<String>(
+  context: context,
+  barrierColor: const Color(0x33000000),
+  builder: (ctx) =>
+      _QuickInput(title: title, placeholder: placeholder, value: value, prompt: prompt),
+);
+
+class _QuickInput extends StatefulWidget {
+  const _QuickInput({required this.title, this.placeholder, this.value, this.prompt});
+
+  final String title;
+  final String? placeholder;
+  final String? value;
+  final String? prompt;
+
+  @override
+  State<_QuickInput> createState() => _QuickInputState();
+}
+
+class _QuickInputState extends State<_QuickInput> {
+  // Com o valor de antes todo selecionado: renomear é quase sempre trocar tudo.
+  late final _text = TextEditingController(text: widget.value)
+    ..selection = TextSelection(baseOffset: 0, extentOffset: widget.value?.length ?? 0);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _text.text.trim();
+    Navigator.pop(context, text.isEmpty ? null : text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Mx.bgSidebar,
+      alignment: const Alignment(0, -0.6),
+      child: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              child: Text(widget.title, style: TextStyle(fontSize: 12, color: Mx.fgDim)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+              child: TextField(
+                controller: _text,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                onSubmitted: (_) => _submit(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: widget.placeholder,
+                  hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Text(
+                widget.prompt ?? 'enter pra confirmar, esc pra cancelar',
+                style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// O formulário em modal de um plugin (`window.form`). Ver [PluginForm].
+///
+/// Volta o botão apertado e os valores de todos os campos, inclusive os que o
+/// `showIf` escondeu -- quem decide o que eles querem dizer é o plugin. Null é
+/// o cancelar, o esc ou o clique fora.
+Future<({String action, Map<String, String> values})?> showQuickForm(
+  BuildContext context,
+  PluginForm form,
+) => showDialog<({String action, Map<String, String> values})>(
+  context: context,
+  builder: (ctx) => _QuickForm(form: form),
+);
+
+class _QuickForm extends StatefulWidget {
+  const _QuickForm({required this.form});
+
+  final PluginForm form;
+
+  @override
+  State<_QuickForm> createState() => _QuickFormState();
+}
+
+class _QuickFormState extends State<_QuickForm> {
+  late final Map<String, TextEditingController> _text = {
+    for (final f in widget.form.fields)
+      if (!f.select) f.id: TextEditingController(text: f.value),
+  };
+  late final Map<String, String> _picks = {
+    for (final f in widget.form.fields)
+      if (f.select)
+        f.id: f.options.any((o) => o.$1 == f.value) ? f.value : (f.options.firstOrNull?.$1 ?? ''),
+  };
+
+  /// O campo obrigatório que estava vazio no último clique.
+  String? _missing;
+
+  Map<String, String> get _values => {
+    for (final f in widget.form.fields) f.id: f.select ? _picks[f.id]! : _text[f.id]!.text,
+  };
+
+  @override
+  void dispose() {
+    for (final c in _text.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _press(PluginFormButton b) {
+    final values = _values;
+    if (!b.danger) {
+      final empty = widget.form.fields.firstWhereOrNull(
+        (f) => f.required && f.visibleWith(values) && values[f.id]!.trim().isEmpty,
+      );
+      if (empty != null) {
+        setState(() => _missing = empty.id);
+        return;
+      }
+    }
+    Navigator.pop(context, (action: b.action, values: values));
+  }
+
+  /// O enter de um campo: o botão de destaque, ou o último que não apaga nada.
+  void _submit() {
+    final b =
+        widget.form.buttons.firstWhereOrNull((b) => b.primary) ??
+        widget.form.buttons.lastWhereOrNull((b) => !b.danger);
+    if (b != null) _press(b);
+  }
+
+  static const _border = OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(7)));
+
+  InputDecoration _decoration(PluginFormField f) => InputDecoration(
+    labelText: f.label,
+    hintText: f.placeholder,
+    isDense: true,
+    labelStyle: TextStyle(color: Mx.fgDim, fontSize: 12),
+    hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+    border: _border,
+    errorText: _missing == f.id ? 'falta ${f.label ?? 'este campo'}' : null,
+  );
+
+  Widget _field(PluginFormField f, {required bool first}) {
+    if (!f.select) {
+      return TextField(
+        controller: _text[f.id],
+        autofocus: first,
+        style: const TextStyle(fontSize: 13),
+        onChanged: (_) {
+          if (_missing == f.id) setState(() => _missing = null);
+        },
+        onSubmitted: (_) => _submit(),
+        decoration: _decoration(f),
+      );
+    }
+    return DropdownButtonFormField<String>(
+      initialValue: _picks[f.id],
+      isDense: true,
+      isExpanded: true,
+      dropdownColor: Mx.bgActive,
+      borderRadius: BorderRadius.circular(Mx.radius),
+      elevation: 12,
+      menuMaxHeight: 320,
+      style: TextStyle(fontSize: 13, color: Mx.fg),
+      decoration: _decoration(f),
+      items: [
+        for (final (value, label) in f.options)
+          DropdownMenuItem(
+            value: value,
+            child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+      ],
+      // Repinta: um campo com `showIf` neste aparece ou some.
+      onChanged: (v) => setState(() => _picks[f.id] = v ?? ''),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final form = widget.form;
+    final values = _values;
+    final shown = [
+      for (final f in form.fields)
+        if (f.visibleWith(values)) f,
+    ];
+    final firstText = shown.firstWhereOrNull((f) => !f.select);
+    final danger = [
+      for (final b in form.buttons)
+        if (b.danger) b,
+    ];
+    final rows = <Widget>[];
+    for (var i = 0; i < shown.length; i++) {
+      final f = shown[i];
+      final field = _field(f, first: f == firstText);
+      // Dois de meia largura seguidos dividem a linha; um sozinho fica com a
+      // metade dele, e o resto da linha vazio -- a porta não estica até o fim.
+      if (f.half) {
+        final next = i + 1 < shown.length && shown[i + 1].half ? shown[++i] : null;
+        rows.add(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 10,
+            children: [
+              Expanded(child: field),
+              Expanded(child: next == null ? const SizedBox() : _field(next, first: false)),
+            ],
+          ),
+        );
+      } else {
+        rows.add(field);
+      }
+    }
+    return AlertDialog(
+      backgroundColor: Mx.bgSidebar,
+      title: Text(form.title, style: const TextStyle(fontSize: 15)),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          // O rótulo do primeiro campo sobe pra borda quando ele ganha o foco:
+          // sem este respiro ele é cortado pelo topo da rolagem.
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 12,
+            children: [
+              ...rows,
+              if (form.error case final error?)
+                Text(error, style: TextStyle(fontSize: 12, color: Mx.red)),
+            ],
+          ),
+        ),
+      ),
+      // O que apaga fica na outra ponta, longe do salvar.
+      actionsAlignment: danger.isEmpty ? MainAxisAlignment.end : MainAxisAlignment.spaceBetween,
+      actions: [
+        if (danger.isNotEmpty)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final b in danger)
+                TextButton(
+                  onPressed: () => _press(b),
+                  style: TextButton.styleFrom(foregroundColor: Mx.red),
+                  child: Text(b.label),
+                ),
+            ],
+          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          spacing: 8,
+          children: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('cancelar')),
+            for (final b in form.buttons.where((b) => !b.danger))
+              b.primary
+                  ? FilledButton(onPressed: () => _press(b), child: Text(b.label))
+                  : OutlinedButton(onPressed: () => _press(b), child: Text(b.label)),
+          ],
+        ),
+      ],
     );
   }
 }

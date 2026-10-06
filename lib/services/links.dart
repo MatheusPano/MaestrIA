@@ -58,6 +58,11 @@ String? linkAt(String line, int column, {String? base}) {
   if (column < 0 || column >= line.length) return null;
   if (_breaks.contains(line[column])) return null;
 
+  // A URL primeiro, e lida numa palavra mais larga: dentro de um endereço
+  // parêntese é parte dele (`wiki/Rust_(programming_language)`), e o corte
+  // nele abria a página errada.
+  if (_urlAt(line, column) case final url?) return url;
+
   var from = column;
   var to = column;
   while (from > 0 && !_breaks.contains(line[from - 1])) {
@@ -67,17 +72,12 @@ String? linkAt(String line, int column, {String? base}) {
     to++;
   }
   final token = line.substring(from, to + 1);
+  if (_url.hasMatch(token)) return null;
 
-  // A URL pode vir colada num traço da moldura da TUI (`│https://…`), então o
-  // que vale é de onde o esquema começa — não o começo da palavra.
-  if (_url.firstMatch(token) case final url?) {
-    // Refeito sobre o que sobrou: um `https://` que perdeu o resto pro corte
-    // do fim da frase não é endereço de nada.
-    final trimmed = _trimTail(token.substring(url.start));
-    return _url.hasMatch(trimmed) ? trimmed : null;
-  }
-
-  final path = _trimTail(_atLine.firstMatch(token)?.group(1) ?? token);
+  // O fim da frase sai antes da linha: `lib/a.dart:42.` é o `:42` de sempre
+  // com um ponto colado, e o `:\d+$` só o reconhece sem ele.
+  final bare = _trimTail(token);
+  final path = _trimTail(_atLine.firstMatch(bare)?.group(1) ?? bare);
   // Sem barra, só markdown: um `PLANO.md` citado numa frase é um link, e a
   // palavra "relatório" ao lado dele não é.
   if (!path.contains('/') && !isMarkdownPath(path)) return null;
@@ -111,11 +111,50 @@ String? linkAtCell(Terminal terminal, CellOffset cell, {String? base}) {
     final line = lines[y];
     for (var x = 0; x < width; x++) {
       final code = line.getCodePoint(x);
-      text.writeCharCode(code == 0 ? 0x20 : code);
+      // Um emoji fora do plano básico são duas unidades na string para uma
+      // célula, e cada coluna depois dele ficaria uma posição atrás. Nenhum
+      // link tem um, então um espaço no lugar mantém a conta.
+      text.writeCharCode(code == 0 || code > 0xFFFF ? 0x20 : code);
     }
   }
   return linkAt(text.toString(), (cell.y - first) * width + cell.x, base: base);
 }
+
+/// A URL que cobre [column], com os parênteses equilibrados dentro dela.
+String? _urlAt(String line, int column) {
+  var from = column;
+  while (from > 0 && !_urlBreaks.contains(line[from - 1])) {
+    from--;
+  }
+  var to = column;
+  while (to + 1 < line.length && !_urlBreaks.contains(line[to + 1])) {
+    to++;
+  }
+  final word = line.substring(from, to + 1);
+  // A URL pode vir colada num traço da moldura da TUI (`│https://…`), então o
+  // que vale é de onde o esquema começa — não o começo da palavra.
+  final url = _url.firstMatch(word);
+  if (url == null) return null;
+  final start = from + url.start;
+  // Um `)` sem o `(` dele é o parêntese da frase -- `(veja https://x.dev)`.
+  var end = start;
+  var depth = 0;
+  for (; end <= to; end++) {
+    final c = line[end];
+    if (c == '(') depth++;
+    if (c == ')' && depth-- == 0) break;
+    if (c == '(' || c == ')') continue;
+    if (_breaks.contains(c)) break;
+  }
+  if (column < start || column >= end) return null;
+  // Refeito sobre o que sobrou: um `https://` que perdeu o resto pro corte
+  // do fim da frase não é endereço de nada.
+  final trimmed = _trimTail(line.substring(start, end));
+  return _url.hasMatch(trimmed) ? trimmed : null;
+}
+
+/// [_breaks] sem os parênteses: a palavra onde se procura uma URL.
+final _urlBreaks = _breaks.replaceAll('(', '').replaceAll(')', '');
 
 String _trimTail(String value) {
   var end = value.length;

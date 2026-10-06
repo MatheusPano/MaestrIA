@@ -234,6 +234,9 @@ class PluginManifest {
     this.icon,
     this.settings = const [],
     this.sidebar = false,
+    this.screen = false,
+    this.screenHome,
+    this.suggestions,
   });
 
   final String id;
@@ -270,6 +273,29 @@ class PluginManifest {
   /// `sidebar.update`, com os blocos das janelas; sem ela, a Maestria monta
   /// uma aba genérica com as janelas abertas e a lista de comandos.
   final bool sidebar;
+
+  /// Se o plugin tem uma tela própria (`contributes.screen`).
+  ///
+  /// Com ela, o ícone dele na faixa troca a lateral *e* os painéis: as
+  /// janelas dele abrem numa árvore só delas, e voltar pras sessões devolve a
+  /// tela que estava lá, com os mesmos cortes e o mesmo foco. É o que faz de um
+  /// quadro de tarefas um lugar, e não mais um painel disputando a grade com
+  /// os terminais. Ver [AppStore.screen].
+  final bool screen;
+
+  /// O comando que monta a tela quando ela abre vazia -- o quadro do Wiboor.
+  /// Null quando o plugin prefere esperar um clique na aba dele.
+  final String? screenHome;
+
+  /// O que o switch do cartão de tarefa sugerida diz, quando o plugin sabe
+  /// pegar uma sugestão e levar adiante (`contributes.suggestions`) -- "criar
+  /// a task no Wiboor". Null em quem não sabe.
+  ///
+  /// Ligado o switch, o "iniciar" do cartão não abre a caixa do id: entrega a
+  /// sugestão pro plugin num `suggestion.start`, e é ele quem cria a tarefa no
+  /// tracker e abre a sessão -- com `session.openClaude` e o campo
+  /// `suggestion`, que é o que tira a sugestão da fila.
+  final String? suggestions;
 
   /// O que o manifesto tinha de estranho sem ser motivo de recusa -- uma tecla
   /// que não vale, um campo que esta versão não conhece.
@@ -441,7 +467,48 @@ class PluginManifest {
       throw const FormatException('"contributes.sidebar" precisa de "main" pra desenhar a aba');
     }
 
-    const known = {'commands', 'themes', 'settings', 'sidebar'};
+    var screen = false;
+    String? screenHome;
+    switch (contributes['screen']) {
+      case null || false:
+        break;
+      case true:
+        screen = true;
+      case {'home': final String home}:
+        if (!commands.any((c) => c.id == home)) {
+          throw FormatException(
+            '"contributes.screen.home" aponta pro comando "$home", que o manifesto não declara',
+          );
+        }
+        screen = true;
+        screenHome = home;
+      default:
+        throw const FormatException(
+          '"contributes.screen" é true ou um objeto com "home": {"home": "quadro"}',
+        );
+    }
+    if (screen && main == null) {
+      throw const FormatException('"contributes.screen" precisa de "main" pra abrir as janelas');
+    }
+
+    String? suggestions;
+    switch (contributes['suggestions']) {
+      case null:
+        break;
+      case {'label': final String label} when label.trim().isNotEmpty:
+        if (main == null) {
+          throw const FormatException(
+            '"contributes.suggestions" precisa de "main": quem recebe a sugestão é o processo',
+          );
+        }
+        suggestions = label.trim();
+      default:
+        throw const FormatException(
+          '"contributes.suggestions" é um objeto com "label": {"label": "criar a task no …"}',
+        );
+    }
+
+    const known = {'commands', 'themes', 'settings', 'sidebar', 'screen', 'suggestions'};
     for (final k in contributes.keys) {
       if (!known.contains(k)) warnings.add('"contributes.$k" não existe nesta versão — ignorado');
     }
@@ -466,6 +533,9 @@ class PluginManifest {
       api: api,
       warnings: warnings,
       sidebar: sidebar == true,
+      screen: screen,
+      screenHome: screenHome,
+      suggestions: suggestions,
     );
   }
 
@@ -1152,6 +1222,13 @@ class Plugins extends ChangeNotifier {
         'rfw': 2,
         // O painel pequeno por cima da janela (`float.show`). Ver [PluginFloats].
         'floats': 1,
+        // O campo de texto rápido (`window.input`), irmão do `window.pick`.
+        'input': 1,
+        // O formulário em modal (`window.form`). Ver [PluginForm].
+        'form': 1,
+        // A janela em modal (`view.open` com `modal: true`), que vira painel
+        // num botão. Ver [AppStore.pluginModal].
+        'modal': 1,
         'pluginId': p.id,
         'pluginDir': p.dir,
         'dataDir': p.dataDir,
@@ -1236,6 +1313,30 @@ class Plugins extends ChangeNotifier {
     final conn = await _start(p);
     if (conn == null || !conn.ready) return;
     conn.notify(method, params);
+  }
+
+  /// Os plugins ligados que sabem levar uma tarefa sugerida adiante. Ver
+  /// [PluginManifest.suggestions].
+  List<MxPlugin> get suggestionTakers =>
+      all.where((p) => p.active && p.manifest!.suggestions != null).toList();
+
+  /// Entrega uma tarefa sugerida a [p] (`suggestion.start`).
+  ///
+  /// Um pedido, e não um evento: um plugin caído sobe de novo, e um que não
+  /// atende o método devolve o erro pra quem clicou. A resposta é só o "peguei"
+  /// -- o resto (o formulário, a tarefa, a sessão) acontece no tempo da pessoa,
+  /// e o fim chega pelo `session.openClaude` com o campo `suggestion`.
+  Future<void> offerSuggestion(MxPlugin p, Map<String, dynamic> params) async {
+    if (!p.active || p.manifest!.suggestions == null) {
+      throw const PluginRpcError(PluginRpcError.unavailable, 'o plugin não está ligado');
+    }
+    p.crash = null;
+    _log(p, 'sugestão ${(params['suggestion'] as Map?)?['id']}');
+    final conn = await _start(p);
+    if (conn == null || !conn.ready) {
+      throw PluginRpcError(PluginRpcError.unavailable, p.crash ?? 'o plugin não subiu');
+    }
+    await conn.request('suggestion.start', params);
   }
 
   /// Roda um comando que o processo do plugin atende.
@@ -1627,4 +1728,141 @@ class PluginConsole extends ChangeNotifier {
     lines.clear();
     notifyListeners();
   }
+}
+
+/// Um formulário em modal (`window.form`): os campos, os botões e o erro da
+/// vez anterior.
+///
+/// Existe porque o formulário de um host do SSH abria como uma janela na
+/// grade, e um painel da altura da tela com seis campos no topo é um painel
+/// com a metade de baixo vazia. Num modal ele tem o tamanho do que pergunta,
+/// e some quando termina.
+///
+/// O plugin valida o que pode ser dito sem ele -- campo obrigatório vazio --
+/// aqui mesmo, sem fechar. O resto (uma porta fora da faixa) ele diz abrindo
+/// de novo com os valores que voltaram e o [error].
+class PluginForm {
+  const PluginForm({required this.title, required this.fields, required this.buttons, this.error});
+
+  final String title;
+  final List<PluginFormField> fields;
+  final List<PluginFormButton> buttons;
+  final String? error;
+
+  /// Lê o pedido do plugin. [FormatException] com a frase que volta pra ele.
+  static PluginForm parse(Map<String, dynamic> p, {required String fallbackTitle}) {
+    final fields = <PluginFormField>[];
+    for (final raw in p['fields'] as List? ?? const []) {
+      if (raw is! Map) throw const FormatException('cada campo é um objeto');
+      final f = raw.cast<String, dynamic>();
+      final id = f['id'];
+      if (id is! String || id.isEmpty) throw const FormatException('campo sem "id"');
+      if (fields.any((o) => o.id == id)) throw FormatException('campo repetido: "$id"');
+      final type = f['type'] ?? 'text';
+      if (type != 'text' && type != 'select') {
+        throw FormatException('o campo "$id" tem "type": "$type" — vale "text" ou "select"');
+      }
+      final options = <(String, String)>[
+        for (final o in f['options'] as List? ?? const [])
+          if (switch (o) {
+                final String v => (v, v),
+                {'value': final String v, 'label': final String l} => (v, l),
+                {'value': final String v} => (v, v),
+                _ => null,
+              }
+              case final option?)
+            option,
+      ];
+      final showIf = switch (f['showIf']) {
+        {'field': final String field, 'value': final String value} => (field, value),
+        _ => null,
+      };
+      fields.add(
+        PluginFormField(
+          id: id,
+          select: type == 'select',
+          label: f['label'] as String?,
+          placeholder: f['placeholder'] as String?,
+          value: switch (f['value']) {
+            final String v => v,
+            final num n => '$n',
+            _ => '',
+          },
+          half: f['half'] == true,
+          required: f['required'] == true,
+          options: options,
+          showIf: showIf,
+        ),
+      );
+    }
+    if (fields.isEmpty) throw const FormatException('"fields" precisa de ao menos um campo');
+    final buttons = <PluginFormButton>[
+      for (final raw in p['buttons'] as List? ?? const [])
+        if (raw case {'action': final String action} when action.isNotEmpty)
+          PluginFormButton(
+            action: action,
+            label: (raw['label'] as String?) ?? action,
+            style: raw['style'] as String? ?? '',
+          ),
+    ];
+    return PluginForm(
+      title: (p['title'] as String?) ?? fallbackTitle,
+      fields: fields,
+      buttons: buttons.isEmpty
+          ? const [PluginFormButton(action: 'ok', label: 'ok', style: 'primary')]
+          : buttons,
+      error: switch (p['error']) {
+        final String e when e.trim().isNotEmpty => e.trim(),
+        _ => null,
+      },
+    );
+  }
+}
+
+/// Um campo de [PluginForm]: texto, ou uma lista de opções.
+class PluginFormField {
+  const PluginFormField({
+    required this.id,
+    required this.select,
+    this.label,
+    this.placeholder,
+    this.value = '',
+    this.half = false,
+    this.required = false,
+    this.options = const [],
+    this.showIf,
+  });
+
+  final String id;
+  final bool select;
+  final String? label;
+  final String? placeholder;
+  final String value;
+
+  /// Meia largura: dois seguidos dividem a linha -- usuário e porta.
+  final bool half;
+
+  /// Vazio, os botões que não são `danger` não saem: o modal diz o que falta.
+  final bool required;
+
+  final List<(String, String)> options;
+
+  /// Só aparece quando o campo `$1` vale `$2`: o nome do grupo novo, quando o
+  /// seletor de grupo está em "novo grupo…".
+  final (String, String)? showIf;
+
+  bool visibleWith(Map<String, String> values) =>
+      showIf == null || values[showIf!.$1] == showIf!.$2;
+}
+
+/// Um botão de [PluginForm]. `style`: `primary` (o do enter), `danger`, ou vazio.
+class PluginFormButton {
+  const PluginFormButton({required this.action, required this.label, this.style = ''});
+
+  final String action;
+  final String label;
+  final String style;
+
+  bool get danger => style == 'danger';
+  bool get primary => style == 'primary';
 }
