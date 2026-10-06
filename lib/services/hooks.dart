@@ -6,6 +6,7 @@ import '../models.dart';
 import 'docs.dart';
 import 'paths.dart';
 import 'shell.dart';
+import 'task_mcp.dart';
 
 class HookEvent {
   HookEvent(this.tabId, this.name, this.payload);
@@ -87,6 +88,12 @@ fi
       // arrives with the first event, and panels need a home before that.
       final segments = req.uri.pathSegments;
       final tabId = segments.length >= 2 ? segments[1] : '';
+      // /mcp/<tabId> é o outro inquilino da porta: as ferramentas que a
+      // Maestria empresta às sessões. Ver [TaskMcp].
+      if (segments.firstOrNull == 'mcp') {
+        await _mcp(req, tabId);
+        return;
+      }
       try {
         final body = await utf8.decoder.bind(req).join();
         final payload = body.isEmpty
@@ -110,6 +117,47 @@ fi
         ..write('{}');
       await req.response.close();
     });
+  }
+
+  /// Quem guarda o que as ferramentas de [TaskMcp] recebem. Null até o store
+  /// subir -- e uma chamada que chegue antes disso ouve que não há painel.
+  TaskDesk? desk;
+
+  /// Uma requisição MCP: JSON-RPC num POST, respondido em JSON.
+  ///
+  /// Sem SSE. O transporte "streamable HTTP" deixa o servidor responder um
+  /// POST com JSON puro, e o `GET` que abriria o fluxo de mão dupla recebe o
+  /// `405` que a especificação manda dar a quem não oferece um.
+  Future<void> _mcp(HttpRequest req, String tabId) async {
+    final res = req.response;
+    if (req.method != 'POST') {
+      res.statusCode = HttpStatus.methodNotAllowed;
+      await res.close();
+      return;
+    }
+    Object? answer;
+    try {
+      final body = await utf8.decoder.bind(req).join();
+      Object? message;
+      try {
+        message = jsonDecode(body);
+      } on FormatException {
+        answer = TaskMcp.parseError();
+      }
+      answer ??= TaskMcp.handle(message, tabId, desk ?? const _NoDesk());
+    } catch (_) {
+      // Como nos hooks: um corpo estragado não pode travar a sessão.
+      answer = TaskMcp.parseError();
+    }
+    if (answer == null) {
+      res.statusCode = HttpStatus.accepted;
+    } else {
+      res
+        ..statusCode = 200
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(answer));
+    }
+    await res.close();
   }
 
   /// Sobe na mesma porta da execução passada, quando ela estiver livre.
@@ -237,14 +285,24 @@ fi
       ],
     };
     return jsonEncode({
+      // As ferramentas de [mcpConfigFor] não mexem em nada: só põem ou tiram
+      // um cartão no painel. Perguntar a cada chamada seria pedir aprovação
+      // pra anotar um lembrete.
+      'permissions': {'allow': TaskMcp.toolNames},
       'hooks': {
         'SessionStart': [group()],
         'SessionEnd': [group()],
         'UserPromptSubmit': [group()],
         'PreToolUse': [group(matcher: '*')],
         'PostToolUse': [group(matcher: '*')],
+        // As duas saídas que não passam pelo `PostToolUse` nem pelo `Stop`: a
+        // ferramenta que falhou ou foi interrompida (o Esc), e o turno que
+        // morreu num erro da API. Sem elas a linha ficava em "Bash(...) 340s"
+        // pra sempre, sem hibernar e com a fila parada.
+        'PostToolUseFailure': [group(matcher: '*')],
         'Notification': [group()],
         'Stop': [group()],
+        'StopFailure': [group()],
         // O fim de um fork. É o único aviso de que um agente disparado em
         // segundo plano terminou -- ver [HookState.forksOut] --, e sem ele
         // "quando terminar" só sabe que o *turno* acabou.
@@ -257,6 +315,43 @@ fi
       },
     });
   }
+
+  /// O `--mcp-config` de um painel: o servidor de [TaskMcp], com o painel na
+  /// URL pelo mesmo motivo dos hooks.
+  ///
+  /// Soma aos servidores MCP do usuário e do projeto, sem trocá-los -- o
+  /// `--strict-mcp-config` é que trocaria, e ele não vai.
+  ///
+  /// `alwaysLoad`, como o Desktop faz com as dele: ferramenta MCP nasce
+  /// escondida atrás do ToolSearch, e uma sessão que só conhece o nome da
+  /// ferramenta não pensa em usá-la no meio do trabalho -- que é justamente
+  /// quando ela serve. São dois esquemas curtos por turno.
+  String mcpConfigFor(String tabId) => jsonEncode({
+    'mcpServers': {
+      TaskMcp.server: {
+        'type': 'http',
+        'url': 'http://127.0.0.1:$port/mcp/$tabId',
+        'alwaysLoad': true,
+      },
+    },
+  });
+}
+
+/// O [TaskDesk] de antes do store subir: não há painel pra guardar nada.
+class _NoDesk implements TaskDesk {
+  const _NoDesk();
+
+  @override
+  SuggestionQueued? suggest(
+    String tabId, {
+    required String title,
+    required String tldr,
+    required String prompt,
+  }) => null;
+
+  @override
+  ({bool withdrawn, SuggestionEnd? already}) withdraw(String tabId, String taskId) =>
+      (withdrawn: false, already: null);
 }
 
 /// Hook events -> panel state. Pure, so it is the part worth testing.
@@ -308,7 +403,9 @@ class HookReducer {
         s.questions = 0;
         s.prompts++;
         s.status = ClaudeStatus.working;
-        s.lastPrompt = _clip(p['user_input'] as String?, 70);
+        // `prompt` é a chave que o Claude Code manda; `user_input` era o que
+        // se supunha, e com ele o subtítulo nunca mostrou pedido nenhum.
+        s.lastPrompt = _clip((p['prompt'] ?? p['user_input']) as String?, 70);
       case 'PreToolUse':
         if (p['tool_name'] == _askTool) _asked(s, p['tool_input']);
         // Um agente disparado daqui pode sobreviver ao turno que o disparou:
@@ -337,6 +434,20 @@ class HookReducer {
         s.question = null;
         s.questions = 0;
         _touch(s, p);
+      case 'PostToolUseFailure':
+        s.activeTool = null;
+        s.toolStartedAt = null;
+        s.question = null;
+        s.questions = 0;
+        // Interrompida é o Esc: o turno parou ali, e nenhum `Stop` vem depois.
+        // Só falhou, o claude lê o erro e segue trabalhando.
+        s.status = p['is_interrupt'] == true ? ClaudeStatus.idle : ClaudeStatus.working;
+      case 'StopFailure':
+        s.status = ClaudeStatus.idle;
+        s.activeTool = null;
+        s.toolStartedAt = null;
+        s.lastMessage =
+            _clip(p['error'] is String ? p['error'] as String : null, 90) ?? s.lastMessage;
       case 'Notification':
         final type = (p['notification_type'] as String?) ?? '';
         if (type == 'permission_prompt') {
@@ -371,7 +482,10 @@ class HookReducer {
         // deaths: a session resumed from here reports SessionEnd on the way in
         // and keeps running. Treating every SessionEnd as terminal is what
         // made live panels read "encerrada" seconds after opening.
-        final reason = (p['end_reason'] as String?) ?? 'other';
+        // `reason`, e não `end_reason`: lida pela chave errada, toda saída
+        // virava `other`, e um `/clear` deixava o painel "encerrada" com o
+        // claude de pé -- sem hibernar e sem disparar fila.
+        final reason = (p['reason'] ?? p['end_reason']) as String? ?? 'other';
         s.status = (reason == 'resume' || reason == 'clear')
             ? ClaudeStatus.ready
             : ClaudeStatus.ended;

@@ -1426,12 +1426,18 @@ class Mx {
       dividerColor: p.border,
       colorScheme: base.colorScheme.copyWith(
         primary: p.accent,
+        // O texto em cima do acento. Sem isto ficava o do M3, um roxo quase
+        // preto no tema escuro -- o rótulo de todo FilledButton.
+        onPrimary: p.accent.computeLuminance() > 0.5 ? p.canvas : Colors.white,
         surface: p.bgSidebar,
         onSurface: p.fg,
       ),
       textTheme: base.textTheme.apply(bodyColor: p.fg, displayColor: p.fg),
       dialogTheme: DialogThemeData(
         backgroundColor: p.bgSidebar,
+        // O conteúdo dentro da curva: o rail das configurações, de outra cor,
+        // furava os cantos de 12 com os dele quadrados.
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: p.border),
@@ -1444,6 +1450,9 @@ class Mx {
           border: Border.fromBorderSide(BorderSide(color: p.border)),
         ),
         textStyle: TextStyle(color: p.fg, fontSize: 11),
+        // Uma espera só pra janela toda: os IconButton abriam o tooltip na
+        // hora, e os feitos à mão esperavam 200, 400, 500 ou 600.
+        waitDuration: const Duration(milliseconds: 400),
       ),
       // Os menus de contexto, no desenho do resto da janela.
       //

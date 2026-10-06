@@ -223,7 +223,8 @@ class _RailBadge extends StatelessWidget {
       );
     }
     return Container(
-      constraints: const BoxConstraints(minWidth: 14),
+      // Com teto: o texto é do plugin, e um "três arquivos" vazava do rail.
+      constraints: const BoxConstraints(minWidth: 14, maxWidth: SidebarRail.width - 4),
       height: 14,
       padding: const EdgeInsets.symmetric(horizontal: 3.5),
       decoration: BoxDecoration(
@@ -231,14 +232,22 @@ class _RailBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(7),
         border: Border.all(color: Mx.canvas, width: 1.5),
       ),
-      alignment: Alignment.center,
-      child: Text(
-        text!,
-        style: TextStyle(
-          fontSize: 8.5,
-          height: 1,
-          fontWeight: FontWeight.w700,
-          color: textColor ?? (color.computeLuminance() > 0.5 ? Mx.canvas : Colors.white),
+      // `widthFactor: 1`, e não o `alignment` do Container: com o teto acima,
+      // um Container alinhado ocupa a largura máxima inteira, e todo selo
+      // virava uma pílula de 32 -- o "▶" de um plugin, inclusive.
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          text!,
+          maxLines: 1,
+          overflow: TextOverflow.clip,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: 8.5,
+            height: 1,
+            fontWeight: FontWeight.w700,
+            color: textColor ?? (color.computeLuminance() > 0.5 ? Mx.canvas : Colors.white),
+          ),
         ),
       ),
     );

@@ -560,9 +560,12 @@ class _Drop extends StatelessWidget {
                 borderRadius: radius,
                 color: over ? (spec.hoverColor ?? accent.withValues(alpha: 0.10)) : spec.color,
               ),
+              // O filho é quem dá o tamanho: o alvo mora em qualquer lugar,
+              // até numa lista horizontal, onde a largura não tem fim. Um
+              // Stack só de posicionados não teria tamanho nenhum ali.
               child: Stack(
                 children: [
-                  Positioned.fill(child: spec.child ?? const SizedBox.shrink()),
+                  spec.child ?? const SizedBox.shrink(),
                   if (over && spec.hint != null)
                     Positioned(
                       left: 0,

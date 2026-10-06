@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 /// O que o Claude Code lê de uma pasta antes de começar a trabalhar nela, e
@@ -574,11 +575,9 @@ abstract final class ClaudeSetup {
   static Future<String> read(String root, String rel) async {
     final file = File(pathOf(root, rel));
     if (!file.existsSync()) return '';
-    try {
-      return await file.readAsString();
-    } catch (_) {
-      return '';
-    }
+    // Um byte que não é UTF-8 (um CLAUDE.md em Latin-1) não pode virar um
+    // editor vazio: o primeiro ⌘S gravaria o vazio por cima do que havia.
+    return utf8.decode(await file.readAsBytes(), allowMalformed: true);
   }
 
   /// Escreve, criando as pastas do caminho. Um `settings.json` novo precisa

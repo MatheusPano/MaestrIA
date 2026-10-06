@@ -36,73 +36,95 @@ class Sidebar extends StatelessWidget {
     if (store.shownPlugin case final plugin?) {
       return MxPanel(
         color: Mx.bgSidebar,
-        child: Column(
-          children: [
-            _PluginHeader(store: store, plugin: plugin),
-            Expanded(
-              child: _PluginPage(key: ValueKey('page:${plugin.id}'), store: store, plugin: plugin),
-            ),
-            _Footer(store: store),
-          ],
+        child: _Ink(
+          child: Column(
+            children: [
+              _PluginHeader(store: store, plugin: plugin),
+              Expanded(
+                child: _PluginPage(
+                  key: ValueKey('page:${plugin.id}'),
+                  store: store,
+                  plugin: plugin,
+                ),
+              ),
+              _Footer(store: store),
+            ],
+          ),
         ),
       );
     }
     return MxPanel(
       color: Mx.bgSidebar,
-      child: Column(
-        children: [
-          _Header(store: store),
-          Expanded(
-            // The loose tray closes the list on purpose: it is where you go
-            // when none of the folders above is the answer.
-            child: ListView(
-              // Tudo montado, mesmo fora da tela: "mostrar na lateral" rola até
-              // a linha, e uma linha que a lista ainda não construiu não tem
-              // contexto pra ser rolada. Por isso a lista inteira fica montada
-              // o tempo todo; é aceitável porque são dezenas de linhas, não milhares.
-              scrollCacheExtent: const ScrollCacheExtent.pixels(100000),
-              padding: const EdgeInsets.only(top: 6, bottom: 20),
-              children: [
-                // Os arranjos salvos abrem a lista. Uma busca em curso os
-                // esconde: procura-se sessão, e um grupo não é uma.
-                if (store.groups.isNotEmpty && !store.filtering)
-                  _GroupTray(key: const ValueKey('groups'), store: store),
-                if (store.folders.isEmpty && !store.filtering) _NoFolders(),
-                if (store.filtering && store.hits.isEmpty) _NoHits(store: store),
-                // Keyed by what the row *is*, so a list that gains, loses or
-                // reorders an entry moves the rows instead of repainting one
-                // row's content into another's place -- which is what a
-                // hovered row swapping under the pointer looked like.
-                //
-                // Com uma busca em curso, um grupo sem achado nenhum sai
-                // inteiro: o cabeçalho dele seria uma linha dizendo "não é
-                // aqui" no lugar de uma que é.
-                //
-                // Uma linha é uma pasta ou uma seção de workspace -- ver
-                // `AppStore.sidebarRows`. As duas condições são exclusivas por
-                // construção, então cada `row` desenha uma coisa só.
-                for (final row in store.sidebarRows) ...[
-                  if (row case final Workspace w)
-                    if (!store.filtering || store.hasHitsInWorkspace(w))
-                      _WorkspaceSection(key: ValueKey(w.id), store: store, workspace: w),
-                  if (row case final Folder p)
-                    if (!store.filtering || store.hasHits(p))
-                      _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
+      child: _Ink(
+        child: Column(
+          children: [
+            _Header(store: store),
+            Expanded(
+              // The loose tray closes the list on purpose: it is where you go
+              // when none of the folders above is the answer.
+              child: ListView(
+                // Tudo montado, mesmo fora da tela: "mostrar na lateral" rola até
+                // a linha, e uma linha que a lista ainda não construiu não tem
+                // contexto pra ser rolada. Por isso a lista inteira fica montada
+                // o tempo todo; é aceitável porque são dezenas de linhas, não milhares.
+                scrollCacheExtent: const ScrollCacheExtent.pixels(100000),
+                padding: const EdgeInsets.only(top: 6, bottom: 20),
+                children: [
+                  // Os arranjos salvos abrem a lista. Uma busca em curso os
+                  // esconde: procura-se sessão, e um grupo não é uma.
+                  if (store.groups.isNotEmpty && !store.filtering)
+                    _GroupTray(key: const ValueKey('groups'), store: store),
+                  if (store.folders.isEmpty && !store.filtering) _NoFolders(),
+                  if (store.filtering && store.hits.isEmpty) _NoHits(store: store),
+                  // Keyed by what the row *is*, so a list that gains, loses or
+                  // reorders an entry moves the rows instead of repainting one
+                  // row's content into another's place -- which is what a
+                  // hovered row swapping under the pointer looked like.
+                  //
+                  // Com uma busca em curso, um grupo sem achado nenhum sai
+                  // inteiro: o cabeçalho dele seria uma linha dizendo "não é
+                  // aqui" no lugar de uma que é.
+                  //
+                  // Uma linha é uma pasta ou uma seção de workspace -- ver
+                  // `AppStore.sidebarRows`. As duas condições são exclusivas por
+                  // construção, então cada `row` desenha uma coisa só.
+                  for (final row in store.sidebarRows) ...[
+                    if (row case final Workspace w)
+                      if (!store.filtering || store.hasHitsInWorkspace(w))
+                        _WorkspaceSection(key: ValueKey(w.id), store: store, workspace: w),
+                    if (row case final Folder p)
+                      if (!store.filtering || store.hasHits(p))
+                        _FolderGroup(key: ValueKey(p.root), store: store, folder: p),
+                  ],
+                  if (!store.filtering || store.hasHits(store.loose))
+                    _LooseTray(key: const ValueKey('loose'), store: store),
+                  // As janelas de plugin não moram aqui: cada plugin tem a aba
+                  // dele na faixa ao lado. Empilhadas embaixo dos avulsos, duas
+                  // ferramentas já eram duas seções inteiras disputando altura
+                  // com o trabalho. Ver [SidebarRail].
                 ],
-                if (!store.filtering || store.hasHits(store.loose))
-                  _LooseTray(key: const ValueKey('loose'), store: store),
-                // As janelas de plugin não moram aqui: cada plugin tem a aba
-                // dele na faixa ao lado. Empilhadas embaixo dos avulsos, duas
-                // ferramentas já eram duas seções inteiras disputando altura
-                // com o trabalho. Ver [SidebarRail].
-              ],
+              ),
             ),
-          ),
-          _Footer(store: store),
-        ],
+            _Footer(store: store),
+          ],
+        ),
       ),
     );
   }
+}
+
+/// Onde a tinta dos [InkWell] da lateral pinta.
+///
+/// O [MxPanel] é um cartão opaco sem [Material] dentro, e a tinta de um
+/// [InkWell] vai pro [Material] mais próximo acima -- o do Scaffold, embaixo do
+/// cartão. Os cabeçalhos de pasta, de projeto e os botões ⋯ e + não davam
+/// sinal nenhum sob o mouse: o hover era desenhado atrás da lateral.
+class _Ink extends StatelessWidget {
+  const _Ink({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Material(type: MaterialType.transparency, child: child);
 }
 
 /// O endereço do campo de busca, pra quem está fora da lateral.
@@ -526,6 +548,7 @@ class _HeaderActionState extends State<_HeaderAction> {
       message: widget.tooltip,
       waitDuration: const Duration(milliseconds: 500),
       child: MouseRegion(
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: GestureDetector(
@@ -719,85 +742,95 @@ class _FolderGroup extends StatelessWidget {
         _RowDrag(
           store: store,
           place: (row: folder, within: within),
-          child: _Hoverable(
-            builder: (hovered) => InkWell(
-              onTap: () => store.toggleFolderCollapsed(folder, within: within),
-              // The whole header is the target the worktrees hang off now, not
-              // just the ⋯ at the end of it.
-              onSecondaryTapDown: (d) =>
-                  showFolderMenu(
-                    context,
-                    store,
-                    folder,
-                    worktrees,
-                    d.globalPosition,
-                    within: within,
-                  ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 14, 8, 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      collapsed ? Icons.chevron_right : Icons.expand_more,
-                      size: 20,
-                      color: Mx.fgDim,
+          // O respiro de cima fica fora do InkWell, pro hover centrar na
+          // linha. Ver [_WorkspaceSection].
+          child: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _Hoverable(
+              builder: (hovered) => InkWell(
+                onTap: () => store.toggleFolderCollapsed(folder, within: within),
+                // The whole header is the target the worktrees hang off now, not
+                // just the ⋯ at the end of it.
+                onSecondaryTapDown: (d) =>
+                    showFolderMenu(
+                      context,
+                      store,
+                      folder,
+                      worktrees,
+                      d.globalPosition,
+                      within: within,
                     ),
-                    const SizedBox(width: 3),
-                    // Na cor da pasta quando ela tem uma: é o fundo do repo
-                    // dito na linha que abre o repo. Ver [MxTint].
-                    RepoGlyph(isRepo: folder.isRepo, color: tint),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            folder.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                          ),
-                          // Which branch the checkout itself is parked on. With the
-                          // worktrees folded away below, this is the line that says
-                          // what cd-ing into the folder would actually give you.
-                          if (folder.branch.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Row(
-                              children: [
-                                Icon(Icons.call_split, size: 10, color: Mx.fgFaint),
-                                const SizedBox(width: 3),
-                                Flexible(
-                                  child: Text(
-                                    folder.branch,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontFamily: Mx.mono,
-                                      fontSize: 10.5,
-                                      color: Mx.fgFaint,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        collapsed ? Icons.chevron_right : Icons.expand_more,
+                        size: 20,
+                        color: Mx.fgDim,
+                      ),
+                      const SizedBox(width: 3),
+                      // Na cor da pasta quando ela tem uma: é o fundo do repo
+                      // dito na linha que abre o repo. Ver [MxTint].
+                      RepoGlyph(isRepo: folder.isRepo, color: tint),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              folder.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                            ),
+                            // Which branch the checkout itself is parked on. With the
+                            // worktrees folded away below, this is the line that says
+                            // what cd-ing into the folder would actually give you.
+                            if (folder.branch.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Icon(Icons.call_split, size: 10, color: Mx.fgFaint),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      folder.branch,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontFamily: Mx.mono,
+                                        fontSize: 10.5,
+                                        color: Mx.fgFaint,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    // The one thing in the worktree list that wants doing stays
-                    // on the surface: registrations git itself would prune. The
-                    // list is behind a menu now, and a warning you only meet by
-                    // opening a menu is a warning that never arrives.
-                    if (ghosts > 0) ...[_GhostChip(count: ghosts), const SizedBox(width: 7)],
-                    if (alerts > 0) _Badge(count: alerts),
-                    Text('$count', style: TextStyle(color: Mx.fgFaint, fontSize: 11.5)),
-                    _AddButton(
-                      store: store,
-                      folder: folder,
-                      // An empty folder has no rows to hover over, so the + is
-                      // the only thing left to aim at: it stays out.
-                      shown: hovered || store.tabsOf(folder).isEmpty,
-                    ),
-                    _FolderMenu(store: store, folder: folder, worktrees: worktrees, within: within),
-                  ],
+                      // The one thing in the worktree list that wants doing stays
+                      // on the surface: registrations git itself would prune. The
+                      // list is behind a menu now, and a warning you only meet by
+                      // opening a menu is a warning that never arrives.
+                      if (ghosts > 0) ...[_GhostChip(count: ghosts), const SizedBox(width: 7)],
+                      if (alerts > 0) _Badge(count: alerts),
+                      Text('$count', style: TextStyle(color: Mx.fgFaint, fontSize: 11.5)),
+                      _AddButton(
+                        store: store,
+                        folder: folder,
+                        // An empty folder has no rows to hover over, so the + is
+                        // the only thing left to aim at: it stays out.
+                        shown: hovered || store.tabsOf(folder).isEmpty,
+                      ),
+                      _FolderMenu(
+                        store: store,
+                        folder: folder,
+                        worktrees: worktrees,
+                        within: within,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2910,7 +2943,7 @@ class _NoFolders extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       child: Text(
         'Nenhuma pasta ainda.\n\nSessões do Claude já rodando aparecem aqui sozinhas — '
-        'ou use o + no rodapé pra adicionar um repo.\n\nPra abrir um painel sem pasta '
+        'ou use o ícone de pasta no rodapé pra adicionar um repo.\n\nPra abrir um painel sem pasta '
         'nenhuma, o + na linha de "avulsos" logo abaixo.',
         style: TextStyle(color: Mx.fgFaint, fontSize: 12.5, height: 1.55),
       ),

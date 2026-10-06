@@ -7,6 +7,7 @@ import '../services/store.dart';
 import '../theme.dart';
 import 'claude_mark.dart';
 import 'sidebar_rail.dart';
+import 'suggestions.dart';
 
 /// O grupo de toque do sino: o botão e a lista contam como um lugar só, então
 /// clicar no botão com a lista aberta fecha pelo botão -- e não fecha pelo
@@ -158,7 +159,7 @@ class SessionList extends StatelessWidget {
   const SessionList({super.key, required this.store});
   final AppStore store;
 
-  static const width = 360.0;
+  static const width = 420.0;
 
   @override
   Widget build(BuildContext context) {
@@ -180,7 +181,7 @@ class SessionList extends StatelessWidget {
         ),
         child: Container(
           width: width,
-          constraints: const BoxConstraints(maxHeight: 420),
+          constraints: const BoxConstraints(maxHeight: 520),
           decoration: BoxDecoration(
             color: Mx.bgSidebar,
             borderRadius: BorderRadius.circular(8),
@@ -190,7 +191,7 @@ class SessionList extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: claude.isEmpty
               ? Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
                     'Nenhuma sessão do Claude aberta',
                     style: TextStyle(fontSize: 12, color: Mx.fgFaint),
@@ -198,7 +199,10 @@ class SessionList extends StatelessWidget {
                 )
               : ListView(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.only(bottom: 6),
+                  // As linhas são tiles recuados da borda, e não faixas de
+                  // ponta a ponta: o hover e a sessão em foco ganham cantos
+                  // arredondados e o cartão respira dos lados.
+                  padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
                   children: [
                     if (waiting.isNotEmpty) ..._block('Esperando você', waiting),
                     if (working.isNotEmpty) ..._block('Trabalhando', working),
@@ -212,7 +216,7 @@ class SessionList extends StatelessWidget {
 
   List<Widget> _block(String label, List<MxTab> tabs) => [
     Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 6),
       child: Text(
         '$label  ${tabs.length}',
         style: TextStyle(
@@ -254,12 +258,18 @@ class _SessionRowState extends State<_SessionRow> {
         behavior: HitTestBehavior.opaque,
         onTap: () => store.openSession(t),
         child: Container(
-          color: _hover ? Mx.bgHover : (here ? Mx.bgActive : Colors.transparent),
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          margin: const EdgeInsets.symmetric(vertical: 1),
+          decoration: BoxDecoration(
+            // A sessão em foco fica acesa sob o mouse: o hover por cima dela a
+            // apagava pro tom de "só passando", como se deixasse de ser ela.
+            color: here ? Mx.bgActive : (_hover ? Mx.bgHover : Colors.transparent),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          padding: const EdgeInsets.fromLTRB(10, 9, 12, 9),
           child: Row(
             children: [
-              ClaudeAvatar(status: t.status, size: 18, dim: t.done),
-              const SizedBox(width: 10),
+              ClaudeAvatar(status: t.status, size: 20, dim: t.done),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,23 +279,24 @@ class _SessionRowState extends State<_SessionRow> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 13,
                         height: 1.3,
                         fontWeight: FontWeight.w600,
                         color: Mx.fg,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       where,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, height: 1.3, color: Mx.fgFaint),
+                      style: TextStyle(fontSize: 11.5, height: 1.3, color: Mx.fgFaint),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(t.status.label, style: TextStyle(fontSize: 11, color: t.status.color)),
+              const SizedBox(width: 10),
+              Text(t.status.label, style: TextStyle(fontSize: 11.5, color: t.status.color)),
             ],
           ),
         ),
@@ -898,7 +909,7 @@ class _Header extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              'Notificações',
+              'notificações',
               style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Mx.fg),
             ),
           ),
@@ -986,7 +997,17 @@ class _NoticeRowState extends State<_NoticeRow> {
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => widget.store.openNotice(n),
+        onTap: () {
+          // Lida antes do clique: o [AppStore.openNotice] fecha a lista, e
+          // a pergunta tem que ser feita enquanto a linha ainda existe.
+          final suggestion = widget.store.suggestionOf(n);
+          widget.store.openNotice(n);
+          // Um aviso de sugestão leva até o cartão dela, não só até o painel.
+          // Ver [MxNotice.suggestionId].
+          if (suggestion != null && tab != null) {
+            showSuggestion(context, widget.store, tab, suggestion);
+          }
+        },
         child: Container(
           color: _hover && !gone ? Mx.bgHover : Colors.transparent,
           padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
@@ -1018,6 +1039,11 @@ class _NoticeRowState extends State<_NoticeRow> {
                               style: TextStyle(fontWeight: FontWeight.w700, color: Mx.fg),
                             ),
                             TextSpan(text: ' ${n.kind.verb}'),
+                            if (n.detail case final detail?)
+                              TextSpan(
+                                text: ': $detail',
+                                style: TextStyle(fontWeight: FontWeight.w600, color: Mx.fg),
+                              ),
                           ],
                         ),
                         style: TextStyle(
@@ -1027,7 +1053,12 @@ class _NoticeRowState extends State<_NoticeRow> {
                         ),
                       ),
                       const SizedBox(height: 3),
-                      Text(where, style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
+                      Text(
+                        where,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: Mx.fgFaint),
+                      ),
                     ],
                   ),
                 ),

@@ -65,17 +65,23 @@ Future<void> press(
 }
 
 /// A janela reduzida ao que um atalho precisa: o mapa montado do store, e um
-/// contexto abaixo do Navigator pra um diálogo poder abrir.
-Future<AppStore> pumpKeys(WidgetTester tester, AppStore store) async {
+/// contexto abaixo do Navigator pra um diálogo poder abrir. O mesmo
+/// [MxKeys.dispatch] do `_Keys` de `main.dart`; [child] é o que tem foco.
+Future<AppStore> pumpKeys(WidgetTester tester, AppStore store, {Widget? child}) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: Mx.theme(),
       home: Scaffold(
         body: Builder(
-          builder: (ctx) => CallbackShortcuts(
-            bindings: MxKeys.bindings(store, ctx),
-            child: const Focus(autofocus: true, child: SizedBox.expand()),
-          ),
+          builder: (ctx) {
+            final bindings = MxKeys.bindings(store, ctx);
+            return Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: (_, event) => MxKeys.dispatch(bindings, event),
+              child: child ?? const Focus(autofocus: true, child: SizedBox.expand()),
+            );
+          },
         ),
       ),
     ),
@@ -101,6 +107,35 @@ MxTab focusedPanel(AppStore store, {String title = 'permissão do drive'}) {
 }
 
 void main() {
+  group('campo de texto', () {
+    // ⌘⌫ é "fechar painel" e também "apagar até o começo da linha". Na busca
+    // da lateral ele fechava o painel em foco -- e matava a sessão dele.
+    testWidgets('⌘⌫ num campo apaga a linha e não fecha o painel', (tester) async {
+      final store = AppStore();
+      final tab = focusedPanel(store);
+      final field = TextEditingController(text: 'procurando')
+        ..selection = const TextSelection.collapsed(offset: 10);
+      await pumpKeys(
+        tester,
+        store,
+        child: Material(child: TextField(controller: field, autofocus: true)),
+      );
+      await press(tester, LogicalKeyboardKey.backspace, holding: [LogicalKeyboardKey.metaLeft]);
+      expect(store.tabs, contains(tab));
+      expect(field.text, isEmpty);
+      await closeWindow(tester, store);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('fora do campo, ⌘⌫ continua fechando o painel', (tester) async {
+      final store = AppStore();
+      final tab = focusedPanel(store);
+      await pumpKeys(tester, store);
+      await press(tester, LogicalKeyboardKey.backspace, holding: [LogicalKeyboardKey.metaLeft]);
+      expect(store.tabs, isNot(contains(tab)));
+      await closeWindow(tester, store);
+    });
+  });
+
   group('combinações', () {
     test('o que se lê na tela e o que vai pro disco são a mesma tecla', () {
       expect(_cmdT.label, '⌘T');

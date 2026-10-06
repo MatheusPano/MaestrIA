@@ -110,11 +110,19 @@ class TermSession {
     );
     _pty = pty;
 
+    // `allowMalformed`: um byte inválido (um `cat` de arquivo Latin-1, um
+    // binário) derrubava o pedaço inteiro em volta dele -- texto bom e
+    // sequência de escape juntos, e um `ESC[?1049l` perdido deixa o painel
+    // preso na tela alternativa. Com ele o byte vira um `�` e o resto passa.
     pty.output
         .cast<List<int>>()
-        .transform(const Utf8Decoder())
+        .transform(const Utf8Decoder(allowMalformed: true))
         .listen((chunk) => terminal.write(_scrub(chunk)));
     pty.exitCode.then((code) {
+      // O processo de uma vida anterior, morto por SIGKILL depois que [kill]
+      // já tinha voltado: a saída dele chega com o próximo já de pé (ver
+      // `AppStore.wake`), e não é deste.
+      if (!identical(_pty, pty)) return;
       exited = true;
       exitCode = code;
       terminal.write('\r\n\x1b[2m[processo saiu com $code]\x1b[0m\r\n');

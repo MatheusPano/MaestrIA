@@ -467,6 +467,35 @@ void main() {
 
       expect(tab.tint, isNull);
     });
+
+    // Numa janela mais baixa que o submenu ele fica do tamanho dela e rola,
+    // em vez do `clamp` da posição lançar com o teto abaixo do piso.
+    testWidgets('numa janela baixa o submenu cabe nela e rola', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 240));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = storeWith();
+      addTearDown(store.dispose);
+      final tab = panelOf(store);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await openMenu(tester, (ctx) => showPanelMenu(ctx, store, tab, Offset.zero));
+      await mouse.moveTo(tester.getCenter(find.text('Cor')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Sem cor', skipOffstage: false), findsOneWidget);
+      final submenu = tester.getRect(
+        find.ancestor(
+          of: find.text('Sem cor', skipOffstage: false),
+          matching: find.byType(SingleChildScrollView),
+        ),
+      );
+      expect(submenu.top, greaterThanOrEqualTo(8));
+      expect(submenu.bottom, lessThanOrEqualTo(240 - 8));
+      await closeMenu(tester);
+    });
   });
 
   // O mesmo submenu, um andar acima: a cor do projeto é a dos painéis dele.

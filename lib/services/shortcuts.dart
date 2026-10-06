@@ -114,6 +114,11 @@ class MxChord {
     if (isModifier(key)) return null;
     if (!_known) return 'essa tecla não dá pra usar num atalho';
     if (reserved[this] case final why?) return why;
+    // As teclas das sessões da lateral não estão no mapa: o `CallbackShortcuts`
+    // dispara todos os que casam, e a mesma tecla faria as duas coisas.
+    for (var i = 0; i < 9; i++) {
+      if (this == slot(i)) return 'é a tecla da ${i + 1}ª sessão da lateral';
+    }
     if (!meta && !control && !alt && !_isFunction) {
       return linux
           ? 'precisa de Ctrl ou Alt — sem modificador a tecla sumiria do terminal'
@@ -239,7 +244,9 @@ class MxChord {
     if (name.length == 1) {
       // Uma tecla imprimível *é* o seu caractere: os ids lógicos das letras,
       // dígitos e pontuação são o próprio code point.
-      return LogicalKeyboardKey.findKeyByKeyId(name.codeUnitAt(0));
+      // Um Ç do ABNT2 não está na tabela do Flutter, e é a mesma tecla.
+      final code = name.codeUnitAt(0);
+      return LogicalKeyboardKey.findKeyByKeyId(code) ?? LogicalKeyboardKey(code);
     }
     return _names.entries.firstWhereOrNull((e) => e.value == name)?.key;
   }

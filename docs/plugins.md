@@ -182,11 +182,37 @@ Um pedido sem a permissão declarada volta com erro `-32001`.
 | `onCommand:<id>` | na primeira vez que o comando roda |
 | `onHook:<Nome>` / `onHook:*` | no primeiro hook com esse nome (`Stop`, `PreToolUse`, …). Exige `hooks`. |
 | `onSession` | quando um painel abre, fecha ou muda de status |
+| `onSuggestion` | na primeira tarefa sugerida entregue a ele (`contributes.suggestions`) |
 
 Um plugin com `main` e sem `activationEvents` sobe com o app. Um processo que
 cai fica como "parou" e **não** é ressuscitado por eventos, pra não entrar num
 ciclo de subir e cair a cada hook. Rodar um comando dele ou apertar
 **reiniciar** sobe de novo.
+
+### Tarefas sugeridas
+
+As sessões do claude abertas pela Maestria podem sugerir uma tarefa que viram de
+passagem (a ferramenta MCP `suggest_task`), e a sugestão vira um cartão no canto
+do terminal. Um plugin que sabe levar essa tarefa a um tracker declara:
+
+```json
+"activationEvents": ["onSuggestion"],
+"permissions": ["sessions.create"],
+"contributes": { "suggestions": { "label": "criar a task no Wiboor" } }
+```
+
+O cartão ganha um switch com esse `label`. Ligado (o estado é lembrado), toda
+saída do cartão — iniciar com worktree, iniciar localmente, fazer aqui — passa
+antes pelo plugin: a Maestria manda um `suggestion.start` com a sugestão, a
+saída escolhida (`choice`) e a sessão de onde ela veio. O plugin só cria a
+tarefa. Responda logo (o pedido tem 30s; o formulário que você abrir espera a
+pessoa no tempo dela) e, com a tarefa criada, chame `suggestion.created` com o
+nome dela (`ref`), a primeira linha do pedido (`intro`, com o número e o link) e,
+se o tracker tem um jeito próprio de nomear a worktree, `branch` e `dir`. Daí a
+Maestria faz a saída escolhida, com `intro` antes do pedido da sugestão, e tira
+a sugestão da fila. Se a pessoa desistir, não faça nada: o cartão continua lá.
+
+Exige `main`. Com mais de um plugin assim ligado, o cartão usa o primeiro.
 
 ## O protocolo
 
@@ -205,6 +231,7 @@ em ~100 linhas, sem dependências, pronto pra copiar.
 |---|---|---|
 | `initialize` | pedido (10s pra responder) | `apiVersion`, `blocks`, `pluginId`, `pluginDir`, `dataDir`, `permissions`, `settings` |
 | `command.invoke` | pedido (30s) | `command`, `context: { cwd, folder, sessionId, title, pluginDir, tabId? }` |
+| `suggestion.start` | pedido (30s) | `suggestion: { id, title, tldr, prompt }`, `choice` (`worktree`, `local` ou `here`), `origin: { tabId, cwd, root, folder, isRepo, branch }` — veja [Tarefas sugeridas](#tarefas-sugeridas) |
 | `event` | notificação | `type` e o resto, abaixo |
 | `view.action` | notificação | `viewId`, `action`, `values` (os campos da janela) |
 | `settings.changed` | notificação | `settings`: todas as configurações, como valem agora |
@@ -238,6 +265,8 @@ Os eventos só chegam depois de o `initialize` voltar.
 | `window.notify` | `title?`, `body` | — · `notifications` |
 | `window.openUrl` | `url` (só http/https) | — |
 | `window.pick` | `title?`, `placeholder?`, `items: [{ value, label?, detail? }]` | o `value` escolhido, ou `null` — o quick pick do VS Code: campo que filtra, setas e enter |
+| `window.input` | `title?`, `placeholder?`, `value?`, `prompt?` | o texto digitado (sem os espaços das pontas), ou `null` no esc, no clique fora ou com o campo vazio — o input box do VS Code, no mesmo cartão do `window.pick`: pra perguntar um nome sem abrir uma janela. `value` vem todo selecionado (renomear); `prompt` é a linha de ajuda embaixo do campo. O `initialize` diz `input: 1` numa Maestria que o tem. |
+| `window.form` | `title?`, `fields`, `buttons?`, `error?` | `{ action, values }` ou `null` (cancelar, esc, clique fora) — um formulário em modal, do tamanho dos campos, em vez de uma janela na grade. Cada campo: `{ id, label?, placeholder?, value?, type?: "text" \| "select", options? (como as do bloco `select`), half?, required?, showIf?: { field, value } }`. Dois `half` seguidos dividem a linha; `showIf` mostra o campo só quando outro vale aquilo (o nome do grupo novo, com o seletor em "novo grupo…"). Cada botão: `{ action, label, style?: "primary" \| "danger" }`; o enter aperta o `primary`, e um `required` vazio segura os que não são `danger`, com o aviso no campo. `values` traz todos os campos, até os escondidos. O que só o plugin sabe validar ele diz chamando de novo com os `values` que voltaram e o `error`. O `initialize` diz `form: 1` numa Maestria que o tem. |
 | `settings.get` | — | as configurações do plugin, como valem agora |
 | `clipboard.write` | `text` | — |
 | `sessions.list` | — | lista de sessões (abaixo) |
@@ -252,10 +281,11 @@ Os eventos só chegam depois de o `initialize` voltar.
 | `command.busy` | `command`, `busy` | — o botão do comando na lateral vira spinner enquanto `busy` |
 | `terminal.sendText` | `text`, `submit?`, `tabId?` | — · `terminal.write`. Sem `tabId`, usa o painel em foco ou, se ele não tiver processo (a própria janela do plugin, por exemplo), a primeira sessão na tela. |
 | `session.openClaude` | `cwd?`, `prompt?`, `label?` | `{ tabId }` · `sessions.create` |
+| `suggestion.created` | `suggestionId`, `ref` (`TASK#123`), `intro?`, `branch?`, `dir?` | `{ tabId, cwd }` do painel onde o trabalho começou, ou `null` — só pra quem declara `contributes.suggestions`; veja [Tarefas sugeridas](#tarefas-sugeridas) |
 | `session.openShell` | `cwd?`, `command?`, `label?`, `owned?`, `tag?`, `embedded?` | `{ tabId }` · `sessions.create`. Com `owned: true` o terminal é do plugin: sai dos avulsos e mora na aba dele (a aba genérica o lista; quem desenha a própria aba o desenha), e não volta quando o app reabre. `tag` é um texto seu que volta no `sessions.list` desse terminal — o id do host, por exemplo. Com `embedded: true` (que já é `owned`) o terminal não vira painel: ele mora dentro de uma janela do plugin, desenhado por um bloco `terminal` com esse `tabId` — a aba Terminal de um container. Fechar a janela o encerra junto. |
 | `session.close` | `tabId` | — fecha um terminal que o plugin abriu com `owned` (só esses) |
 | `pane.openMarkdown` | `markdown`, `title?` | `{ tabId }`, no painel de leitura |
-| `view.open` | `viewId`, `title?`, `blocks` (ou `rfw` e `data`) | `{ tabId }` — com `rfw` a janela é a interface que o plugin monta (veja "A interface em widgets") |
+| `view.open` | `viewId`, `title?`, `blocks` (ou `rfw` e `data`), `modal?` | `{ tabId }` — com `rfw` a janela é a interface que o plugin monta (veja "A interface em widgets"). Com `modal: true` ela abre em modal, por cima da tela e fora da grade (veja "Janelas em modal") |
 | `view.update` | `viewId`, `title?`, `blocks?`, `rfw?`, `data?` | `{ open }`: `false` quando você fechou a janela. `data` junta: cada chave de cima troca a que havia. Mandar `blocks` volta pros blocos. |
 | `view.appendLines` | `viewId`, `id`, `lines` | `{ open }`: junta linhas a um bloco `console` sem redesenhar a janela |
 | `view.clearLines` | `viewId`, `id` | — |
@@ -427,6 +457,80 @@ de `viewId` em `view.open`.
 Dois blocos existem pensando na lateral: `section` (a régua das seções da
 lateral) e `list` com `flat: true` (linhas sem moldura, como as das sessões).
 
+## A tela própria
+
+Por padrão, a janela de um plugin abre no meio dos terminais, como mais um
+painel da grade. Um plugin que é um lugar de trabalho, como um quadro de
+tarefas, pode pedir uma tela só dele:
+
+```json
+"contributes": { "screen": { "home": "quadro" } }
+```
+
+(exige `main`; `"screen": true` é o mesmo sem `home`). Com ela, o ícone do
+plugin na faixa troca a lateral **e** os painéis:
+
+- As janelas do plugin (`view.open`) abrem numa árvore de painéis só delas. A
+  primeira ocupa a tela inteira, e as seguintes abrem ao lado da que está em
+  foco, que é onde a janela de uma tarefa cai quando você clica num cartão do
+  quadro.
+- O ícone das sessões devolve a grade que estava lá, com os mesmos cortes,
+  as mesmas proporções e o mesmo foco. Voltar ao plugin traz a tela dele do
+  jeito que ficou. As sessões continuam rodando enquanto você está fora:
+  nada hiberna nem perde o painel preso por isso, e o selo de "esperando por
+  você" no ícone das sessões continua valendo.
+- O ícone de um plugin sem tela própria (o git, por exemplo) é da tela das
+  sessões. Clicar nele com a tela de outro plugin na vista volta pras sessões.
+- Uma sessão ou um terminal aberto pelo plugin (`session.openClaude`,
+  `session.openShell`, `session.focus`) leva você de volta pra tela das
+  sessões, já com ele em foco. É o "trabalhar nesta tarefa".
+- A exceção é o terminal que é do plugin (`session.openShell` com `owned: true`):
+  ele mora na tela do plugin, com a aba do plugin na lateral, porque não aparece
+  na lista das sessões. Ele não toma o lugar da janela do plugin: troca outro
+  terminal que esteja na tela, ou abre ao lado da janela quando não há nenhum.
+  É a conexão do SSH ao lado da grade de hosts.
+- Um `view.open` pedido com você nas sessões (uma tecla do plugin, um comando
+  no menu de um painel) traz você pra tela do plugin, com a janela em foco.
+- O botão de dividir no cabeçalho de uma janela do plugin a **leva pra tela das
+  sessões**, à direita do painel que estava em foco lá, e você vai junto: a
+  tarefa do Wiboor ao lado do claude que trabalha nela. Dali dá pra arrastar
+  sessões da lateral pras bordas dela, como com qualquer painel. Ela mora nas
+  sessões até você apertar o mesmo botão de novo (agora "devolver"), que a põe
+  de volta na tela do plugin. Um `view.open` dela enquanto está nas sessões leva
+  você até lá, em vez de abrir uma segunda.
+
+`home` é um comando do próprio plugin. Ele roda quando você clica no ícone e a
+tela está vazia (na primeira vez, ou depois de fechar tudo), e quando o app
+abre com a tela do plugin na vista. É a deixa pra abrir a janela principal.
+Sem `home`, a tela vazia mostra só o ícone e o nome do plugin. Com `home`, ela
+mostra também um botão que roda o comando.
+
+As janelas não voltam quando o app reabre, então a tela do plugin também não
+volta: ela se monta de novo pelo `home`. A grade das sessões é guardada mesmo
+que o app feche com a tela do plugin na vista. Grupos de painéis são só da
+tela das sessões.
+
+Numa Maestria sem tela própria, `contributes.screen` é ignorado com um aviso no
+log, e as janelas abrem entre as sessões como antes.
+
+## Janelas em modal
+
+`view.open` com `modal: true` abre a janela por cima da tela, com o fundo
+escurecido, em vez de pô-la na grade: a tarefa do quadro, que se lê e fecha sem
+desmontar os painéis. O conteúdo é o de uma janela qualquer (blocos ou `rfw`), e
+`view.update`, `view.close` e os eventos valem do mesmo jeito.
+
+- Fecha no x, no esc e no clique fora. Como com uma janela fechada, o plugin fica
+  sabendo no próximo `view.update`, que volta `open: false`.
+- O botão **abrir como painel** no topo dele a manda pra grade, ao lado do painel
+  em foco, com o mesmo `viewId`: daí em diante ela é uma janela como as outras, e
+  um `view.open` dela, com ou sem `modal`, só a traz pra frente.
+- Um modal por vez: um `view.open` em modal de outra janela toma o lugar do que
+  estava aberto. Pedir em modal uma janela que já está na grade não a tira de lá.
+
+O `initialize` diz `modal: 1` numa Maestria que o tem; numa de antes, o `modal` é
+ignorado e a janela abre na grade.
+
 ## Janelas (blocos)
 
 Uma janela de plugin é um painel como os outros (arrastável, com moldura e
@@ -447,7 +551,7 @@ reabre.
 | `progress` | `value` (0–1, ou ausente pra indeterminado), `label?`, `detail?` (o número à direita do rótulo: "12% de 300%"), `tone?` (a cor da barra) |
 | `list` | `items: [{ title, subtitle?, icon?, tone?, badge?, action?, actions? }]`, `empty?`. `actions: [{ action, icon, tooltip?, tone? }]` são botões de ícone que aparecem do lado do item com o mouse em cima — o preparar/descartar do controle de código do VS Code. Clicar num deles manda só a ação dele, não a do item. `flat: true` tira a moldura e os traços, pra aba da lateral. `menu: [{ action, label, icon?, tone?, disabled?, children? } | { type: "divider" }]` abre no botão direito do item (um item com `children: [{ action, label, tone? }]` abre um submenu, cada linha com a bolinha na cor do `tone`): deixe no hover uma ou duas ações e mande o resto pra cá, senão a linha fica sem lugar onde clicar. Os campos da lista do OrbStack estão logo abaixo. |
 | `button` | `action`, `label`, `style?`: `primary`, `danger`, `icon`; `icon?`, `tone?`, `tooltip?`, `disabled?`. Com `icon` e sem `label` (ou `style: "icon"`) vira um botão só de ícone — a barra de debug do VS Code. Com `menu` (o mesmo formato do de um item de lista) o botão abre o menu embaixo dele em vez de mandar uma ação — o "…" de um cabeçalho. |
-| `header` | `title`, `subtitle?`, `tone?` (a cor do subtítulo), `avatar?`, `status?`, `dim?`, `actions?: [botão]` — o cabeçalho de uma lista ou janela: o avatar, o título grande e os botões de ícone à direita (cada um vira `style: "icon"`, e aceita `menu`). |
+| `header` | `title`, `subtitle?`, `tone?` (a cor do subtítulo), `avatar?`, `status?`, `dim?`, `wrap?`, `actions?: [botão]` — o cabeçalho de uma lista ou janela: o avatar, o título grande e os botões de ícone à direita (cada um vira `style: "icon"`, e aceita `menu`). O título cabe numa linha e é cortado; com `wrap: true` ele quebra em até três. |
 | `card` | `children`, `padding?` — uma caixa arredondada um passo acima do fundo, com blocos dentro. Uma lista `flat` dentro de um cartão é a lista de containers do OrbStack. |
 | `tabs` | `items: [{ label, action, active?, count?, icon? }]`, `align?: "center"` — abas num controle segmentado. Quem diz qual está ativa é o plugin (`active`); o clique manda a `action`. |
 | `columns` | `children` — blocos lado a lado, todos da mesma largura: três cartões de CPU, memória e rede. |

@@ -82,7 +82,12 @@ class Git {
   static Future<String?> defaultRemoteRef(String root) async {
     final r = await Sh.run('git symbolic-ref --quiet refs/remotes/origin/HEAD || echo', cwd: root);
     if (r.ok && r.stdout.isNotEmpty) {
-      return r.stdout.replaceFirst('refs/remotes/', '');
+      // origin/HEAD can outlive the branch it names: a default renamed
+      // master -> main, a `fetch --prune`, and older gits never repoint it.
+      // Counting commits against a ref that is gone reads as "nothing to lose".
+      final named = r.stdout.replaceFirst('refs/remotes/', '');
+      final v = await Sh.run('git rev-parse --verify --quiet ${Sh.q(named)}', cwd: root);
+      if (v.ok) return named;
     }
     for (final candidate in ['origin/master', 'origin/main']) {
       final v = await Sh.run('git rev-parse --verify ${Sh.q(candidate)}', cwd: root);
@@ -121,12 +126,18 @@ class Git {
     // A prunable worktree has no checkout left to read: there is nothing in it
     // to lose, which is exactly what makes it safe to clear.
     if (w.prunable) return const WorktreeSafety(dirty: 0, unmerged: 0);
-    final dirty = await dirtyCount(w.path) ?? 0;
-    final base = await defaultRemoteRef(root);
+    final dirty = await dirtyCount(w.path);
+    var base = await defaultRemoteRef(root);
     var unmerged = 0;
     if (base != null) {
       final r = await Sh.run('git rev-list --count ${Sh.q(base)}..HEAD', cwd: w.path);
-      unmerged = int.tryParse(r.stdout) ?? 0;
+      final n = r.ok ? int.tryParse(r.stdout) : null;
+      // A count that failed is not a count of zero: say there was no base.
+      if (n == null) {
+        base = null;
+      } else {
+        unmerged = n;
+      }
     }
     return WorktreeSafety(dirty: dirty, unmerged: unmerged, base: base);
   }
@@ -141,6 +152,7 @@ class Git {
     required String root,
     required WorktreeInfo worktree,
     bool force = false,
+    bool? forceBranch,
     bool deleteBranch = false,
   }) async {
     if (worktree.isMain) {
@@ -164,7 +176,7 @@ class Git {
     ];
     if (deleteBranch && worktree.branch != '(detached)') {
       final b = await Sh.run(
-        'git branch ${force ? '-D' : '-d'} ${Sh.q(worktree.branch)}',
+        'git branch ${(forceBranch ?? force) ? '-D' : '-d'} ${Sh.q(worktree.branch)}',
         cwd: root,
       );
       said.add(
@@ -180,7 +192,9 @@ class Git {
   static Future<GitOutcome> prune(String root) async {
     final r = await Sh.run('git worktree prune -v', cwd: root);
     if (!r.ok) return GitOutcome(false, root, r.stderr.isEmpty ? r.stdout : r.stderr);
-    final cleared = r.stdout.split('\n').where((l) => l.trim().isNotEmpty).length;
+    // `-v` reports each "Removing worktrees/x" on stderr, not stdout.
+    final said = '${r.stdout}\n${r.stderr}';
+    final cleared = said.split('\n').where((l) => l.trim().isNotEmpty).length;
     return GitOutcome(
       true,
       root,
@@ -193,14 +207,21 @@ class Git {
 /// committed, and what was committed but lives nowhere else.
 class WorktreeSafety {
   const WorktreeSafety({required this.dirty, required this.unmerged, this.base});
-  final int dirty;
+
+  /// `null` when `git status` could not be read -- unknown, not clean.
+  final int? dirty;
   final int unmerged;
 
   /// The ref the commits were counted against, `null` when there was none to
   /// compare with -- which is itself worth saying out loud.
   final String? base;
 
-  bool get risky => dirty > 0 || unmerged > 0;
+  bool get risky => dirty != 0 || unmerged > 0;
+
+  /// Whether `git branch -D` is earned: only once the commits were actually
+  /// counted against a base, so the dialog told the truth about them. With no
+  /// base, `-d` keeps git's own merged check as the last word.
+  bool get forceBranch => base != null && risky;
 }
 
 class GitOutcome {

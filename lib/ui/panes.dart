@@ -1,11 +1,13 @@
 import 'dart:math' as math;
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
 import '../services/layout.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'doc_pane.dart';
+import 'panel.dart';
 import 'plugin_pane.dart';
 import 'setup_pane.dart';
 import 'terminal_pane.dart';
@@ -40,6 +42,7 @@ class PaneArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final root = store.panes;
+    if (root == null && store.screen != null) return _EmptyScreen(store: store);
     if (root == null) return _EmptyDrop(store: store);
     return _Node(store: store, node: root);
   }
@@ -324,6 +327,50 @@ class _EmptyDropState extends State<_EmptyDrop> {
           EmptyPane(store: widget.store),
           if (_over) const IgnorePointer(child: _DropHint(side: DropSide.center)),
         ],
+      ),
+    );
+  }
+}
+
+/// A tela de um plugin com nada aberto (ver [AppStore.screen]).
+///
+/// Sem o drop e sem a cola da tela das sessões: nenhuma sessão entra aqui, e
+/// as teclas que a cola ensina são das sessões. O que cabe dizer é de quem é
+/// esta tela, e o botão que monta ela de novo quando o plugin tem um.
+class _EmptyScreen extends StatelessWidget {
+  const _EmptyScreen({required this.store});
+
+  final AppStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final plugin = store.plugins.byId(store.screen!);
+    final home = plugin?.manifest?.screenHome;
+    final command = store.plugins.commands.firstWhereOrNull(
+      (c) => c.pluginId == plugin?.id && c.id == home,
+    );
+    return MxPanel(
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PluginGlyph(
+              icon: plugin?.manifest?.icon,
+              dir: plugin?.dir,
+              size: 30,
+              color: Mx.fgFaint,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'nada aberto ${plugin == null ? 'aqui' : 'do ${plugin.name}'}',
+              style: TextStyle(color: Mx.fgDim, fontSize: 13),
+            ),
+            if (command != null) ...[
+              const SizedBox(height: 10),
+              TextButton(onPressed: store.openScreenHome, child: Text(command.title)),
+            ],
+          ],
+        ),
       ),
     );
   }

@@ -289,10 +289,15 @@ class _MxSubmenuItemState extends State<MxSubmenuItem> {
     if (box == null) return;
     final origin = box.localToGlobal(Offset.zero, ancestor: overlay.context.findRenderObject());
 
+    // Um submenu mais alto que a janela fica do tamanho dela e rola. Sem isso
+    // o `clamp` de baixo recebe um teto menor que o piso e lança.
+    final full = rows.length * _rowHeight + rows.where((r) => r.divided).length * 9 + 10;
+    final room = screen.height - 16;
+    final tall = full > room ? room : full;
+
     // Encostado na borda do menu e não a um vão dele: o ponteiro andando da
     // linha até o submenu não pode atravessar um pedaço de tela que não é de
     // nenhum dos dois.
-    final tall = rows.length * _rowHeight + rows.where((r) => r.divided).length * 9 + 10;
     var left = origin.dx + box.size.width - 4;
     if (left + mxMenuWidth > screen.width - 8) left = origin.dx - mxMenuWidth + 4;
     var top = origin.dy - 5;
@@ -300,9 +305,10 @@ class _MxSubmenuItemState extends State<MxSubmenuItem> {
 
     final entry = OverlayEntry(
       builder: (_) => Positioned(
-        left: left.clamp(8.0, screen.width - mxMenuWidth - 8),
-        top: top.clamp(8.0, screen.height - tall - 8),
+        left: left.clamp(8.0, (screen.width - mxMenuWidth - 8).clamp(8.0, double.infinity)),
+        top: top.clamp(8.0, (screen.height - tall - 8).clamp(8.0, double.infinity)),
         width: mxMenuWidth,
+        height: full > room ? tall : null,
         child: _Submenu(rows: rows, onPick: _pick),
       ),
     );
@@ -362,7 +368,7 @@ class _Submenu extends StatelessWidget {
         side: BorderSide(color: Mx.border),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 5),
         child: Column(
           mainAxisSize: MainAxisSize.min,

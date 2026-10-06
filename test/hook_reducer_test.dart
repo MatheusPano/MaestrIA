@@ -17,7 +17,7 @@ void main() {
       expect(s.status, ClaudeStatus.ready);
 
       HookReducer.apply(s, 'UserPromptSubmit',
-          ev('UserPromptSubmit', {'user_input': 'troca o middleware  de sessão'}));
+          ev('UserPromptSubmit', {'prompt': 'troca o middleware  de sessão'}));
       expect(s.status, ClaudeStatus.working);
       expect(s.prompts, 1);
       expect(s.lastPrompt, 'troca o middleware de sessão');
@@ -188,8 +188,37 @@ void main() {
 
     test('session end is terminal only when it really ended', () {
       final s = HookState();
-      HookReducer.apply(s, 'SessionEnd', ev('SessionEnd', {'end_reason': 'logout'}));
+      HookReducer.apply(s, 'SessionEnd', ev('SessionEnd', {'reason': 'logout'}));
       expect(s.status, ClaudeStatus.ended);
+    });
+
+    // O Esc no meio de uma ferramenta não manda `Stop`, e um turno que morre
+    // num erro da API também não: cada um tem o seu evento.
+    test('a tool interrupted with Esc ends the turn; a tool that only failed does not', () {
+      final s = HookState();
+      HookReducer.apply(s, 'PreToolUse', ev('PreToolUse', {'tool_name': 'Bash'}));
+      HookReducer.apply(
+        s,
+        'PostToolUseFailure',
+        ev('PostToolUseFailure', {'tool_name': 'Bash', 'error': 'exit 1', 'is_interrupt': false}),
+      );
+      expect(s.status, ClaudeStatus.working);
+      expect(s.activeTool, isNull);
+      HookReducer.apply(s, 'PreToolUse', ev('PreToolUse', {'tool_name': 'Bash'}));
+      HookReducer.apply(
+        s,
+        'PostToolUseFailure',
+        ev('PostToolUseFailure', {'tool_name': 'Bash', 'is_interrupt': true}),
+      );
+      expect(s.status, ClaudeStatus.idle);
+    });
+
+    test('a turn that died on an API error rests, with the error as the last word', () {
+      final s = HookState();
+      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'prompt': 'vai'}));
+      HookReducer.apply(s, 'StopFailure', ev('StopFailure', {'error': 'rate_limit'}));
+      expect(s.status, ClaudeStatus.idle);
+      expect(s.lastMessage, 'rate_limit');
     });
 
     // Caught on the first real run: fourteen live panels read "encerrada"
@@ -198,7 +227,7 @@ void main() {
       for (final reason in ['resume', 'clear']) {
         final s = HookState();
         HookReducer.apply(s, 'SessionStart', ev('SessionStart'));
-        HookReducer.apply(s, 'SessionEnd', ev('SessionEnd', {'end_reason': reason}));
+        HookReducer.apply(s, 'SessionEnd', ev('SessionEnd', {'reason': reason}));
         expect(s.status, ClaudeStatus.ready, reason: reason);
       }
     });
@@ -217,7 +246,7 @@ void main() {
 
     test('settling never walks a session that already spoke backwards', () {
       final s = HookState();
-      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'vai'}));
+      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'prompt': 'vai'}));
       expect(s.settle(), isFalse);
       expect(s.status, ClaudeStatus.working);
     });
@@ -399,7 +428,7 @@ void main() {
 
     test('um evento de fork não mexe no status da sessão', () {
       final s = HookState();
-      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'user_input': 'divide'}));
+      HookReducer.apply(s, 'UserPromptSubmit', ev('UserPromptSubmit', {'prompt': 'divide'}));
       HookReducer.apply(s, 'PostToolUse', fromAgent('PostToolUse', 'a03', {
         'tool_name': 'Read',
         'tool_input': {'file_path': '/repo/lib/models.dart'},

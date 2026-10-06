@@ -63,6 +63,30 @@ class PluginApi {
           placeholder: p['placeholder'] as String?,
           items: items,
         );
+      case 'window.input':
+        final input = store.quickInput;
+        if (input == null) {
+          throw const PluginRpcError(PluginRpcError.unavailable, 'a janela não tem onde perguntar');
+        }
+        return input(
+          title: (p['title'] as String?) ?? plugin.name,
+          placeholder: p['placeholder'] as String?,
+          value: p['value'] as String?,
+          prompt: p['prompt'] as String?,
+        );
+      case 'window.form':
+        final show = store.quickForm;
+        if (show == null) {
+          throw const PluginRpcError(PluginRpcError.unavailable, 'a janela não tem onde perguntar');
+        }
+        final PluginForm form;
+        try {
+          form = PluginForm.parse(p, fallbackTitle: plugin.name);
+        } on FormatException catch (e) {
+          throw PluginRpcError(PluginRpcError.invalidParams, e.message);
+        }
+        final answer = await show(form);
+        return answer == null ? null : {'action': answer.action, 'values': answer.values};
       case 'settings.get':
         return store.plugins.settingsOf(plugin);
       case 'clipboard.write':
@@ -178,6 +202,30 @@ class PluginApi {
           featureOrHotfix: store.focusedFeatureOrHotfix,
         );
         return {'tabId': tab.id};
+      case 'suggestion.created':
+        // O fim do `suggestion.start`: a tarefa existe no tracker, e a
+        // Maestria faz o que foi escolhido no cartão. Ver
+        // [AppStore.suggestionTracked].
+        if (plugin.manifest?.suggestions == null) {
+          throw const PluginRpcError(
+            PluginRpcError.forbidden,
+            'só quem declara "contributes.suggestions" recebe tarefas sugeridas',
+          );
+        }
+        final id = p['suggestionId'];
+        final ref = p['ref'];
+        if (id is! String || ref is! String || ref.trim().isEmpty) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, 'faltam "suggestionId" e "ref"');
+        }
+        final tab = await store.suggestionTracked(
+          plugin,
+          suggestionId: id,
+          ref: ref.trim(),
+          intro: (p['intro'] as String?) ?? '',
+          branch: p['branch'] as String?,
+          dir: p['dir'] as String?,
+        );
+        return tab == null ? null : {'tabId': tab.id, 'cwd': tab.cwd};
       case 'session.openShell':
         _need(plugin, PluginPermission.sessionsCreate);
         final (folder, cwd) = _place(p);
@@ -253,6 +301,7 @@ class PluginApi {
           title: (p['title'] as String?) ?? plugin.name,
           blocks: PluginView.blocksFrom(p['blocks']),
           rfw: _rfw(p),
+          modal: p['modal'] == true,
         );
         return {'tabId': tab.id};
       case 'view.update':
