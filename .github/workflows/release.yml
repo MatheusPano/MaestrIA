@@ -1,7 +1,13 @@
-# Uma tag vira duas coisas pra baixar.
+# Uma versão vira duas coisas pra baixar.
 #
-#   make bump V=1.0.3          # sobe a versão no pubspec
-#   git commit -am '...' && git push
+# Na aba Actions, "Run workflow" na main com a versão (ex.: 2.5.0). O workflow
+# sobe o pubspec, commita "release v2.5.0" na main, cria a tag e segue. Se a
+# tag já existe, ele só reempacota -- é pra isso que serve rodar de novo uma
+# versão já publicada.
+#
+# O caminho à mão continua valendo:
+#
+#   make bump V=1.0.3 && git commit -am '...' && git push
 #   git tag v1.0.3 && git push origin v1.0.3
 #
 # Daí em diante é sozinho: o .deb sai de um container ubuntu:22.04 (o mesmo do
@@ -13,29 +19,72 @@ name: release
 on:
   push:
     tags: ['v*']
-  # Pra reempacotar uma tag que já existe sem ter que apagá-la e recriá-la.
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'a tag a empacotar (ex.: v1.0.3)'
+      versao:
+        description: 'a versão (ex.: 2.5.0) -- nova é criada, existente é reempacotada'
         required: true
 
 permissions:
   contents: write
 
-env:
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
-
 jobs:
   # A tag é o nome público da versão e o pubspec é o que vai dentro do pacote.
   # Divergirem é uma release que se anuncia 1.0.3 e instala 1.0.2 -- e o apt,
   # que decide atualizar pela versão do pacote, não atualizaria nada.
+  #
+  # O build acontece neste mesmo run, e não num disparado pelo push da tag:
+  # tag empurrada com o GITHUB_TOKEN não dispara workflow nenhum.
   versao:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+
+      - id: tag
+        name: qual tag?
+        env:
+          VERSAO: ${{ github.event.inputs.versao }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          v="${VERSAO#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSAO' não é uma versão (ex.: 2.5.0)."
+            exit 1
+          fi
+          tag="v$v"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag já existe: reempacotando."
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::versão nova sai da main, e este run é de $GITHUB_REF_NAME."
+            exit 1
+          fi
+
+          # O mesmo `make bump` de quem faz à mão. Se o pubspec já estava na
+          # versão, não há o que commitar e a tag vai no HEAD como está.
+          make bump V="$v"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --quiet || git commit -am "release $tag"
+          git tag "$tag"
+          # Atômico: ou a main e a tag sobem juntas, ou nenhuma -- nada de tag
+          # apontando pra um commit que a main recusou.
+          git push --atomic origin HEAD:main "$tag"
+
+      - uses: actions/checkout@v4
+        with: { ref: '${{ steps.tag.outputs.tag }}' }
       - name: a tag bate com o pubspec?
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           pubspec=$(sed -n 's/^version: *\([0-9][^+ ]*\).*/\1/p' pubspec.yaml | head -1)
@@ -50,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+        with: { ref: '${{ needs.versao.outputs.tag }}' }
       # O mesmo script do `make deb`: aqui o container roda nativo em vez de
       # emulado, então o que no Mac leva dezenas de minutos leva alguns.
       - run: ./packaging/linux/build-deb.sh
@@ -66,7 +115,7 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+        with: { ref: '${{ needs.versao.outputs.tag }}' }
 
       # A versão do Flutter vem do Makefile, que é onde ela mora pro resto do
       # projeto: um runner que compilasse com outra não seria o mesmo app.
@@ -103,21 +152,22 @@ jobs:
           if-no-files-found: error
 
   publicar:
-    needs: [deb, dmg]
+    needs: [versao, deb, dmg]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { ref: '${{ github.event.inputs.tag || github.ref_name }}' }
+        with: { ref: '${{ needs.versao.outputs.tag }}' }
       - uses: actions/download-artifact@v4
         with: { path: anexos, merge-multiple: true }
 
       # O SHA256SUMS é o que o app confere antes de se atualizar: release sem
       # ele não é instalada -- ver `lib/services/updater.dart`.
       #
-      # `--clobber` porque o workflow_dispatch existe justamente pra reempacotar
-      # uma tag já publicada: sem ele a segunda rodada morre no anexo repetido.
+      # `--clobber` porque rodar de novo uma versão publicada é reempacotá-la:
+      # sem ele a segunda rodada morre no anexo repetido.
       - env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.versao.outputs.tag }}
         run: |
           set -euo pipefail
           (cd anexos && sha256sum *.dmg *.deb > SHA256SUMS && cat SHA256SUMS)
