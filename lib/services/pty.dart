@@ -154,10 +154,11 @@ class TermSession {
   ///
   /// The text is read by [selectedText] and not by `buffer.getText`, which
   /// hands over a TUI's line with every space missing -- see `vt.dart`.
-  Future<void> copySelection() async {
+  /// [reflow] is for claude's tab: see [selectedText].
+  Future<void> copySelection({bool reflow = false}) async {
     final selection = controller.selection;
     if (selection == null) return;
-    await Clipboard.setData(ClipboardData(text: selectedText(terminal, selection)));
+    await Clipboard.setData(ClipboardData(text: selectedText(terminal, selection, reflow: reflow)));
   }
 
   /// What ⌘V puts in.

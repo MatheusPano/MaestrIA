@@ -206,7 +206,7 @@ Future<void> showTerminalMenu(BuildContext context, MxTab tab, Offset globalPosi
 
   switch (choice) {
     case 'copy':
-      await tab.term.copySelection();
+      await tab.term.copySelection(reflow: tab.kind == TabKind.claude);
     case 'paste':
       await tab.term.pasteClipboard(imagesViaCtrlV: tab.kind == TabKind.claude);
   }
