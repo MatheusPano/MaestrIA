@@ -107,6 +107,140 @@ void main() {
     });
   });
 
+  // Como o Claude Code 2.1.292 escreve: continuação na coluna 3, via `ESC[2C`.
+  group('selectedText with reflow', () {
+    VtTerminal claude(List<String> rows, {int width = 40}) {
+      final terminal = VtTerminal(maxLines: 100)..resize(width, 12);
+      terminal.write('\x1b[H● ${rows.first}');
+      for (final row in rows.skip(1)) {
+        terminal.write('\r\n${row.isEmpty ? '' : '\x1b[2C$row'}');
+      }
+      return terminal;
+    }
+
+    String reflowed(Terminal terminal, {int from = 0, int line = 0, required int lastLine}) =>
+        selectedText(
+          terminal,
+          BufferRangeLine(CellOffset(from, line), CellOffset(terminal.viewWidth, lastLine)),
+          reflow: true,
+        );
+
+    test('the rows Claude broke join into one line, without the indent or the ●', () {
+      final terminal = claude([
+        'Rivers shape landscapes and sustain',
+        'ecosystems across the whole globe.',
+      ]);
+
+      expect(
+        reflowed(terminal, lastLine: 1),
+        'Rivers shape landscapes and sustain ecosystems across the whole globe.',
+      );
+    });
+
+    test('and without reflow they stay as the screen shows them', () {
+      final terminal = claude([
+        'Rivers shape landscapes and sustain',
+        'ecosystems across the whole globe.',
+      ]);
+
+      final range = BufferRangeLine(const CellOffset(0, 0), const CellOffset(40, 1));
+      expect(
+        selectedText(terminal, range),
+        '● Rivers shape landscapes and sustain\n  ecosystems across the whole globe.',
+      );
+    });
+
+    test('a row that ends early ends a line', () {
+      final terminal = claude(['First paragraph.', '', 'Second one.']);
+
+      expect(reflowed(terminal, lastLine: 2), 'First paragraph.\n\nSecond one.');
+    });
+
+    test('a row whose next word would have fit was a line of its own', () {
+      final terminal = claude(['Short line', 'x']);
+
+      expect(reflowed(terminal, lastLine: 1), 'Short line\nx');
+    });
+
+    test('list items stay apart, each one whole', () {
+      final terminal = claude([
+        'Two items:',
+        '',
+        '- The first item is long enough to',
+        '  wrap.',
+        '- The second.',
+      ]);
+
+      expect(
+        reflowed(terminal, lastLine: 4),
+        'Two items:\n\n- The first item is long enough to wrap.\n- The second.',
+      );
+    });
+
+    test('a selection that starts on a word keeps the rest dedented', () {
+      final terminal = claude([
+        'Rivers shape landscapes and sustain',
+        'ecosystems.',
+        '',
+        '- An item.',
+      ]);
+
+      expect(
+        reflowed(terminal, from: 9, lastLine: 3),
+        'shape landscapes and sustain ecosystems.\n\n- An item.',
+      );
+    });
+
+    test('a word longer than the row joins without a space', () {
+      final terminal = claude(['https://example.com/a/very/long/path/x', 'yz']);
+
+      expect(reflowed(terminal, lastLine: 1), 'https://example.com/a/very/long/path/xyz');
+    });
+
+    test('a row that opens with a number is still the middle of a sentence', () {
+      final terminal = claude([
+        'The release shipped in the spring of',
+        '2026. After that the whole team had',
+        'moved on.',
+      ]);
+
+      expect(
+        reflowed(terminal, lastLine: 2),
+        'The release shipped in the spring of 2026. After that the whole team had moved on.',
+      );
+    });
+
+    test('a selection across two replies loses both ●', () {
+      final terminal = claude(['First reply.', '', '\x1b[1G● Second reply.', '  - item']);
+
+      expect(reflowed(terminal, lastLine: 3), 'First reply.\n\nSecond reply.\n- item');
+    });
+
+    test('a selection that starts on the space between two words is not an indent', () {
+      final terminal = claude([
+        'Rivers shape landscapes and sustain',
+        'ecosystems.',
+        '',
+        '- An item.',
+      ]);
+
+      expect(
+        reflowed(terminal, from: 8, lastLine: 3),
+        ' shape landscapes and sustain ecosystems.\n\n- An item.',
+      );
+    });
+
+    test('a table is never prose', () {
+      final terminal = claude([
+        '┌──────────────────────────────────┐',
+        '│ a long table row that fills it  │',
+        '└──────────────────────────────────┘',
+      ]);
+
+      expect(reflowed(terminal, lastLine: 2).split('\n'), hasLength(3));
+    });
+  });
+
   group('⌘C', () {
     testWidgets('copies the selection, spaces and all', (tester) async {
       final clipboard = watchClipboard();

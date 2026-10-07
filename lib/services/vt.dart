@@ -242,24 +242,141 @@ class VtTerminal extends Terminal {
 /// nobody drew on, and no terminal puts them on the clipboard. A space the
 /// program actually wrote stays wherever it is — it was selected like any
 /// other character.
-String selectedText(Terminal terminal, BufferRange range) {
+///
+/// With [reflow], the rows Claude Code broke itself join back into one line and
+/// its layout indent is left out -- see [_claudeWrapped] and [_dedent].
+String selectedText(Terminal terminal, BufferRange range, {bool reflow = false}) {
   final buffer = terminal.buffer;
   final selection = range.normalized;
-  final lines = <StringBuffer>[StringBuffer()];
+  final lines = <List<String>>[[]];
+  var hanging = 0;
 
   for (final segment in selection.toSegments()) {
     if (segment.line < 0 || segment.line >= buffer.height) continue;
     final line = buffer.lines[segment.line];
+    final text = _segmentText(line, segment.start, segment.end);
+    final first = segment.line == selection.begin.y || segment.line == 0;
     // A wrapped line is the second half of the line above it, so it joins
     // without a break -- the rule `buffer.getText` follows, and the reason a
     // URL that the terminal split in two is copied whole.
-    if (!(segment.line == selection.begin.y || segment.line == 0 || line.isWrapped)) {
-      lines.add(StringBuffer());
+    if (first || line.isWrapped) {
+      lines.last.add(text);
+      if (first) hanging = _hangingIndent(line);
+      continue;
     }
-    lines.last.write(_segmentText(line, segment.start, segment.end));
+    final above = buffer.lines[segment.line - 1];
+    if (reflow && _claudeWrapped(above, line, terminal.viewWidth, hanging)) {
+      final space = _brokenWord(above, terminal.viewWidth, hanging) ? '' : ' ';
+      lines.last.last = lines.last.last.trimRight();
+      lines.last.add('$space${text.trimLeft()}');
+      continue;
+    }
+    lines.add([text]);
+    hanging = _hangingIndent(line);
   }
 
-  return lines.join('\n');
+  final text = [for (final parts in lines) parts.join()];
+  if (!reflow) return text.join('\n');
+  final begin = selection.begin;
+  final fromIndent =
+      begin.y >= 0 && begin.y < buffer.height && begin.x <= _indent(buffer.lines[begin.y]);
+  return _dedent([for (final line in text) line.trimRight()], firstCounts: fromIndent).join('\n');
+}
+
+/// Claude wraps a reply itself, so `isWrapped` never says so: a row ended where
+/// it did when the next row's first word would not have fit after it.
+bool _claudeWrapped(BufferLine above, BufferLine below, int width, int hanging) {
+  final end = _drawnEnd(above);
+  final indent = _indent(below);
+  if (end == 0 || indent >= below.length || indent != hanging) return false;
+  if (_isBox(above.getCodePoint(end - 1)) || _isBox(below.getCodePoint(indent))) return false;
+  return end + 1 + _wordWidth(below, indent) > width;
+}
+
+/// A word longer than the row, which Claude cut mid-word: no space between the halves.
+bool _brokenWord(BufferLine line, int width, int hanging) =>
+    _drawnEnd(line) >= width && hanging + _wordWidth(line, hanging) >= width;
+
+/// Where the text of [line] starts: past its indent and past an opening `●`, `-` or `1.`.
+int _hangingIndent(BufferLine line) {
+  final indent = _indent(line);
+  var i = indent;
+  while (i < line.length && !_isBlank(line.getCodePoint(i))) {
+    i++;
+  }
+  if (!_marker.hasMatch(_cells(line, indent, i))) return indent;
+  while (i < line.length && _isBlank(line.getCodePoint(i))) {
+    i++;
+  }
+  return i;
+}
+
+final _marker = RegExp(r'^([●⏺•⎿❯>*-]|\d+[.)])$');
+
+int _indent(BufferLine line) {
+  var i = 0;
+  while (i < line.length && _isBlank(line.getCodePoint(i))) {
+    i++;
+  }
+  return i;
+}
+
+/// The column right after the last cell anything visible was written in.
+int _drawnEnd(BufferLine line) {
+  for (var i = line.length - 1; i >= 0; i--) {
+    if (!_isBlank(line.getCodePoint(i))) return i + line.getWidth(i);
+  }
+  return 0;
+}
+
+int _wordWidth(BufferLine line, int from) {
+  var i = from;
+  while (i < line.length && !_isBlank(line.getCodePoint(i))) {
+    i += line.getWidth(i).clamp(1, 2);
+  }
+  return i - from;
+}
+
+String _cells(BufferLine line, int from, int to) =>
+    String.fromCharCodes([for (var i = from; i < to; i++) line.getCodePoint(i)]);
+
+bool _isBlank(int codePoint) => codePoint == 0 || codePoint == 32;
+
+/// Box drawing, which is how Claude draws a table.
+bool _isBox(int codePoint) => codePoint >= 0x2500 && codePoint <= 0x257F;
+
+/// [lines] without their shared indent and without the `●` that opens a reply.
+/// The first line counts only when the selection started inside its indent.
+List<String> _dedent(List<String> lines, {required bool firstCounts}) {
+  final out = [...lines];
+  final kept = <int>{if (!firstCounts) 0};
+  for (var i = 0; i < out.length; i++) {
+    final mark = _replyMark.firstMatch(out[i]);
+    if (mark == null) continue;
+    out[i] = out[i].substring(mark.end);
+    kept.add(i);
+  }
+
+  final indents = [
+    for (var i = 0; i < out.length; i++)
+      if (!kept.contains(i) && out[i].trim().isNotEmpty) out[i].length - out[i].trimLeft().length,
+  ];
+  if (indents.isEmpty) return out;
+  final shared = indents.reduce((a, b) => a < b ? a : b);
+
+  return [
+    for (var i = 0; i < out.length; i++) kept.contains(i) ? out[i] : _cutIndent(out[i], shared),
+  ];
+}
+
+final _replyMark = RegExp(r'^[●⏺] +');
+
+String _cutIndent(String line, int count) {
+  var i = 0;
+  while (i < count && i < line.length && line.codeUnitAt(i) == 32) {
+    i++;
+  }
+  return line.substring(i);
 }
 
 /// One line of [selectedText], from cell [start] up to (not including) [end].
