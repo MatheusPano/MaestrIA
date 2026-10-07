@@ -389,7 +389,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       return KeyEventResult.handled;
     }
     if (MxChord.copy.accepts(event)) {
-      tab.term.copySelection();
+      tab.term.copySelection(reflow: tab.kind == TabKind.claude);
       return KeyEventResult.handled;
     }
     // O mapa de atalhos inteiro, resolvido aqui e não lá em cima: a keytab do
