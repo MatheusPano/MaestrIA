@@ -18,6 +18,7 @@ import 'dialogs.dart';
 import 'menus.dart';
 import 'plugin_dialogs.dart';
 import 'plugin_pane.dart' show PluginGlyph;
+import 'switch.dart';
 import 'theme_gallery.dart';
 
 /// As quatro metades da tela: como a janela se parece, o que o teclado faz, o
@@ -267,6 +268,65 @@ class _RailItemState extends State<_RailItem> {
   }
 }
 
+/// Uma opção de ligar e desligar: o nome, a frase que explica (quando o nome
+/// não basta) e o [MxSwitch].
+///
+/// O interruptor fica na altura do nome e não no meio do bloco: com uma frase
+/// de três linhas embaixo, centralizado ele flutuava longe do que liga. A
+/// linha inteira é o alvo, como no `SwitchListTile` que isto substitui.
+class _Toggle extends StatelessWidget {
+  const _Toggle({
+    required this.value,
+    required this.onChanged,
+    required this.title,
+    this.subtitle,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => onChanged!(!value) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            crossAxisAlignment: subtitle == null
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
+                    if (subtitle case final subtitle?) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 24),
+              MxSwitch(value: value, onChanged: onChanged),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Cabeçalho de bloco: o nome do que vem abaixo e a frase que explica.
 class _Heading extends StatelessWidget {
   const _Heading(this.title, {this.hint, this.hintAsInfo = false});
@@ -341,19 +401,11 @@ class _Appearance extends StatelessWidget {
           hint: 'A faixa com o resumo das sessões e o sino. O sino, a lista '
               'dele e os cartões de aviso ficam do mesmo lado que ela.',
         ),
-        SwitchListTile(
+        _Toggle(
           value: store.statusBarTop,
           onChanged: store.setStatusBarTop,
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text(
-            'Barra de status em cima',
-            style: TextStyle(fontSize: 12.5, color: Mx.fg),
-          ),
-          subtitle: Text(
-            'No topo da janela, em vez de no pé',
-            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
-          ),
+          title: 'Barra de status em cima',
+          subtitle: 'No topo da janela, em vez de no pé',
         ),
       ],
     );
@@ -386,22 +438,15 @@ class _Sessions extends StatelessWidget {
               'onde parou. Também dá pra hibernar uma sessão à mão, pelo menu '
               'da linha.',
         ),
-        SwitchListTile(
+        _Toggle(
           value: on,
           onChanged: (v) => store.setHibernateMinutes(v ? AppStore.defaultHibernateMinutes : 0),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text(
-            'Hibernar sozinho o que está parado fora da tela',
-            style: TextStyle(fontSize: 12.5, color: Mx.fg),
-          ),
-          subtitle: Text(
-            'Só as que não estão na tela, sem pendência com você, sem fila pra '
-            'andar e sem agentes rodando. O que estava rodando dentro dela — '
-            'um servidor MCP, um dev server que uma ferramenta subiu — vai '
-            'junto com o processo.',
-            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
-          ),
+          title: 'Hibernar sozinho o que está parado fora da tela',
+          subtitle:
+              'Só as que não estão na tela, sem pendência com você, sem fila pra '
+              'andar e sem agentes rodando. O que estava rodando dentro dela — '
+              'um servidor MCP, um dev server que uma ferramenta subiu — vai '
+              'junto com o processo.',
         ),
         if (on) ...[
           const SizedBox(height: 14),
@@ -440,25 +485,17 @@ class _Updates extends StatelessWidget {
                     'que comparar a release publicada.'
               : 'Esta é a ${u.current}.',
         ),
-        SwitchListTile(
+        _Toggle(
           value: u.active,
           // Fora de um app instalado pelo pacote da release, não há o que
           // trocar: o interruptor fica, mas apagado.
           onChanged: u.enabled ? store.setAutoUpdate : null,
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text(
-            'Atualizar sozinho',
-            style: TextStyle(fontSize: 12.5, color: Mx.fg),
-          ),
-          subtitle: Text(
-            u.enabled
-                ? 'Quando sai versão nova, ela é baixada em segundo plano e o '
-                      'número aparece na barra de status. $when Nada reinicia '
-                      'sem você pedir.'
-                : 'Só vale pro app instalado pelo pacote da release.',
-            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
-          ),
+          title: 'Atualizar sozinho',
+          subtitle: u.enabled
+              ? 'Quando sai versão nova, ela é baixada em segundo plano e o '
+                    'número aparece na barra de status. $when Nada reinicia '
+                    'sem você pedir.'
+              : 'Só vale pro app instalado pelo pacote da release.',
         ),
       ],
     );
@@ -1430,21 +1467,10 @@ class _AutoUpdate extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SwitchListTile(
+        _Toggle(
           value: store.plugins.autoUpdate,
           onChanged: store.setPluginAutoUpdate,
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text(
-            'Atualizar os plugins sozinho',
-            style: TextStyle(fontSize: 12.5, color: Mx.fg),
-          ),
-          subtitle: Text(
-            'Os que vieram do catálogo ou de um repositório de git ganham as '
-            'versões novas sem perguntar. A que pede uma permissão nova espera o '
-            'seu "confio". Dá pra deixar um plugin de fora no menu dele.',
-            style: faint,
-          ),
+          title: 'Atualizar os plugins sozinho',
         ),
         Row(
           children: [
@@ -1676,7 +1702,14 @@ class _PluginRowState extends State<_PluginRow> {
               children: [
                 Row(
                   children: [
-                    PluginGlyph(icon: m?.icon, dir: plugin.dir, size: 17, color: _tone),
+                    // O estado é só a cor do ícone, com o nome no tooltip: por
+                    // extenso ao lado do nome era mais um rótulo disputando a
+                    // linha com a versão e o selo. Erro e queda têm a linha
+                    // vermelha embaixo; desligado, o interruptor.
+                    Tooltip(
+                      message: state.label,
+                      child: PluginGlyph(icon: m?.icon, dir: plugin.dir, size: 17, color: _tone),
+                    ),
                     const SizedBox(width: 11),
                     Expanded(
                       child: Wrap(
@@ -1746,19 +1779,7 @@ class _PluginRowState extends State<_PluginRow> {
           ),
           if (m != null) ...[
             const SizedBox(width: 6),
-            // Reduzido pelo FittedBox, e não por um Transform.scale: o scale
-            // encolhe o desenho mas deixa a caixa do tamanho original, e a
-            // sobra de cada lado desalinhava o interruptor do ⋮.
-            SizedBox(
-              height: 24,
-              child: FittedBox(
-                child: Switch(
-                  value: plugin.enabled,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: (on) => store.setPluginEnabled(plugin, on),
-                ),
-              ),
-            ),
+            MxSwitch(value: plugin.enabled, onChanged: (on) => store.setPluginEnabled(plugin, on)),
           ],
         ],
       ),
@@ -2218,21 +2239,14 @@ class _DictationState extends State<_Dictation> {
           onChanged: (v) => _apply(config.copyWith(prompt: v)),
         ),
         const SizedBox(height: 8),
-        SwitchListTile(
+        _Toggle(
           value: config.submit,
           onChanged: (v) => _apply(config.copyWith(submit: v)),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text(
-            'Enviar sozinho ao terminar de falar',
-            style: TextStyle(fontSize: 12.5, color: Mx.fg),
-          ),
-          subtitle: Text(
-            'Desligado, o texto só é colado e você confere antes do enter — '
-            'que é o que vale a pena enquanto você não confia no microfone: '
-            'nome de arquivo e nome de branch são o que ele mais erra.',
-            style: TextStyle(fontSize: 11.5, color: Mx.fgFaint, height: 1.4),
-          ),
+          title: 'Enviar sozinho ao terminar de falar',
+          subtitle:
+              'Desligado, o texto só é colado e você confere antes do enter — '
+              'que é o que vale a pena enquanto você não confia no microfone: '
+              'nome de arquivo e nome de branch são o que ele mais erra.',
         ),
       ],
     );

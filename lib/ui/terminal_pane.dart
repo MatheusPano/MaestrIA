@@ -449,7 +449,7 @@ class _PaneHeader extends StatelessWidget {
   /// Era o cabeçalho inteiro num `Opacity`, e isso apagava justamente a coisa
   /// que a pessoa vai procurar: numa grade de quatro, três nomes a 55% e um
   /// aceso. O que fica apagado é o que só interessa no painel em que você está
-  /// digitando -- as fichas, o subtítulo e os botões.
+  /// digitando -- as fichas e os botões.
   Widget _faded(Widget child) => dimmed ? Opacity(opacity: 0.55, child: child) : child;
 
   @override
@@ -469,7 +469,7 @@ class _PaneHeader extends StatelessWidget {
                 ? ClaudeAvatar(status: tab.status, size: 20)
                 : StatusDot(status: tab.status),
             const SizedBox(width: 9),
-            // Title, chips and subtitle share one flexible block on purpose.
+            // Title and chips share one flexible block on purpose.
             //
             // Laid out as siblings of the buttons, whatever the title's flex
             // share went unused stayed unclaimed, and a Row packed to the
@@ -515,7 +515,6 @@ class _PaneHeader extends StatelessWidget {
                             // `/compact`, e a ficha some junto com ele.
                             if (tab.kind == TabKind.claude && tab.context != null)
                               _ContextChip(usage: tab.context!),
-                            if (tab.dirty > 0) _Chip(text: '${tab.dirty}', color: Mx.yellow),
                             if (tab.hooks.touched.isNotEmpty)
                               ResultChip(
                                 count: tab.hooks.touched.length,
@@ -528,16 +527,6 @@ class _PaneHeader extends StatelessWidget {
                                 child: FollowUpMark(tab: tab),
                               ),
                           ],
-                        ),
-                      ),
-                      Flexible(
-                        flex: 2,
-                        child: _faded(
-                          Text(
-                            tab.subtitle,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Mx.fgDim, fontSize: 12),
-                          ),
                         ),
                       ),
                     ],

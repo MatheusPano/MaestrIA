@@ -408,7 +408,12 @@ class _DocPillState extends State<_DocPill> {
 /// Says the one number worth a glance and nothing else — the list is a click
 /// away, and a header that spelled out filenames would be competing with the
 /// title for the same 300 pixels.
-class ResultChip extends StatelessWidget {
+///
+/// Drawn like the strip's own pills — outline, neutral ink, lit on hover — and
+/// not as a filled green badge: green read as "all good", the box icon as
+/// "archive", and a badge as something to read rather than press. The chevron
+/// is what says this opens something, and which way it will go.
+class ResultChip extends StatefulWidget {
   const ResultChip({super.key, required this.count, required this.open, required this.onTap});
 
   final int count;
@@ -416,31 +421,54 @@ class ResultChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<ResultChip> createState() => _ResultChipState();
+}
+
+class _ResultChipState extends State<ResultChip> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    final color = open ? Mx.accent : Mx.green;
+    final open = widget.open;
+    final color = open ? Mx.accent : (_hover ? Mx.fg : Mx.fgDim);
+    final count = widget.count;
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: Tooltip(
-        message: open ? 'Esconder o que mudou' : 'Ver o que mudou',
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.inventory_2_outlined, size: 11, color: color),
-                const SizedBox(width: 4),
-                Text(
-                  count == 1 ? '1 arquivo' : '$count arquivos',
-                  style: TextStyle(color: color, fontSize: 11),
-                ),
-              ],
+        message: open
+            ? 'Esconder os arquivos que esta sessão escreveu'
+            : 'Ver os arquivos que esta sessão escreveu',
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: Container(
+              padding: const EdgeInsets.only(left: 6, right: 3, top: 2, bottom: 2),
+              decoration: BoxDecoration(
+                color: open
+                    ? Mx.accent.withValues(alpha: 0.12)
+                    : (_hover ? Mx.bgHover : Colors.transparent),
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: open ? Mx.accent.withValues(alpha: 0.5) : Mx.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.edit_note_rounded, size: 14, color: color),
+                  const SizedBox(width: 4),
+                  Text(
+                    count == 1 ? '1 arquivo' : '$count arquivos',
+                    style: TextStyle(color: color, fontSize: 11),
+                  ),
+                  Icon(
+                    open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                    size: 14,
+                    color: color,
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -113,18 +113,14 @@ class SidebarRail extends StatelessWidget {
         open == 0 ? p.name : '${p.name} — $open ${open == 1 ? 'janela aberta' : 'janelas abertas'}',
         current,
       ),
-      // As janelas abertas, em cinza: é contagem, não alarme. E o ponto de
-      // "rodando" quando algum comando do plugin está em curso -- o relatório,
-      // um build --, que é o que a aba fechada não teria como contar.
-      //
-      // O selo que o plugin pediu vem na frente da contagem: ele sabe o que
-      // importa nele (três arquivos mudados) melhor que a janela.
+      // O ponto de "rodando" quando algum comando do plugin está em curso --
+      // o relatório, um build --, e senão o selo que o plugin pediu: ele sabe
+      // o que importa nele (três arquivos mudados). A contagem de janelas
+      // abertas fica só no tooltip: no ícone ela era ruído.
       badge: busy
           ? _RailBadge(color: Mx.accent)
           : said != null
           ? _RailBadge(text: said, color: Mx.bgActive, textColor: Mx.fg)
-          : open > 0 && !current
-          ? _RailBadge(text: '$open', color: Mx.bgActive, textColor: Mx.fgDim)
           : null,
       onTap: () => store.showSidebarView(p.id),
       builder: (color) => PluginGlyph(icon: p.manifest?.icon, dir: p.dir, size: 18, color: color),

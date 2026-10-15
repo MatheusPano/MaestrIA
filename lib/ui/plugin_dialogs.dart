@@ -10,6 +10,7 @@ import '../services/store.dart';
 import '../services/updater.dart' show compareVersions;
 import '../theme.dart';
 import 'panel.dart';
+import 'switch.dart';
 
 /// Instalar um plugin, em dois passos: de onde, e se você confia nele.
 ///
@@ -1359,9 +1360,9 @@ class _SettingRowState extends State<_SettingRow> {
           )
         : const SizedBox(width: 26);
     final field = switch (s.type) {
-      PluginSettingType.boolean => Transform.scale(
-        scale: 0.75,
-        child: Switch(value: widget.value == true, onChanged: widget.onChanged),
+      PluginSettingType.boolean => MxSwitch(
+        value: widget.value == true,
+        onChanged: widget.onChanged,
       ),
       PluginSettingType.select => SizedBox(
         width: 200,

@@ -4,6 +4,7 @@ import '../models.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'dialogs.dart';
+import 'switch.dart';
 
 /// As tarefas que esta sessão sugeriu, num cartão no canto do terminal.
 ///
@@ -420,16 +421,7 @@ class _PluginSwitch extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                SizedBox(
-                  height: 20,
-                  child: FittedBox(
-                    child: Switch(
-                      value: on,
-                      onChanged: onChanged,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ),
+                MxSwitch(value: on, onChanged: onChanged),
               ],
             ),
           ),
