@@ -244,6 +244,15 @@ class MxTab {
   /// pergunta é [AppStore.isPinned], não este campo.
   bool pinned = false;
 
+  /// A tecla que traz este painel pra tela, quando alguém deu uma a ele.
+  ///
+  /// Escolhida painel a painel, e não ⌘1…⌘9 pela posição na lista: com vinte
+  /// painéis na lateral os nove primeiros eram quase sempre os errados, e o
+  /// número de cada um mudava sempre que outro abria ou fechava acima dele.
+  /// Uma tecla dada à mão é de quem a recebeu, e continua dele quando a lista
+  /// anda. Null é o padrão. Ver [AppStore.setHotkey].
+  MxChord? hotkey;
+
   /// A janela de um plugin com tela própria que você levou pra tela das
   /// sessões: a tarefa do Wiboor ao lado do claude que trabalha nela. Mora lá
   /// até você devolver -- ver [AppStore.releaseView] e [AppStore.screenOf].
@@ -263,6 +272,11 @@ class MxTab {
   /// isso -- e o clique nela tem que religar, em vez de mostrar uma moldura
   /// com "processo saiu (0)". Ver [AppStore.hibernate] e [AppStore.wake].
   bool hibernated = false;
+
+  /// O retrato desta sessão (um png), quando um plugin deu um a ela
+  /// (`session.portrait`): o boneco dela no escritório. Vai na notificação de
+  /// quando ela para por você. Não é gravado: o plugin manda de novo quando sobe.
+  String? portrait;
 
   /// Quando esta sessão parou de trabalhar: o instante da virada pra repouso,
   /// não o do último evento.
@@ -447,6 +461,9 @@ class MxTab {
     // No layout e não na receita, como o grupo: preso é um jeito de estar
     // nesta tela, e a tela é o que o layout guarda.
     if (pinned) 'pinned': true,
+    // No layout e não na receita: a tecla é deste painel, e um grupo que a
+    // levasse junto abriria um segundo painel disputando a mesma tecla.
+    if (hotkey case final k?) 'hotkey': k.id,
   };
 }
 
@@ -1160,6 +1177,12 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         );
         tab.done = pane['done'] == true;
         tab.pinned = pane['pinned'] == true;
+        // Uma tecla que o mapa do app passou a usar desde que foi gravada fica
+        // com o app: dois donos é uma tecla que só um deles ouve.
+        final hotkey = MxChord.parse(pane['hotkey'] as String?);
+        if (hotkey != null && hotkey.valid && keymap.owner(hotkey) == null) {
+          tab.hotkey = hotkey;
+        }
         // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
         // deixaria as linhas coloridas de um conjunto que não abre mais.
         final group = pane['group'] as String?;
@@ -1408,6 +1431,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   void bindShortcut(MxAction action, MxChord chord, {MxChord? replacing}) {
     final stolen = keymap.bind(action, chord, replacing: replacing);
     if (stolen != null) showBanner('${chord.label} saiu de "${stolen.label}"');
+    // E de um painel, pelo mesmo motivo: as ações vêm antes deles no
+    // teclado, e o painel ficaria com uma tecla que nunca chega nele.
+    for (final tab in tabs) {
+      if (tab.hotkey == chord) {
+        tab.hotkey = null;
+        showBanner('${chord.label} saiu do painel "${tab.title}"');
+      }
+    }
     _save();
     notifyListeners();
   }
@@ -1646,19 +1677,19 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   /// Troca os blocos da aba de [plugin] e/ou o selo do ícone dele (vazio
   /// tira). Null é "não mexe". Diz se a aba está na tela.
-  bool updatePluginSidebar(
-    MxPlugin plugin, {
-    List<Map<String, dynamic>>? blocks,
-    String? badge,
-    PluginRfwUpdate? rfw,
-  }) {
+  bool updatePluginSidebar(MxPlugin plugin, {List<Map<String, dynamic>>? blocks, String? badge, PluginRfwUpdate? rfw}) {
+    // O selo e a troca entre blocos e widgets o app enxerga; os dados da aba
+    // são só dela (ver [PluginView.rfwChanges]).
+    final rebadged =
+        badge != null && (badge.isEmpty ? sidebarBadges.containsKey(plugin.id) : sidebarBadges[plugin.id] != badge);
     if (badge != null) {
       badge.isEmpty ? sidebarBadges.remove(plugin.id) : sidebarBadges[plugin.id] = badge;
     }
     if (blocks == null && rfw == null) {
-      notifyListeners();
+      if (rebadged) notifyListeners();
       return _sidebarLive == plugin.id;
     }
+    final fresh = !_sidebarTabs.containsKey(plugin.id);
     final tab = _sidebarTabs.putIfAbsent(
       plugin.id,
       () => MxTab(
@@ -1676,13 +1707,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         ),
       ),
     );
+    final switched = blocks != null || (rfw?.library != null && tab.view!.rfwLibrary == null);
     if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
     if (blocks != null) {
       tab.view!
         ..rfwLibrary = null
         ..setBlocks(blocks);
     }
-    notifyListeners();
+    if (fresh || switched || rebadged) notifyListeners();
     return _sidebarLive == plugin.id;
   }
 
@@ -2506,6 +2538,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
+    bool place = true,
   }) {
     final tab = MxTab(
       id: _nextId(),
@@ -2517,7 +2550,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     );
     tab.sessionId = resumeId;
     if (featureOrHotfix != null && featureOrHotfix.folderRoot == f.root) tab.featureOrHotfixId = featureOrHotfix.id;
-    _register(tab);
+    // Sem [place], a sessão nasce só na lateral, sem tomar um painel nem trocar
+    // de tela: a que um plugin abre de dentro da tela dele.
+    _register(tab, place: place);
 
     final name = (label == null || label.isEmpty) ? tab.cwd.split('/').last : label;
     tab.agentName = name;
@@ -2576,10 +2611,27 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     // Nothing reports the prompt being ready -- see `HookState.settle` -- so
     // the panel gives the launch a beat and then says so itself. A session
     // that spoke first (it can only be a prompt you typed) keeps its state.
-    Timer(const Duration(seconds: 3), () {
+    void settleSoon(Duration after, int tries) => Timer(after, () {
       if (!tabs.contains(tab) || tab.exited) return;
-      if (tab.hooks.settle()) notifyListeners();
+      // O "confia nesta pasta?" na tela: o prompt ainda não subiu. Olha de
+      // novo daqui a pouco, até você responder (ou desistir de esperar).
+      if (tab.term.asksTrust) {
+        if (tries > 0) settleSoon(const Duration(seconds: 2), tries - 1);
+        return;
+      }
+      if (tab.hooks.settle()) {
+        // Os plugins também: sem isto, quem mostra as sessões ficava com a
+        // recém-aberta (ou recém-acordada) em "starting" pra sempre.
+        plugins.emit(
+          'session.status',
+          {'tabId': tab.id, 'status': ClaudeStatus.ready.name, 'previous': ClaudeStatus.starting.name},
+          activations: ['onSession'],
+        );
+        notifyListeners();
+      }
     });
+    // Uns 10 minutos de "confia nesta pasta?" no máximo, de 2 em 2 segundos.
+    settleSoon(const Duration(seconds: 3), 300);
   }
 
   // --- histórico de conversas ---------------------------------------------
@@ -2641,15 +2693,42 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   /// Em que pé está [chat] agora. Ver [ChatStanding].
   ChatStanding standingOf(ChatEntry chat) {
-    if (tabs.any((t) => t.resumeId == chat.sessionId)) return ChatStanding.onScreen;
+    if (_tabHolding(chat.sessionId) != null) return ChatStanding.onScreen;
     // Viva é o que o `claude agents --json` lista: ele só enxerga processo de
     // pé, que é a razão de ele não servir de histórico -- e a razão de servir
     // exatamente pra isto.
-    if (agents.latest.any((a) => a.sessionId == chat.sessionId)) return ChatStanding.live;
+    //
+    // Menos os processos que são painéis daqui. O id que o CLI lista é o do
+    // registro dele, que fica no da sessão em que o processo nasceu: um painel
+    // que trocou de conversa no meio do caminho -- `/clear`, `/resume` lá
+    // dentro -- segue listado com o id antigo. Contar esses dizia "aberta fora
+    // daqui" sobre a conversa que o painel já largou; a que ele está usando
+    // agora é a dos hooks, e essa a linha de cima já achou.
+    if (_elsewhere(chat.sessionId) case final a?) {
+      return a.kind == 'background' && a.id != null ? ChatStanding.background : ChatStanding.live;
+    }
     if (chat.missing || chat.cwd.isEmpty || !Directory(chat.cwd).existsSync()) {
       return ChatStanding.gone;
     }
     return ChatStanding.fresh;
+  }
+
+  /// O painel que está com a conversa [sessionId], se algum está.
+  ///
+  /// Pelos dois ids e não só pelo [MxTab.resumeId]: entre um hook e uma volta
+  /// do `claude agents` eles podem discordar (ver [applyAgents]), e o dos
+  /// hooks é o que o processo está escrevendo.
+  ///
+  /// Um terminal anexado a uma sessão de segundo plano também está com ela,
+  /// enquanto o `claude attach` dele roda: ver [ChatStanding.background].
+  MxTab? _tabHolding(String sessionId) => tabs.firstWhereOrNull(
+    (t) => (t.kind == TabKind.claude || !t.exited) && (t.resumeId == sessionId || t.hooks.sessionId == sessionId),
+  );
+
+  /// A sessão viva de [sessionId] que não é painel daqui. Ver [standingOf].
+  AgentInfo? _elsewhere(String sessionId) {
+    final ours = {for (final t in tabs) ?t.term.pid};
+    return agents.latest.firstWhereOrNull((a) => a.sessionId == sessionId && !ours.contains(a.pid));
   }
 
   /// Retoma [chat] num painel: o `--resume` daquela conversa, na pasta em que
@@ -2664,7 +2743,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         // Não é pra abrir de novo: é pra olhar. Uma segunda sessão no mesmo id
         // seria o CLI recusando por sessão viva -- a que o próprio cockpit
         // acabou de subir.
-        final open = tabs.firstWhere((t) => t.resumeId == chat.sessionId);
+        final open = _tabHolding(chat.sessionId)!;
         select(open);
         return open;
       case ChatStanding.live:
@@ -2674,6 +2753,8 @@ class AppStore extends ChangeNotifier implements TaskDesk {
           sticky: true,
         );
         return null;
+      case ChatStanding.background:
+        return _attach(chat, _elsewhere(chat.sessionId)!, folder: folder, featureOrHotfix: featureOrHotfix);
       case ChatStanding.gone:
         showBanner(
           chat.cwd.isEmpty
@@ -2699,6 +2780,27 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       resumeId: chat.sessionId,
       featureOrHotfix: featureOrHotfix,
     );
+  }
+
+  /// Anexa um terminal à sessão de segundo plano [agent], que é a conversa
+  /// [chat]. Ver [ChatStanding.background].
+  ///
+  /// Um terminal e não um painel do claude: a sessão já roda com os hooks de
+  /// quem a lançou, não com os nossos, e um painel do claude seria salvo pra
+  /// voltar amanhã com um `--resume` -- justamente o que o CLI recusa enquanto
+  /// ela estiver em segundo plano. O que o painel guarda dela é o nome e o id,
+  /// que são o que a lateral mostra e o histórico usa pra não anexar duas
+  /// vezes.
+  MxTab _attach(ChatEntry chat, AgentInfo agent, {Folder? folder, FeatureOrHotfix? featureOrHotfix}) {
+    final at = folder ?? folderAt(chat.cwd) ?? loose;
+    // A pasta só serve de lugar pro terminal: o `attach` acha a sessão pelo
+    // id, e uma sessão viva numa pasta que sumiu continua anexável.
+    final cwd = Directory(chat.cwd).existsSync() ? chat.cwd : at.root;
+    final tab = openShell(at, cwd: cwd, command: 'claude attach ${Sh.q(agent.id!)}', featureOrHotfix: featureOrHotfix);
+    tab.customLabel = chat.label;
+    tab.agentName = agent.name;
+    tab.sessionId = chat.sessionId;
+    return tab;
   }
 
   // --- painéis de leitura -------------------------------------------------
@@ -2986,11 +3088,13 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// grade como uma janela qualquer.
   MxTab? pluginModal;
 
-  /// Fecha o modal. O plugin fica sabendo no próximo `view.update`, que volta
-  /// `open: false`, como com uma janela fechada.
+  /// Fecha o modal. O plugin fica sabendo pelo evento `view.closed` (e, numa
+  /// versão de antes, no próximo `view.update`, que volta `open: false`).
   void closeModal() {
-    if (pluginModal == null) return;
+    final view = pluginModal?.view;
+    if (view == null) return;
     pluginModal = null;
+    plugins.viewClosed(view.pluginId, view.id);
     notifyListeners();
   }
 
@@ -3019,12 +3123,16 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     required List<Map<String, dynamic>> blocks,
     PluginRfwUpdate? rfw,
     bool modal = false,
+    String? from,
+    double? width,
+    double? height,
   }) {
     final source = focusedTab;
     // A que está em modal continua em modal: só troca o conteúdo.
     if (pluginModal case final m? when m.view?.pluginId == plugin.id && m.view?.id == viewId) {
       m.view!
         ..title = title
+        ..modalFrom = from ?? m.view!.modalFrom
         ..setBlocks(blocks);
       if (rfw != null) m.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
       notifyListeners();
@@ -3061,6 +3169,10 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       ),
     );
     if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+    tab.view!
+      ..modalFrom = from
+      ..modalWidth = width
+      ..modalHeight = height;
     // Em modal ela fica fora da grade (ver [pluginModal]); um segundo modal
     // toma o lugar do primeiro.
     if (modal) {
@@ -3087,6 +3199,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     final tab = _pluginTab(plugin.id, viewId);
     if (tab == null) return false;
     final view = tab.view!;
+    // O que o resto do app enxerga: o título (no cabeçalho e na lateral) e a
+    // troca entre blocos e widgets. Os dados de uma janela de widgets são só
+    // dela -- ver [PluginView.rfwChanges].
+    final retitled = title != null && title != view.title;
+    final switched = blocks != null || (rfw?.library != null && view.rfwLibrary == null);
     if (title != null) view.title = title;
     if (rfw != null) view.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
     if (blocks != null) {
@@ -3094,7 +3211,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         ..rfwLibrary = null
         ..setBlocks(blocks);
     }
-    notifyListeners();
+    if (retitled || switched) notifyListeners();
     return true;
   }
 
@@ -3840,6 +3957,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   void renameTab(MxTab tab, String label) {
     tab.customLabel = label;
+    // Os plugins que mostram as sessões (o escritório, o quadro) ficam com o
+    // nome novo -- venha ele da lateral ou de um plugin (`session.rename`).
+    if (!tab.isPassive) {
+      plugins.emit('session.renamed', {'tabId': tab.id, 'title': tab.title}, activations: ['onSession']);
+    }
     _save();
     notifyListeners();
   }
@@ -3886,8 +4008,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// The list is one list while the sidebar draws it per folder, so a
   /// folder's panels are a subsequence of it and not a slice. Landing the
   /// panel on the target's index leaves every other panel's relative order
-  /// untouched -- and with it the ⌘1..9 numbering, which is this same list
-  /// counted from the top, and the saved layout, which is its order on disk.
+  /// untouched -- and with it the saved layout, which is its order on disk.
   void moveTab(MxTab tab, MxTab target) {
     final from = tabs.indexOf(tab);
     final to = tabs.indexOf(target);
@@ -4106,6 +4227,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// o `--resume` devolve, que é a conversa.
   void hibernate(MxTab tab) {
     if (!canHibernate(tab)) return;
+    final before = tab.hooks.status;
     tab.hibernated = true;
     tab.armed = false;
     tab.restedAt = null;
@@ -4124,8 +4246,20 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     } else {
       unawaited(tab.term.kill());
     }
+    _sleepChanged(tab, before);
     _save();
     notifyListeners();
+  }
+
+  /// Avisa os plugins que [tab] dormiu ou acordou: o status muda por fora dos
+  /// hooks (quem desliga e religa o processo é a janela), e sem isto um plugin
+  /// que mostra as sessões ficaria com a de antes.
+  void _sleepChanged(MxTab tab, ClaudeStatus before) {
+    plugins.emit(
+      'session.status',
+      {'tabId': tab.id, 'status': tab.hooks.status.name, 'previous': before.name, 'hibernated': tab.hibernated},
+      activations: ['onSession'],
+    );
   }
 
   /// Religa uma sessão hibernada, na mesma conversa. Ver [MxTab.hibernated].
@@ -4136,8 +4270,10 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// do primeiro chegando depois do segundo subir. Ver [TermSession.relaunch].
   Future<void> wake(MxTab tab) async {
     if (!tab.hibernated) return;
+    final before = tab.hooks.status;
     tab.hibernated = false;
     tab.hooks.status = ClaudeStatus.starting;
+    _sleepChanged(tab, before);
     notifyListeners();
     if (!tab.exited) await tab.term.kill();
     if (!tabs.contains(tab)) return;
@@ -4522,9 +4658,23 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     notifyListeners();
   }
 
-  void selectIndex(int index) {
-    if (index < 0 || index >= tabs.length) return;
-    select(tabs[index]);
+  /// Dá [chord] a [tab] -- ou tira, com null -- e avisa de qual painel ela
+  /// foi tirada. Ver [MxTab.hotkey].
+  ///
+  /// Roubar e não recusar, como em [bindShortcut]: quem aperta a tecla aqui
+  /// está dizendo que a quer neste painel.
+  void setHotkey(MxTab tab, MxChord? chord) {
+    if (chord != null) {
+      for (final other in tabs) {
+        if (other != tab && other.hotkey == chord) {
+          other.hotkey = null;
+          showBanner('${chord.label} saiu de "${other.title}"');
+        }
+      }
+    }
+    tab.hotkey = chord;
+    _save();
+    notifyListeners();
   }
 
   /// Move the focused pane through the panel list.
@@ -4792,6 +4942,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       return;
     }
     tab.context = now;
+    plugins.emit(
+      'session.context',
+      {'tabId': tab.id, 'context': PluginApi.contextJson(now)},
+      activations: ['onSession'],
+    );
     notifyListeners();
   }
 
@@ -4935,9 +5090,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// Pendura [child] em [parent]: o painel que um passo de fluxo abriu é filho
   /// da sessão de onde o passo saiu.
   ///
-  /// Mexer na lista é parte do vínculo, não enfeite: ela é a ordem da lateral
-  /// *e* a numeração do ⌘1..9, e um filho nascido no fim dela apareceria a
-  /// cinco linhas de quem o abriu. Ele entra atrás dos irmãos que já nasceram,
+  /// Mexer na lista é parte do vínculo, não enfeite: ela é a ordem da
+  /// lateral, e um filho nascido no fim dela apareceria a cinco linhas de
+  /// quem o abriu. Ele entra atrás dos irmãos que já nasceram,
   /// que é a ordem em que o fluxo os produziu.
   void _descend(MxTab child, MxTab parent) {
     child.bornOf = parent.id;
@@ -5146,24 +5301,55 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       // que se fala com ela.
       if (a.name != null && a.name!.isNotEmpty) mine.agentName = a.name;
       if (a.sessionId == null) continue;
+      // Só até os hooks falarem. O registro do CLI guarda o id com que o
+      // processo nasceu e não acompanha um `/clear`; o `SessionStart` traz o
+      // novo, e deixar esta volta escrever por cima fazia o painel alternar
+      // entre as duas conversas a cada trinta segundos -- e salvar a errada.
+      if (mine.hooks.sessionId != null) continue;
       mine.sessionId = a.sessionId;
     }
     _checkAlerts();
+  }
+
+  /// O corpo da notificação com retrato: o que [t] quer de você.
+  String _alertBody(MxTab t) {
+    final h = t.hooks;
+    return switch (t.status) {
+      ClaudeStatus.waitingAnswer when h.question != null => 'pergunta: ${h.question}',
+      ClaudeStatus.waitingPermission when h.activeTool != null => 'quer aprovação pra ${h.activeTool}',
+      _ => t.status.callToAction,
+    };
+  }
+
+  /// O clique numa notificação com retrato: a sessão dela na tela.
+  void _focusFromNotification(String tabId) {
+    final t = tabs.where((x) => x.id == tabId).firstOrNull;
+    if (t != null) select(t);
   }
 
   /// Notify once per session that stops for a human, and keep the dock badge
   /// equal to how many are stopped right now.
   void _checkAlerts() {
     final waiting = <String, String>{};
+    final stopped = <String, MxTab>{};
     for (final t in tabs) {
       if (!t.done && t.status.needsHuman) {
         waiting['tab:${t.id}'] = '${t.title} · ${t.status.callToAction}';
+        stopped['tab:${t.id}'] = t;
       }
     }
 
     for (final entry in waiting.entries) {
       if (_alerted.add(entry.key)) {
-        notifier.alert('MaestrIA', entry.value);
+        final t = stopped[entry.key]!;
+        if (t.portrait case final image?) {
+          // Com o retrato: o nome da sessão em cima e, no corpo, o que ela
+          // quer -- a pergunta, ou a ferramenta que espera aprovação.
+          notifier.onTap ??= _focusFromNotification;
+          notifier.alert(t.title, _alertBody(t), subtitle: 'MaestrIA', image: image, tabId: t.id);
+        } else {
+          notifier.alert('MaestrIA', entry.value);
+        }
       }
     }
     _alerted.removeWhere((key) => !waiting.containsKey(key));

@@ -11,6 +11,7 @@ import '../services/notify.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'panel.dart';
+import 'panes.dart';
 
 /// Um painel de leitura: markdown desenhado, no lugar de um terminal.
 ///
@@ -137,12 +138,16 @@ class _DocPaneState extends State<DocPane> {
         tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
-            _DocHeader(
+            PaneGrab(
               store: widget.store,
               tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
-              onCopy: _copy,
-              onReload: _reload,
+              child: _DocHeader(
+                store: widget.store,
+                tab: widget.tab,
+                dimmed: widget.showFocus && !widget.focused,
+                onCopy: _copy,
+                onReload: _reload,
+              ),
             ),
             Expanded(child: _surface()),
           ],
@@ -215,15 +220,23 @@ class MxMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MarkdownBody(
+    final body = MarkdownBody(
       data: data,
-      selectable: true,
+      // A seleção é de uma área só, e não de cada parágrafo: com o
+      // `selectable` do pacote cada bloco é um `SelectableText` à parte, e
+      // arrastar parava na primeira quebra de linha -- não dava pra copiar
+      // dois parágrafos, nem uma lista inteira.
+      selectable: false,
       styleSheet: sheet(fontSize),
       onTapLink: onFollow == null ? null : (text, href, title) => onFollow!(href),
       // GFM: tabela, lista de tarefas e ~riscado~ são o que o Claude escreve
       // num plano. Sem isto um `- [ ]` sai como um traço e um colchete.
       extensionSet: md.ExtensionSet.gitHubWeb,
     );
+    // Dentro de uma área de seleção (o chat inteiro, num plugin), é dela;
+    // solto, ganha a sua.
+    if (SelectionContainer.maybeOf(context) != null) return body;
+    return SelectionArea(child: body);
   }
 
   /// O markdown vestido com a paleta da janela.
@@ -340,7 +353,6 @@ class _DocHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final doc = tab.doc!;
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     return Container(
       height: 42,
       decoration: paneHeaderBox(store.tintOf(tab)),
@@ -360,7 +372,7 @@ class _DocHeader extends StatelessWidget {
                       style: paneTitleStyle,
                     ),
                   ),
-                  PaneKeyHint(index: index),
+                  PaneKeyHint(chord: tab.hotkey),
                   if (box.maxWidth >= 190) ...[
                     const SizedBox(width: 8),
                     Flexible(

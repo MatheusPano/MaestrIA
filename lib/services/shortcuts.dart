@@ -66,12 +66,6 @@ class MxChord {
       ? MxChord(key, control: true, shift: true, alt: alt)
       : this;
 
-  /// A tecla da enésima sessão da lateral, contada de zero: ⌘1 no macOS,
-  /// Alt+1 no Linux — que é onde o gnome-terminal põe as abas, e porque lá o
-  /// Super+1 é da dock.
-  static MxChord slot(int index) =>
-      MxChord(LogicalKeyboardKey(0x31 + index), meta: !linux, alt: linux);
-
   /// Copiar a seleção do painel. No Linux o Ctrl+C é do processo, então é
   /// Ctrl+Shift+C, como em todo terminal de lá.
   static MxChord get copy => linux
@@ -114,11 +108,6 @@ class MxChord {
     if (isModifier(key)) return null;
     if (!_known) return 'essa tecla não dá pra usar num atalho';
     if (reserved[this] case final why?) return why;
-    // As teclas das sessões da lateral não estão no mapa: o `CallbackShortcuts`
-    // dispara todos os que casam, e a mesma tecla faria as duas coisas.
-    for (var i = 0; i < 9; i++) {
-      if (this == slot(i)) return 'é a tecla da ${i + 1}ª sessão da lateral';
-    }
     if (!meta && !control && !alt && !_isFunction) {
       return linux
           ? 'precisa de Ctrl ou Alt — sem modificador a tecla sumiria do terminal'
@@ -493,14 +482,29 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.arrowLeft, control: true, shift: true),
     ],
   ),
+  // O ⌘F é do painel, como em todo terminal e todo editor: é ali que está o
+  // texto comprido que se procura. A lateral, que é uma lista curta de nomes,
+  // ficou com o ⌘⇧F -- o "buscar em tudo" dos editores.
+  findInPane(
+    id: 'find',
+    label: 'Buscar no painel',
+    hint: 'No que o terminal em foco já escreveu; Enter sobe, Shift+Enter desce, Esc fecha',
+    group: MxGroup.navigation,
+    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
+    // O Ctrl+Shift+F do GNOME Terminal e do Konsole; o Ctrl+F sozinho é do
+    // readline, que anda um caractere pra frente com ele.
+    linux: [
+      MxChord(LogicalKeyboardKey.keyF, control: true, shift: true),
+    ],
+  ),
   search(
     id: 'search',
     label: 'Buscar na lateral',
     hint: 'Foca o campo de busca; Esc limpa e devolve o teclado',
     group: MxGroup.navigation,
-    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
+    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true, shift: true)],
     linux: [
-      MxChord(LogicalKeyboardKey.keyF, control: true, shift: true),
+      MxChord(LogicalKeyboardKey.keyF, control: true, alt: true),
     ],
   ),
   openMarkdown(

@@ -8,13 +8,12 @@ import '../services/plugins.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import '../theme.dart';
-import 'claude_mark.dart';
 import 'dialogs.dart';
-import 'icons.dart';
 import 'menus.dart';
 import 'panel.dart';
 import 'panes.dart';
 import 'plugin_pane.dart';
+import 'session_cards.dart';
 import 'settings.dart';
 import 'terminal_pane.dart';
 
@@ -1768,7 +1767,6 @@ class _TabRowState extends State<_TabRow> {
     final selected = store.isOpen(tab);
     // Which pane has the keyboard, so four selected rows are still readable.
     final focused = selected && store.focusedPaneId == tab.id;
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     // O grupo a que este painel pertence, que é o que dá a cor da linha e o
     // que o clique nela faz. Ver [AppStore.groupOf].
     final group = store.groupOf(tab);
@@ -1798,37 +1796,7 @@ class _TabRowState extends State<_TabRow> {
       // não tiver visto. Ver [MxTab.restedAt] e [MxTab.unseen].
       stamp: tab.restedAgo,
       stampColor: tab.unseen ? Mx.green : null,
-      leading: switch (tab.kind) {
-        TabKind.claude => ClaudeAvatar(status: tab.status, size: 26, dim: tab.done),
-        // Um leitor na lista se distingue pelo que é: uma folha, não um
-        // prompt esperando comando.
-        TabKind.reader => Icon(Icons.article_outlined, size: 18, color: Mx.fgDim),
-        // E a configuração pelos ajustes: é um painel de mexer em coisas.
-        TabKind.setup => Icon(Icons.tune, size: 18, color: Mx.fgDim),
-        // E a janela de plugin pela peça de quebra-cabeça: é o que o VS Code
-        // e o resto do mundo usam pra "veio de uma extensão".
-        TabKind.plugin => PluginGlyph(
-          icon: store.plugins.byId(tab.view!.pluginId)?.manifest?.icon,
-          dir: store.plugins.byId(tab.view!.pluginId)?.dir,
-        ),
-        // O terminal que subiu dentro de um programa se anuncia como o
-        // programa: o `>_` é o prompt esperando comando, e ali não há prompt
-        // nenhum -- há um btop rodando.
-        //
-        // O prompt vem dentro de uma tela cheia, e não como chevron solto,
-        // por duas razões. Solto, ele é a mesma seta que abre as pastas e os
-        // grupos duas linhas acima -- na lista, um `>` sozinho se lê como
-        // "clique pra expandir". E sólido ele tem peso: ao lado da rajada do
-        // claude, que enche os 26px dela, um contorno fino sumia.
-        //
-        // Por ser sólido é que vai a 22 e não aos 17 dos glifos de launcher:
-        // o que precisa empatar é a mancha, não a caixa. Isso não desloca o
-        // título -- o `leading` mora num slot de 34 centralizado.
-        TabKind.shell => switch (tab.launcher) {
-          final l? => Icon(l.icon.glyph, size: 17, color: l.color),
-          null => MxIcon(MxIcons.terminal, size: 22, color: Mx.fgDim),
-        },
-      },
+      leading: TabGlyph(store: store, tab: tab),
       title: tab.title,
       subtitle: tab.subtitle,
       trailing: Row(
@@ -1860,11 +1828,12 @@ class _TabRowState extends State<_TabRow> {
               ),
             ),
           if (!tab.done && tab.status.needsHuman) _Badge(count: 1, color: tab.status.color),
-          if (index >= 0 && index < 9)
+          // Só quem recebeu uma tecla: ver [MxTab.hotkey].
+          if (tab.hotkey case final k?)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Text(
-                MxChord.slot(index).label,
+                k.label,
                 style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: Mx.fgFaint),
               ),
             ),

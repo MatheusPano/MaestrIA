@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,9 +15,12 @@ import '../services/store.dart';
 import '../theme.dart';
 import 'claude_mark.dart';
 import 'dialogs.dart';
+import 'find_bar.dart';
 import 'keys.dart';
 import 'panel.dart';
+import 'panes.dart';
 import 'result_strip.dart';
+import 'session_cards.dart';
 import 'suggestions.dart';
 
 /// One pane: header that says what this panel is, then the pty.
@@ -84,12 +89,16 @@ class _TerminalPaneState extends State<TerminalPane> {
         tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
-            _PaneHeader(
+            PaneGrab(
               store: widget.store,
               tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
-              resultOpen: _resultOpen,
-              onToggleResult: () => setState(() => _resultOpen = !_resultOpen),
+              child: _PaneHeader(
+                store: widget.store,
+                tab: widget.tab,
+                dimmed: widget.showFocus && !widget.focused,
+                resultOpen: _resultOpen,
+                onToggleResult: () => setState(() => _resultOpen = !_resultOpen),
+              ),
             ),
             Expanded(
               child: Stack(
@@ -201,6 +210,20 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   /// [_clicked]. Null quando não foi o botão principal.
   Offset? _pressedAt;
 
+  /// A rolagem do pty, nossa e não do xterm, pelo mesmo motivo do [_focus]: a
+  /// busca precisa levar a tela até o achado, e o xterm guarda o dele privado.
+  final _scroll = ScrollController();
+
+  /// A busca aberta neste painel, ou null. Ver [FindBar].
+  FindSession? _find;
+  final _findText = TextEditingController();
+  final _findFocus = FocusNode(debugLabel: 'busca no painel');
+
+  /// O painel continua escrevendo com a busca aberta, e os achados novos
+  /// esperam ele dar uma pausa: o Claude escreve dezenas de vezes por segundo,
+  /// e buscar o scrollback inteiro a cada pedaço seria trabalho jogado fora.
+  Timer? _refresh;
+
   Terminal get _terminal => widget.tab.term.terminal;
 
   /// Um painel recém-aberto já nasce com o teclado.
@@ -219,6 +242,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_noteKey);
+    TerminalFind.register(widget.tab.id, _openFind);
     if (!widget.focused) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.focused) _focus.requestFocus();
@@ -228,14 +252,99 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   @override
   void didUpdateWidget(_TerminalSurface old) {
     super.didUpdateWidget(old);
+    // Uma posição da grade, não um painel: a mesma superfície recebe outro
+    // [MxTab] quando a lateral troca o que ela mostra, e a busca era no
+    // terminal de antes.
+    if (old.tab.id != widget.tab.id) {
+      TerminalFind.unregister(old.tab.id, _openFind);
+      TerminalFind.register(widget.tab.id, _openFind);
+      if (_find != null) {
+        old.tab.term.terminal.removeListener(_onOutput);
+        _dropFind();
+      }
+    }
     if (widget.focused && !old.focused) _focus.requestFocus();
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_noteKey);
+    TerminalFind.unregister(widget.tab.id, _openFind);
+    if (_find != null) _terminal.removeListener(_onOutput);
+    _dropFind();
+    _findText.dispose();
+    _findFocus.dispose();
+    _scroll.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  /// Abre a busca, ou devolve o foco a ela com o texto selecionado.
+  ///
+  /// O foco espera o quadro: na primeira vez o campo ainda não existe, e um
+  /// [FocusNode] fora da árvore não tem como recebê-lo.
+  void _openFind() {
+    if (_find == null) {
+      setState(() => _find = FindSession(_terminal, widget.tab.term.controller));
+      _terminal.addListener(_onOutput);
+    }
+    _findText.selection = TextSelection(baseOffset: 0, extentOffset: _findText.text.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _find != null) _findFocus.requestFocus();
+    });
+  }
+
+  void _closeFind() {
+    if (_find == null) return;
+    _terminal.removeListener(_onOutput);
+    setState(_dropFind);
+    _focus.requestFocus();
+  }
+
+  /// Tira os destaques e esquece a busca. O texto fica: um ⌘F logo depois
+  /// volta com a mesma palavra selecionada, pronta pra Enter ou pra troca.
+  void _dropFind() {
+    _refresh?.cancel();
+    _find?.dispose();
+    _find = null;
+  }
+
+  void _onOutput() {
+    _refresh?.cancel();
+    _refresh = Timer(const Duration(milliseconds: 250), () => _find?.refresh());
+  }
+
+  void _findQuery(String query) {
+    _find?.search(query, nearLine: _bottomLine);
+    _reveal();
+  }
+
+  void _findStep(int by) {
+    _find?.step(by);
+    _reveal();
+  }
+
+  /// A última linha do buffer que está na tela.
+  int get _bottomLine {
+    final render = _view.currentState?.renderTerminal;
+    final last = _terminal.buffer.lines.length - 1;
+    if (render == null || render.lineHeight <= 0 || !_scroll.hasClients) return last;
+    final p = _scroll.position;
+    return ((p.pixels + p.viewportDimension) / render.lineHeight).floor().clamp(0, last);
+  }
+
+  /// Rola até o achado da vez, se ele estiver fora da tela, e o deixa no meio
+  /// dela: na borda, a linha de cima ou de baixo é o contexto que se perde.
+  void _reveal() {
+    final hit = _find?.current;
+    final render = _view.currentState?.renderTerminal;
+    if (hit == null || render == null || !_scroll.hasClients) return;
+    final line = render.lineHeight;
+    final p = _scroll.position;
+    final top = hit.from.y * line;
+    final bottom = (hit.to.y + 1) * line;
+    if (top >= p.pixels && bottom <= p.pixels + p.viewportDimension) return;
+    _scroll.jumpTo((top - (p.viewportDimension - line) / 2).clamp(0.0, p.maxScrollExtent));
   }
 
   /// Conta a tecla pro pty, e não a consome nunca.
@@ -258,7 +367,8 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     // for the alternate screen reports it to the program with the wrong button
     // at the wrong cell (see TermSession.wheel), and `simulateScroll: false`
     // stops it from turning the wheel into arrow keys when that report fails.
-    return Listener(
+    final find = _find;
+    final pty = Listener(
       onPointerSignal: (e) {
         if (e is PointerScrollEvent) _scrolled(e.scrollDelta.dy, e.position);
       },
@@ -277,6 +387,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
         _terminal,
         key: _view,
         controller: widget.tab.term.controller,
+        scrollController: _scroll,
         focusNode: _focus,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         // The pty paints in the app's palette, so a theme change
@@ -290,6 +401,32 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
         shortcuts: _xtermShortcuts,
         onSecondaryTapDown: (d, _) => showTerminalMenu(context, widget.tab, d.globalPosition),
       ),
+    );
+    // O [Stack] fica mesmo sem a barra: com ele indo e vindo, o pty mudaria de
+    // lugar na árvore a cada ⌘F e Esc.
+    return Stack(
+      children: [
+        Positioned.fill(child: pty),
+        // Fora do [Listener] do pty: um clique na barra não é um clique no
+        // terminal, e o de debaixo dela podia seguir um link.
+        if (find != null)
+          Positioned(
+            top: 8,
+            left: 12,
+            right: 12,
+            child: Align(
+              alignment: Alignment.topRight,
+              child: FindBar(
+                session: find,
+                controller: _findText,
+                focusNode: _findFocus,
+                onQuery: _findQuery,
+                onStep: _findStep,
+                onClose: _closeFind,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -399,7 +536,19 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     // antemão quais delas o terminal engoliria — então todas passam por aqui.
     // O que não está no mapa segue pro pty, ⇥ e ⌃C inclusive.
     if (widget.store.keymap.match(event) case final action?) {
+      // A busca é deste terminal, e não do "painel em foco" do mapa: no de
+      // uma janela de plugin os dois não são o mesmo.
+      if (action == MxAction.findInPane) {
+        _openFind();
+        return KeyEventResult.handled;
+      }
       MxKeys.run(action, widget.store, context);
+      return KeyEventResult.handled;
+    }
+    // As teclas dos painéis, pelo mesmo motivo: escolhidas à mão, qualquer
+    // uma delas pode ser das que a keytab engole.
+    if (MxKeys.panelFor(widget.store, event) case final target?) {
+      widget.store.select(target);
       return KeyEventResult.handled;
     }
     // Depois do mapa do app, pelo mesmo motivo: as teclas de plugin também
@@ -454,8 +603,6 @@ class _PaneHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A tecla deste painel, pra dizer no cabeçalho. Ver [PaneKeyHint].
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     // The same menu the sidebar row offers: the header *is* this panel.
     return GestureDetector(
       onSecondaryTapDown: (d) => showPanelMenu(context, store, tab, d.globalPosition),
@@ -495,7 +642,7 @@ class _PaneHeader extends StatelessWidget {
                     // duas juntas são o par com que a lateral identifica uma
                     // linha, e num painel estreito é justamente ele que tem
                     // que sobrar. Ver [PaneKeyHint].
-                    PaneKeyHint(index: index),
+                    PaneKeyHint(chord: tab.hotkey),
                     if (box.maxWidth >= 170) ...[
                       const SizedBox(width: 8),
                       _faded(
@@ -874,7 +1021,15 @@ class _ContextChip extends StatelessWidget {
   }
 }
 
-/// Shown in place of a pane when nothing is open. Doubles as the cheat sheet.
+/// Shown in place of a pane when nothing is open, de um de dois jeitos.
+///
+/// Com sessões na lateral: os plugins numa faixa no topo e, embaixo, as
+/// sessões em cartões, pra trazer de volta com um clique.
+///
+/// Sem sessão nenhuma: os plugins grandes, como ícones de app, no meio da
+/// tela. É a tela inteira de quem usa o app só pelos plugins e nunca abre um
+/// painel -- pra essa pessoa uma caixa de "nenhum painel aberto" seria a
+/// tela dizendo, toda vez, que ela está usando errado.
 class EmptyPane extends StatelessWidget {
   // Deliberately not const: a const instance is canonicalised, so the element
   // tree would reuse it verbatim across a theme change and this pane would go
@@ -882,104 +1037,85 @@ class EmptyPane extends StatelessWidget {
   // ignore: prefer_const_constructors_in_immutables
   EmptyPane({super.key, this.store});
 
-  /// Só pra contar o que ficou rodando na lateral: desde que o X do header
-  /// apenas tira do painel, esta tela vazia não quer mais dizer que não há
-  /// nada acontecendo.
+  /// De onde vêm os plugins e as sessões: desde que o X do header apenas tira
+  /// do painel, esta tela vazia não quer mais dizer que não há nada
+  /// acontecendo.
   final AppStore? store;
 
-  /// O que a cola ensina, na ordem em que se aprende o app.
-  ///
-  /// Ações e não teclas: as teclas são escolhidas nas configurações agora, e
-  /// uma cola escrita à mão passaria a ensinar a combinação errada no dia em
-  /// que alguém trocasse a dela. Sem store — que é como os testes montam esta
-  /// tela — ficam os padrões, que é o que aquela janela teria mesmo.
-  static const _cheatSheet = [
-    MxAction.newClaude,
-    MxAction.newShell,
-    MxAction.newTask,
-    MxAction.nextPane,
-    MxAction.nextSession,
-    MxAction.closePane,
-    MxAction.settings,
-  ];
-
-  List<(String, String)> get _keys => [
-    for (final action in _cheatSheet)
-      if ((store?.keymap[action] ?? action.defaults) case final chords when chords.isNotEmpty)
-        (chords.map((c) => c.label).join('  '), action.label),
-    // Fixo, e por isso escrito: são nove teclas, não uma escolha.
-    ('${MxChord.slot(0).label}…9', 'Ir pra enésima sessão'),
-  ];
-
-  String get _headline {
-    final live = store?.tabs.where((t) => !t.exited).length ?? 0;
-    if (live == 0) return 'Nenhum painel aberto';
-    if (live == 1) return '1 sessão rodando na lateral — clique nela pra trazer de volta';
-    return '$live sessões rodando na lateral — clique numa pra trazer de volta';
-  }
-
-  // Larga o bastante pras duas combinações de uma ação que tem duas — ⌃⇥ e
-  // ⌥⌘↓ são a mesma linha.
-  static double get _keysWidth => MxChord.linux ? 170 : 104;
-  static double get _cheatWidth => _keysWidth + 14 + 210;
+  static const _pad = 28.0;
 
   @override
   Widget build(BuildContext context) {
+    final store = this.store;
     return MxPanel(
       child: LayoutBuilder(
-        builder: (context, box) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.grid_view_rounded, size: 30, color: Mx.fgFaint),
-              const SizedBox(height: 14),
-              Text(_headline, style: TextStyle(color: Mx.fgDim, fontSize: 13)),
-              const SizedBox(height: 8),
-              // A tela se divide por arraste e só por arraste, então é aqui que
-              // isso é dito: sem um atalho pra listar, era o único gesto do app
-              // que não aparecia em lugar nenhum.
-              SizedBox(
-                width: 330,
-                child: Text(
-                  'Arraste uma sessão da lateral pra cá — pela borda de um painel, '
-                  'ela divide a tela; pelo meio, toma o lugar dele',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
-                ),
-              ),
-              // Num painel estreito a cola não cabe, e cortada ela ensina metade
-              // de um atalho: melhor não mostrar nada que mostrar isso.
-              if (box.maxWidth >= _cheatWidth) ...[
-                const SizedBox(height: 22),
-                for (final (keys, what) in _keys)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: _keysWidth,
-                          child: Text(
-                            keys,
-                            textAlign: TextAlign.right,
-                            style: TextStyle(fontFamily: Mx.mono, fontSize: 11.5, color: Mx.fg),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        SizedBox(
-                          width: 210,
-                          child: Text(what, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
-                        ),
-                      ],
+        builder: (context, box) {
+          final width = (box.maxWidth - 2 * _pad).clamp(0.0, double.infinity);
+          final live = store == null ? 0 : SessionCards.of(store).length;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(_pad),
+            child: store == null
+                ? const SizedBox.shrink()
+                : live == 0
+                ? ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minWidth: width,
+                      minHeight: (box.maxHeight - 2 * _pad).clamp(0.0, double.infinity),
                     ),
-                  ),
-              ],
-            ],
-          ),
-        ),
+                    child: Center(child: _apps(store, width)),
+                  )
+                : _sessions(store, width),
+          );
+        },
       ),
     );
   }
+
+  /// Sem sessão nenhuma: os plugins como apps, e as sessões num rodapé baixo
+  /// -- ditas, pra quem as procura, sem disputar a tela com o que se usa.
+  Widget _apps(AppStore store, double width) => SizedBox(
+    width: width,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'O que vamos abrir?',
+          style: TextStyle(color: Mx.fg, fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          store.railPlugins.isEmpty
+              ? 'Instale um plugin, ou abra uma sessão pela lateral'
+              : 'Escolha um plugin, ou abra uma sessão pela lateral',
+          style: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+        ),
+        const SizedBox(height: 32),
+        PluginTiles(store: store, width: width, large: true),
+      ],
+    ),
+  );
+
+  /// Sessões na lateral: os plugins numa faixa e as sessões em cartões.
+  Widget _sessions(AppStore store, double width) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      PluginTiles(store: store, width: width),
+      const SizedBox(height: 30),
+      SessionCards(store: store, width: width),
+      // A tela se divide por arraste e só por arraste, então é aqui que isso
+      // é dito: sem um atalho pra listar, era o único gesto do app que não
+      // aparecia em lugar nenhum.
+      SizedBox(
+        width: width,
+        child: Text(
+          'Arraste um cartão ou uma sessão da lateral pra cá — pela borda de um '
+          'painel, ela divide a tela; pelo meio, toma o lugar dele',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
+        ),
+      ),
+    ],
+  );
 }
 
 /// The "and then" a panel is carrying.

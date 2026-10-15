@@ -21,12 +21,99 @@ import 'terminal_pane.dart';
 /// esquerda dele. A linha arrastada diz aqui por onde foi pega; a soma dos
 /// dois é o ponteiro de volta, sem defasagem de um evento.
 ///
-/// Uma variável só porque só existe um arraste por vez, e um só lugar que
-/// levanta uma sessão: a linha da lateral.
+/// Uma variável só porque só existe um arraste por vez, e quem levanta uma
+/// sessão -- a linha da lateral, o cabeçalho do painel ([PaneGrab]) -- diz
+/// aqui por onde pegou ao começar.
 abstract final class DragCursor {
   static Offset grab = Offset.zero;
 
   static Offset pointer(Offset corner) => corner + grab;
+}
+
+/// O cabeçalho de um painel, que levanta o painel inteiro.
+///
+/// Pegar pela faixa de cima e soltar em outro painel é o mesmo drop da linha
+/// da lateral -- trocar, ou dividir pelo lado onde cair (ver [_PaneSlot]) --,
+/// e o [AppStore.dropTab] já sabe tirar de onde estava o que já estava na tela.
+/// O que faltava era um lugar pra pegar que não fosse a lateral: com a sessão
+/// na tela, a mão está no painel, não na lista.
+///
+/// Os botões da faixa continuam botões: o arraste só começa depois que o mouse
+/// anda, e um clique parado é do botão. Com um painel só não há pra onde ir, e
+/// a faixa não se oferece.
+class PaneGrab extends StatelessWidget {
+  const PaneGrab({super.key, required this.store, required this.tab, required this.child});
+
+  final AppStore store;
+  final MxTab tab;
+  final Widget child;
+
+  /// Onde o cartão que voa fica preso no ponteiro. Fixo, e não o ponto onde a
+  /// faixa foi pega: a faixa tem a largura do painel e o cartão não, então
+  /// pegar pela direita deixaria o cartão a meio painel do mouse.
+  static const anchor = Offset(18, 17);
+
+  @override
+  Widget build(BuildContext context) {
+    if (store.paneCount < 2) return child;
+    return Draggable<MxTab>(
+      data: tab,
+      dragAnchorStrategy: (_, _, _) => anchor,
+      onDragStarted: () {
+        DragCursor.grab = anchor;
+        store.focusPane(tab);
+      },
+      feedback: _LiftedPane(title: tab.title, tint: store.tintOf(tab)),
+      childWhenDragging: Opacity(opacity: 0.4, child: child),
+      child: MouseRegion(cursor: SystemMouseCursors.grab, child: child),
+    );
+  }
+}
+
+/// O painel no ar: só o nome dele, num cartão do tamanho de uma linha.
+///
+/// O painel inteiro voando seria um terminal de meia tela tapando justamente
+/// onde ele vai cair; o que precisa ir junto com o mouse é saber quem está
+/// sendo levado. Onde ele cai, quem diz é a marca embaixo ([_DropHint]).
+class _LiftedPane extends StatelessWidget {
+  const _LiftedPane({required this.title, this.tint});
+
+  final String title;
+  final Color? tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 280),
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Mx.bgSidebar,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.fromBorderSide(
+            BorderSide(color: tint ?? Mx.accent.withValues(alpha: 0.55), width: 1.4),
+          ),
+          boxShadow: [BoxShadow(color: Mx.shadow, blurRadius: 18, offset: const Offset(0, 8))],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.open_with, size: 14, color: Mx.fgDim),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+                style: paneTitleStyle.copyWith(fontSize: 13, color: Mx.fg),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// A região principal: a árvore de painéis, desenhada.
@@ -145,7 +232,15 @@ class _PaneSlotState extends State<_PaneSlot> {
     return room / 2 < Panes.minFor(side.axis) ? DropSide.center : side;
   }
 
-  void _track(Offset corner) {
+  void _track(MxTab incoming, Offset corner) {
+    // O próprio painel, pego pelo cabeçalho e ainda em cima de si: não há
+    // lado dele que ele possa ocupar. Soltar ali continua aceito -- o
+    // [AppStore.dropTab] entende como o clique que o arraste quase foi --,
+    // só sem marca dizendo "dividir" pra um gesto que não divide nada.
+    if (incoming.id == widget.tab.id) {
+      if (_side != null) setState(() => _side = null);
+      return;
+    }
     final side = _sideAt(DragCursor.pointer(corner));
     if (side != _side) setState(() => _side = side);
   }
@@ -155,10 +250,10 @@ class _PaneSlotState extends State<_PaneSlot> {
     final store = widget.store;
     return DragTarget<MxTab>(
       onWillAcceptWithDetails: (d) {
-        _track(d.offset);
+        _track(d.data, d.offset);
         return true;
       },
-      onMove: (d) => _track(d.offset),
+      onMove: (d) => _track(d.data, d.offset),
       onLeave: (_) {
         if (_side != null) setState(() => _side = null);
       },

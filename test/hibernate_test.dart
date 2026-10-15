@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/hooks.dart';
 import 'package:maestria/services/layout.dart';
+import 'package:maestria/services/plugin_api.dart';
+import 'package:maestria/services/plugins.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/sidebar.dart';
 
@@ -105,6 +109,126 @@ void main() {
       expect(tab.subtitle, isNot(contains('Hibernada')));
       // O `--resume` leva o id que ficou.
       expect(tab.resumeId, 'sess-1');
+    });
+
+    test('um plugin acorda pelo session.wake, com o tabId e a permissão', () async {
+      final (store, tab) = storeWithSession();
+      addTearDown(store.dispose);
+      store.hibernate(tab);
+      final api = PluginApi(store);
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'p', name: 'P', version: '1', permissions: {PluginPermission.sessionsCreate}),
+      );
+      final nope = MxPlugin(dir: '/q', manifest: const PluginManifest(id: 'q', name: 'Q', version: '1'));
+      expect(() => api.handle(nope, 'session.wake', {'tabId': tab.id}), throwsA(isA<PluginRpcError>()));
+      expect(() => api.handle(plugin, 'session.wake', {}), throwsA(isA<PluginRpcError>()));
+      expect(tab.hibernated, isTrue);
+
+      expect(await api.handle(plugin, 'session.wake', {'tabId': tab.id}), {'woke': true});
+      expect(tab.hibernated, isFalse);
+      expect(tab.hooks.status, ClaudeStatus.starting);
+      expect(await api.handle(plugin, 'session.wake', {'tabId': tab.id}), {'woke': false});
+    });
+
+    test('um plugin hiberna pelo session.hibernate: parada, com o tabId e a permissão', () async {
+      final (store, tab) = storeWithSession();
+      addTearDown(store.dispose);
+      final api = PluginApi(store);
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'p', name: 'P', version: '1', permissions: {PluginPermission.sessionsClose}),
+      );
+      final create = MxPlugin(
+        dir: '/q',
+        manifest: const PluginManifest(id: 'q', name: 'Q', version: '1', permissions: {PluginPermission.sessionsCreate}),
+      );
+      expect(() => api.handle(create, 'session.hibernate', {'tabId': tab.id}), throwsA(isA<PluginRpcError>()));
+      expect(() => api.handle(plugin, 'session.hibernate', {}), throwsA(isA<PluginRpcError>()));
+
+      // No meio de um turno, não.
+      store.applyHook(HookEvent(tab.id, 'UserPromptSubmit', {}));
+      expect(() => api.handle(plugin, 'session.hibernate', {'tabId': tab.id}), throwsA(isA<PluginRpcError>()));
+      expect(tab.hibernated, isFalse);
+
+      store.applyHook(HookEvent(tab.id, 'Stop', {}));
+      expect(await api.handle(plugin, 'session.hibernate', {'tabId': tab.id}), {'hibernated': true});
+      expect(tab.hibernated, isTrue);
+      expect(await api.handle(plugin, 'session.hibernate', {'tabId': tab.id}), {'hibernated': false});
+    });
+
+    test('com o "confia nesta pasta?" na tela, o plugin não escreve no terminal', () async {
+      final (store, tab) = storeWithSession();
+      addTearDown(store.dispose);
+      final api = PluginApi(store);
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'p', name: 'P', version: '1', permissions: {PluginPermission.terminalWrite}),
+      );
+      tab.term.terminal.write(
+        'Accessing workspace:\r\n\r\nQuick safety check: Is this a project you created or one you trust?\r\n'
+        '❯ No, exit\r\n  Yes, I trust this folder\r\n',
+      );
+      expect(tab.term.asksTrust, isTrue);
+      for (final method in ['terminal.sendText', 'terminal.sendKeys']) {
+        await expectLater(
+          api.handle(plugin, method, {
+            'tabId': tab.id,
+            'text': 'oi',
+            'submit': true,
+            'keys': ['enter'],
+          }),
+          throwsA(isA<PluginRpcError>().having((e) => e.message, 'message', contains('confia na pasta'))),
+        );
+      }
+      // Respondida, a tela limpa e o prompt volta: aí pode.
+      tab.term.terminal.write('\x1b[2J\x1b[H> ');
+      expect(tab.term.asksTrust, isFalse);
+    });
+
+    test('o retrato de uma sessão: só um png da pasta do plugin', () async {
+      final (store, tab) = storeWithSession();
+      addTearDown(store.dispose);
+      final dir = Directory.systemTemp.createTempSync('retrato');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final png = File('${dir.path}/rosto.png')..writeAsBytesSync([0x89, 0x50, 0x4e, 0x47]);
+      final fora = Directory.systemTemp.createTempSync('fora');
+      addTearDown(() => fora.deleteSync(recursive: true));
+      final alheio = File('${fora.path}/outro.png')..writeAsBytesSync([0x89]);
+      final api = PluginApi(store);
+      final plugin = MxPlugin(dir: dir.path, manifest: const PluginManifest(id: 'p', name: 'P', version: '1'));
+
+      await api.handle(plugin, 'session.portrait', {'tabId': tab.id, 'image': png.path});
+      expect(tab.portrait, png.resolveSymbolicLinksSync());
+      expect(
+        () => api.handle(plugin, 'session.portrait', {'tabId': tab.id, 'image': alheio.path}),
+        throwsA(isA<PluginRpcError>()),
+        reason: 'fora da pasta do plugin, não',
+      );
+      expect(
+        () => api.handle(plugin, 'session.portrait', {'tabId': tab.id, 'image': '${dir.path}/nada.png'}),
+        throwsA(isA<PluginRpcError>()),
+      );
+      await api.handle(plugin, 'session.portrait', {'tabId': tab.id, 'image': null});
+      expect(tab.portrait, isNull);
+    });
+
+    test('um plugin renomeia a sessão; vazio volta pro nome de sempre', () async {
+      final (store, tab) = storeWithSession();
+      addTearDown(store.dispose);
+      final api = PluginApi(store);
+      final plugin = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(id: 'p', name: 'P', version: '1', permissions: {PluginPermission.sessionsCreate}),
+      );
+      final nope = MxPlugin(dir: '/q', manifest: const PluginManifest(id: 'q', name: 'Q', version: '1'));
+      expect(() => api.handle(nope, 'session.rename', {'tabId': tab.id, 'title': 'x'}), throwsA(isA<PluginRpcError>()));
+      expect(() => api.handle(plugin, 'session.rename', {'title': 'x'}), throwsA(isA<PluginRpcError>()));
+
+      expect(await api.handle(plugin, 'session.rename', {'tabId': tab.id, 'title': '  login do google  '}), {'title': 'login do google'});
+      expect(tab.title, 'login do google');
+      final back = await api.handle(plugin, 'session.rename', {'tabId': tab.id, 'title': ''}) as Map;
+      expect(back['title'], isNot('login do google'), reason: 'vazio volta pro nome de sempre');
     });
 
     test('acordar quem não está hibernada não faz nada', () async {

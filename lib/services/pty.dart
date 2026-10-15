@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
@@ -38,7 +40,11 @@ class TermSession {
   int? exitCode;
   void Function()? onExit;
 
-  int? get pid => _pty?.pid;
+  int? get pid => _pty?.pid ?? fakePid;
+
+  /// O pid de um painel que, sob teste, não tem processo nenhum.
+  @visibleForTesting
+  int? fakePid;
 
   void startShell(String cwd) => _start(['-l'], cwd, null);
 
@@ -179,6 +185,66 @@ class TermSession {
     }
     if (imagesViaCtrlV) terminal.send('\x16');
   }
+
+  /// O Claude Code está perguntando se você confia na pasta -- o "Quick
+  /// safety check" da primeira vez numa pasta, que vem com o "No, exit"
+  /// marcado. Enquanto ele está na tela, um enter de fora (o chat de um
+  /// plugin) fecha a sessão em vez de mandar a mensagem.
+  bool get asksTrust => _trustPrompt.hasMatch(screenText());
+
+  static final _trustPrompt = RegExp(r'trust this folder|Do you trust the files', caseSensitive: false);
+
+  /// O texto da parte visível do terminal, uma linha por linha da tela.
+  String screenText() {
+    final lines = terminal.buffer.lines;
+    final width = terminal.viewWidth;
+    final out = StringBuffer();
+    for (var y = math.max(0, lines.length - terminal.viewHeight); y < lines.length; y++) {
+      final line = lines[y];
+      final end = math.min(width, line.length);
+      for (var x = 0; x < end; x++) {
+        final code = line.getCodePoint(x);
+        out.writeCharCode(code == 0 ? 0x20 : code);
+      }
+      out.writeln();
+    }
+    return out.toString();
+  }
+
+  /// Um enter sozinho: manda o que já está no prompt (a imagem colada com ^V,
+  /// sem texto nenhum junto).
+  void enter() {
+    if (!exited) terminal.keyInput(TerminalKey.enter);
+  }
+
+  /// As teclas de um plugin (`terminal.sendKeys`), uma de cada vez: uma
+  /// setinha, um enter, ou `{ text }` digitado. Com uma pausa entre elas, que
+  /// o TUI do claude lê a entrada em pedaços e trata um pedaço como uma tecla
+  /// só -- três setas que chegam juntas viram uma que ele não reconhece.
+  Future<void> sendKeys(List<Object?> keys, {Duration gap = const Duration(milliseconds: 60)}) async {
+    for (final (i, k) in keys.indexed) {
+      if (exited) return;
+      if (i > 0) await Future<void>.delayed(gap);
+      if (k is Map && k['text'] is String) {
+        terminal.textInput(k['text'] as String);
+      } else if (terminalKeys[k] case final key?) {
+        terminal.keyInput(key);
+      }
+    }
+  }
+
+  /// Os nomes das teclas de `terminal.sendKeys`.
+  static const terminalKeys = <Object?, TerminalKey>{
+    'up': TerminalKey.arrowUp,
+    'down': TerminalKey.arrowDown,
+    'left': TerminalKey.arrowLeft,
+    'right': TerminalKey.arrowRight,
+    'enter': TerminalKey.enter,
+    'escape': TerminalKey.escape,
+    'tab': TerminalKey.tab,
+    'space': TerminalKey.space,
+    'backspace': TerminalKey.backspace,
+  };
 
   /// A line break in the prompt, the way claude asks for one.
   ///

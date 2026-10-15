@@ -921,7 +921,7 @@ class _Row extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           if (recording && replacing == null)
-            _Recorder(onCaptured: onCaptured, onCancel: onCancel)
+            ShortcutRecorder(onCaptured: onCaptured, onCancel: onCancel)
           else
             // Um teto pra coluna das teclas. Sem ele o Row entrega largura
             // infinita ao Wrap, que então nunca quebra a linha: uma ação com
@@ -936,7 +936,7 @@ class _Row extends StatelessWidget {
                 children: [
                   for (final chord in chords)
                     if (recording && chord == replacing)
-                      _Recorder(onCaptured: onCaptured, onCancel: onCancel)
+                      ShortcutRecorder(onCaptured: onCaptured, onCancel: onCancel)
                     else
                       _Cap(
                         chord: chord,
@@ -1104,8 +1104,11 @@ class _GhostState extends State<_Ghost> {
 /// Devolve `handled` em tudo enquanto está no ar: gravar um atalho é o único
 /// momento em que a tecla não deve fazer o que ela faz — inclusive o ⏎ que
 /// fecharia o diálogo e o ⇥ que mudaria o foco.
-class _Recorder extends StatelessWidget {
-  const _Recorder({required this.onCaptured, required this.onCancel});
+///
+/// Público porque são duas as telas que gravam uma tecla: esta, das ações, e
+/// a do menu do painel, que dá uma tecla a ele (ver [showPanelHotkey]).
+class ShortcutRecorder extends StatelessWidget {
+  const ShortcutRecorder({super.key, required this.onCaptured, required this.onCancel});
 
   final ValueChanged<MxChord> onCaptured;
   final VoidCallback onCancel;
@@ -1150,8 +1153,9 @@ class _Recorder extends StatelessWidget {
 ///
 /// Está aqui pelo mesmo motivo que o resto da lista: uma tecla que funciona e
 /// não aparece em lugar nenhum é uma tecla que ninguém descobre. O que separa
-/// estas das outras é que cada uma é a metade de um par (nove teclas, uma
-/// régua) ou pertence a quem está embaixo — o pty e o macOS.
+/// estas das outras é que cada uma pertence a quem está embaixo — o pty e o
+/// macOS. As teclas dos painéis também não estão aqui: cada uma se escolhe no
+/// menu do painel dono dela (ver [showPanelHotkey]).
 class _Fixed extends StatelessWidget {
   const _Fixed();
 
@@ -1159,7 +1163,6 @@ class _Fixed extends StatelessWidget {
   Widget build(BuildContext context) {
     final linux = MxChord.linux;
     final fixed = <(String, String)>[
-      ('${MxChord.slot(0).label} … ${MxChord.slot(8).label}', 'Ir pra enésima sessão da lateral'),
       (
         MxChord.paste.take(2).map((c) => c.label).join('  '),
         'Colar no painel — imagem inclusa, que o Claude recebe como ^V',
@@ -1729,7 +1732,8 @@ class _PluginRowState extends State<_PluginRow> {
                               m.version,
                               style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
                             ),
-                          Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
+                          for (final k in PluginKind.values)
+                            if (m?.kinds.contains(k) == true) PluginKindTag(k),
                           if (plugin.linked)
                             Text('Desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
                           if (store.pluginUpdates.busy.contains(plugin.id))

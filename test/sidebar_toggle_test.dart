@@ -142,9 +142,13 @@ void main() {
       await pumpKeys(tester, store);
       store.toggleSidebar();
 
-      // Sem isto o ⌘F mandava o foco pra um campo que não estava na árvore, e
+      // Sem isto o ⌘⇧F mandava o foco pra um campo que não estava na árvore, e
       // a tecla não fazia nada em tela nenhuma.
-      await press(tester, LogicalKeyboardKey.keyF, holding: [LogicalKeyboardKey.metaLeft]);
+      await press(
+        tester,
+        LogicalKeyboardKey.keyF,
+        holding: [LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.shiftLeft],
+      );
       expect(store.sidebarHidden, isFalse);
       await closeWindow(tester, store);
     });

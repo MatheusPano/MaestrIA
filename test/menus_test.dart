@@ -55,6 +55,7 @@ class NoPty extends AppStore {
     FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
+    bool place = true,
   }) {
     pedidos.add(Pedido('claude', cwd, label: label, featureOrHotfix: featureOrHotfix?.name));
     return _fake(cwd, label: label);

@@ -23,6 +23,7 @@ class NoPty extends AppStore {
     FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
+    bool place = true,
   }) {
     abertas.add({'cwd': cwd, 'label': label, 'prompt': prompt});
     final tab = MxTab(

@@ -88,6 +88,31 @@ void main() {
       expect(m.commands, isEmpty);
     });
 
+    test('é tema, recurso ou os dois pelo que declara', () {
+      PluginManifest parse(Map<String, dynamic> contributes, {List<String>? main}) =>
+          PluginManifest.parse({
+            'id': 'x',
+            'version': '1',
+            'main': ?main,
+            'contributes': contributes,
+          });
+      final themes = {
+        'themes': ['themes/a.json'],
+      };
+      expect(parse(themes).kinds, {PluginKind.theme});
+      expect(parse({}, main: ['node', 'main.js']).kinds, {PluginKind.feature});
+      expect(
+        parse({
+          ...themes,
+          'commands': [
+            {'id': 'c', 'title': 'c', 'run': 'ls'},
+          ],
+        }).kinds,
+        {PluginKind.theme, PluginKind.feature},
+      );
+      expect(parse({}).kinds, isEmpty);
+    });
+
     test('recusa o que faria o plugin fazer outra coisa que o autor quis', () {
       void bad(Map<String, dynamic> j, String says) => expect(
         () => PluginManifest.parse({'id': 'x', 'version': '1', ...j}),
@@ -729,6 +754,11 @@ void main() {
       expect(picked, '/x/app-b');
     });
 
+    test('a vassoura de limpar é um ícone da tabela, e o clear continua o bloqueio', () {
+      expect(pluginIcon('clean'), Icons.cleaning_services_outlined);
+      expect(pluginIcon('clear'), Icons.block_rounded);
+    });
+
     testWidgets('o svg da pasta do plugin vira o ícone, e não sai da pasta', (tester) async {
       final dir = writePlugin(
         tmp.path,
@@ -1162,6 +1192,46 @@ void main() {
     });
   });
 
+  group('mandar um claude pra casa', () {
+    test('com sessions.close, o plugin fecha uma sessão do claude; sem ela, não', () async {
+      final store = AppStore();
+      final f = Folder(root: '/repo', name: 'repo');
+      store.folders.add(f);
+      final claude = MxTab(id: 'c1', folder: f, kind: TabKind.claude, cwd: '/repo', branch: '');
+      final shell = MxTab(id: 's1', folder: f, kind: TabKind.shell, cwd: '/repo', branch: '');
+      store.tabs.addAll([claude, shell]);
+      final api = PluginApi(store);
+      final office = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(
+          id: 'escritorio',
+          name: 'E',
+          version: '1',
+          permissions: {PluginPermission.sessionsClose},
+        ),
+      );
+      final plain = MxPlugin(dir: '/q', manifest: const PluginManifest(id: 'q', name: 'Q', version: '1'));
+
+      await expectLater(api.handle(plain, 'session.close', {'tabId': 'c1'}), throwsA(isA<PluginRpcError>()));
+      await expectLater(
+        api.handle(office, 'session.close', {'tabId': 's1'}),
+        throwsA(isA<PluginRpcError>()),
+        reason: 'a permissão é pras sessões do claude, não pros seus terminais',
+      );
+      await expectLater(
+        api.handle(office, 'session.close', {}),
+        throwsA(isA<PluginRpcError>()),
+        reason: 'sem tabId, nada de fechar o painel em foco',
+      );
+      expect(store.tabs, contains(claude));
+
+      await api.handle(office, 'session.close', {'tabId': 'c1'});
+      expect(store.tabs, isNot(contains(claude)));
+      expect(store.tabs, contains(shell));
+      store.dispose();
+    });
+  });
+
   group('as configurações de plugin', () {
     Map<String, dynamic> manifest() => {
       'id': 'cfg',
@@ -1245,6 +1315,98 @@ void main() {
       plugins.setSetting(p, 'colors.app', null);
       expect(plugins.settingsOf(p)['colors.app'], '');
       expect(plugins.toJson(), isEmpty, reason: 'voltar ao padrão tira do config');
+    });
+
+    test('folders guarda a lista dos root marcados, e o resto cai no vazio', () {
+      final s = PluginSetting.parse({'id': 'salas', 'type': 'folders'});
+      expect(s.type, PluginSettingType.folders);
+      expect(s.resolve(null), <String>[]);
+      final saved = s.resolve(<dynamic>['/a', '/b']);
+      expect(saved, isA<List<String>>(), reason: 'o config chega List<dynamic>');
+      expect(saved, ['/a', '/b']);
+      expect(s.resolve(['/a', 3]), <String>[], reason: 'só lista de texto');
+      expect(s.resolve('/a'), <String>[]);
+    });
+
+    testWidgets('folders mostra as marcadas num botão, que abre o modal das pastas', (tester) async {
+      writePlugin(tmp.path, 'cfg', {
+        'id': 'cfg',
+        'version': '1',
+        'contributes': {
+          'settings': [
+            {'id': 'salas', 'type': 'folders', 'title': 'as salas'},
+          ],
+        },
+      });
+      final store = AppStore();
+      store.plugins.all.addAll((Plugins(root: tmp.path)..scan()).all);
+      store.folders
+        ..add(Folder(root: '/r/app', name: 'app'))
+        ..add(Folder(root: '/r/api', name: 'api'));
+      final p = store.plugins.byId('cfg')!;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => TextButton(
+              onPressed: () => showPluginSettings(ctx, store, p),
+              child: const Text('abrir'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Checkbox), findsNothing, reason: 'as caixinhas ficam no modal');
+
+      Future<void> pickIn(String button, List<String> taps, {String done = 'Pronto'}) async {
+        await tester.tap(find.text(button));
+        await tester.pumpAndSettle();
+        expect(find.byType(Checkbox), findsNWidgets(2));
+        for (final t in taps) {
+          await tester.tap(find.text(t));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(find.text(done).last); // o do modal, em cima do das configurações
+        await tester.pumpAndSettle();
+      }
+
+      await pickIn('Nenhuma', ['api']);
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/api']);
+
+      // O cancelar deixa como estava.
+      await pickIn('api', ['app'], done: 'Cancelar');
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/api']);
+
+      // Na ordem da lateral.
+      await pickIn('api', ['Todas']);
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/app', '/r/api']);
+      expect(find.text('app, api'), findsOneWidget);
+
+      // O filtro: o Todas/Nenhuma vale só pro que aparece.
+      await tester.tap(find.text('app, api'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'api');
+      await tester.pumpAndSettle();
+      expect(find.byType(Checkbox), findsOneWidget);
+      await tester.tap(find.text('Nenhuma'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 de 2'), findsOneWidget);
+      // Sem o filtro, o app segue marcado: o Todas marca o resto, o Nenhuma tira tudo.
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Todas'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 de 2'), findsOneWidget);
+      await tester.tap(find.text('Nenhuma'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pronto').last);
+      await tester.pumpAndSettle();
+      expect(store.plugins.settingsOf(p)['salas'], <String>[]);
+      expect(store.plugins.toJson(), isEmpty, reason: 'nenhuma é o padrão: sai do config');
+      expect(find.byTooltip('Voltar ao padrão'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
     });
 
     test('a cor de um valor: hex, nome do tema ou vazio', () {
@@ -1696,6 +1858,49 @@ void main() {
       await tester.tap(find.text('main.dart'));
       expect(store.actions, ['preparar', 'diff']);
       await mouse.removePointer();
+    });
+
+    testWidgets('a árvore de arquivos: o ícone pequeno com as cores dele e o nome na cor do git', (
+      tester,
+    ) async {
+      const svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#F7DF1E"/></svg>';
+      final tab = MxTab(
+        id: 'tab1',
+        folder: Folder(root: '/repo', name: 'repo'),
+        kind: TabKind.plugin,
+        cwd: '/repo',
+        branch: '',
+        view: PluginView(
+          pluginId: 'p',
+          pluginName: 'P',
+          id: 'v',
+          title: 'editor',
+          blocks: PluginView.blocksFrom([
+            {
+              'type': 'list',
+              'flat': true,
+              'items': [
+                {'title': 'app.js', 'avatar': {'svg': svg, 'size': 16}, 'titleTone': 'yellow'},
+                {'title': 'docker', 'avatar': {'svg': svg}},
+              ],
+            },
+          ]),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(width: 400, height: 300, child: PluginPane(store: _ActionsStore(), tab: tab)),
+          ),
+        ),
+      );
+      final pictures = find.byType(SvgPicture);
+      expect(pictures, findsNWidgets(2));
+      expect(tester.getSize(pictures.first), const Size(16, 16), reason: 'avatar.size encolhe o desenho');
+      expect(tester.getSize(pictures.last), const Size(26, 26), reason: 'sem size, o de sempre da lista flat');
+      expect(tester.widget<Text>(find.text('app.js')).style!.color, Mx.yellow);
+      expect(tester.widget<Text>(find.text('docker')).style!.color, Mx.fg);
     });
 
     testWidgets('o menu de um item abre no botão direito e manda a ação escolhida', (tester) async {
@@ -2471,6 +2676,10 @@ void main() {
       expect(session['featureOrHotfix'], 'login quebrado');
       expect(session['featureOrHotfixKind'], 'hotfix');
       expect(session['workspaces'], ['ATRIUM']);
+      // O contexto: nulo até a linha de status dizer, e os três números depois.
+      expect(session['context'], isNull);
+      tab.context = const ContextUsage(percent: 71, tokens: 142000, window: 200000);
+      expect(api.sessionJson(tab)['context'], {'percent': 71, 'tokens': 142000, 'window': 200000});
 
       store.dispose();
     });

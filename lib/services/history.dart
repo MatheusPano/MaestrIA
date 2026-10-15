@@ -98,13 +98,21 @@ enum ChatStanding {
   /// painel na mesma conversa.
   onScreen,
 
-  /// Viva fora do maestria.
+  /// Viva fora do maestria, num terminal interativo de outro lugar.
   ///
-  /// O CLI recusa o `--resume` de uma sessão que ainda está rodando -- ela
-  /// `is running as a background session`, e a saída que ele oferece é um
-  /// `claude attach` com um job id que o cockpit não tem de onde tirar. Então
-  /// a linha avisa em vez de abrir um painel que morre na largada.
+  /// Não há o que fazer daqui: o processo é de outro terminal, e um segundo
+  /// `--resume` na mesma conversa seriam dois claudes escrevendo no mesmo
+  /// transcript. Então a linha avisa em vez de abrir.
   live,
+
+  /// Viva em segundo plano -- o `claude --bg`, ou o que se mandou pra trás da
+  /// agent view.
+  ///
+  /// O CLI recusa o `--resume` dela (`is running as a background session`) e
+  /// manda usar o `claude attach <job id>`. O `claude agents --json` traz esse
+  /// id (ver [AgentInfo.id]), então o clique abre um terminal anexado a ela em
+  /// vez de um painel que morreria na largada.
+  background,
 
   /// A pasta em que ela rodou não está mais no disco. Ver [ChatEntry.missing].
   gone;
@@ -114,12 +122,14 @@ enum ChatStanding {
     ChatStanding.fresh => null,
     ChatStanding.onScreen => 'já está num painel',
     ChatStanding.live => 'aberta fora daqui',
+    ChatStanding.background => 'em segundo plano · anexar',
     ChatStanding.gone => 'a pasta não existe mais',
   };
 
-  /// Se retomar vai dar em painel novo. As outras três não abrem nada: uma vai
-  /// pro painel que já existe, e duas só têm um aviso pra dar.
-  bool get opens => this == ChatStanding.fresh;
+  /// Se retomar vai dar em painel novo -- com o `--resume`, ou anexado à de
+  /// segundo plano. As outras três não abrem nada: uma vai pro painel que já
+  /// existe, e duas só têm um aviso pra dar.
+  bool get opens => this == ChatStanding.fresh || this == ChatStanding.background;
 }
 
 /// A leitura do histórico. Ver a nota da biblioteca.
