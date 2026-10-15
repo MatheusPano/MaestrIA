@@ -987,6 +987,7 @@ class AgentInfo {
     required this.pid,
     required this.cwd,
     required this.kind,
+    this.id,
     this.sessionId,
     this.name,
     this.status,
@@ -998,6 +999,11 @@ class AgentInfo {
   final int? pid;
   final String cwd;
   final String kind;
+
+  /// O id de job de uma sessão em segundo plano, que é o que o
+  /// `claude attach` leva. Só as `background` têm; uma interativa é um
+  /// processo noutro terminal, e não há onde anexar.
+  final String? id;
   final String? sessionId;
   final String? name;
   final String? status;
@@ -1011,6 +1017,7 @@ class AgentInfo {
     pid: j['pid'] as int?,
     cwd: (j['cwd'] as String?) ?? '',
     kind: (j['kind'] as String?) ?? 'interactive',
+    id: j['id'] as String?,
     sessionId: j['sessionId'] as String?,
     name: j['name'] as String?,
     status: j['status'] as String?,

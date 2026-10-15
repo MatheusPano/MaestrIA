@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/history.dart';
+import 'package:maestria/services/hooks.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/dialogs.dart';
 import 'package:maestria/ui/sidebar.dart';
@@ -60,6 +61,30 @@ class NoPty extends AppStore {
       customLabel: label,
     );
     tab.sessionId = resumeId;
+    tabs.add(tab);
+    select(tab);
+    return tab;
+  }
+
+  /// O terminal pedido, anotado: é por ele que se anexa a uma sessão de
+  /// segundo plano, e o que está em teste é o comando, não o pty.
+  @override
+  MxTab openShell(
+    Folder f, {
+    String? cwd,
+    String? command,
+    FeatureOrHotfix? featureOrHotfix,
+    Launcher? launcher,
+    bool place = true,
+  }) {
+    asked.add({'folder': f.root, 'cwd': cwd, 'command': command});
+    final tab = MxTab(
+      id: 'tab${asked.length}',
+      folder: f,
+      kind: TabKind.shell,
+      cwd: cwd ?? f.root,
+      branch: '',
+    );
     tabs.add(tab);
     select(tab);
     return tab;
@@ -320,8 +345,8 @@ void main() {
       expect(store.panes, isNotNull);
     });
 
-    // O CLI recusa o `--resume` de uma sessão que ainda está rodando, e manda
-    // um `claude attach <jobId>` que o cockpit não tem como formar.
+    // Num terminal interativo de outro lugar não há onde anexar, e um segundo
+    // `--resume` seriam dois claudes escrevendo no mesmo transcript.
     test('a que está viva fora do maestria avisa em vez de abrir', () async {
       final store = NoPty();
       addTearDown(store.dispose);
@@ -336,6 +361,112 @@ void main() {
       expect(store.resumeChat(chat, folder: folder), isNull);
       expect(store.asked, isEmpty);
       expect(store.banner, contains('ainda está rodando fora do MaestrIA'));
+    });
+
+    // O CLI recusa o `--resume` de uma sessão em segundo plano e manda usar o
+    // `claude attach <job id>`, que o `claude agents --json` traz.
+    test('a que está em segundo plano abre um terminal anexado a ela', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final folder = Folder(root: '/tmp', name: 'tmp');
+      store.folders.add(folder);
+      final chat = byId(await store.chatsIn(folder), titled);
+      store.agents.latest = [
+        AgentInfo(
+          pid: null,
+          id: '40e816ba',
+          cwd: '/tmp',
+          kind: 'background',
+          sessionId: titled,
+          name: 'revisão do schema',
+        ),
+      ];
+
+      expect(store.standingOf(chat), ChatStanding.background);
+      expect(ChatStanding.background.note, contains('segundo plano'));
+      final tab = store.resumeChat(chat, folder: folder)!;
+
+      expect(store.asked.single, {
+        'folder': '/tmp',
+        'cwd': '/tmp',
+        'command': "claude attach '40e816ba'",
+      });
+      expect(tab.kind, TabKind.shell);
+      expect(tab.title, chat.label);
+      expect(tab.agentName, 'revisão do schema');
+      // E o segundo clique vai pra ele em vez de anexar de novo.
+      expect(store.standingOf(chat), ChatStanding.onScreen);
+      expect(store.resumeChat(chat, folder: folder), same(tab));
+      expect(store.asked, hasLength(1));
+      // O `attach` saiu -- ← ou Ctrl+Z --, e a sessão segue lá atrás: o
+      // painel morto não é mais o lugar dela.
+      tab.term.exited = true;
+      expect(store.standingOf(chat), ChatStanding.background);
+    });
+
+    // A de segundo plano sem job id -- um CLI mais velho -- não tem como ser
+    // anexada, e volta pro aviso.
+    test('a de segundo plano sem job id avisa como as de fora', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final folder = Folder(root: '/tmp', name: 'tmp');
+      store.folders.add(folder);
+      final chat = byId(await store.chatsIn(folder), titled);
+      store.agents.latest = [
+        AgentInfo(pid: null, cwd: '/tmp', kind: 'background', sessionId: titled),
+      ];
+
+      expect(store.standingOf(chat), ChatStanding.live);
+    });
+
+    // O registro do CLI fica no id com que o processo nasceu: depois de um
+    // `/clear` no painel, o `claude agents` segue listando a conversa velha
+    // naquele pid, e os hooks já falam da nova.
+    test('painel daqui que trocou de conversa não conta como fora daqui', () async {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final folder = Folder(root: '/tmp', name: 'tmp');
+      store.folders.add(folder);
+      final chats = await store.chatsIn(folder);
+      final old = byId(chats, titled);
+      final now = chats.firstWhere((c) => c.sessionId != titled);
+      final tab = store.resumeChat(old, folder: folder)!;
+      tab.term.fakePid = 4242;
+      HookReducer.apply(tab.hooks, 'SessionStart', {'session_id': now.sessionId});
+      store.agents.latest = [
+        AgentInfo(pid: 4242, cwd: '/tmp', kind: 'interactive', sessionId: titled),
+      ];
+
+      // A que o painel está usando é dele, mesmo com o `resumeId` atrasado.
+      expect(store.standingOf(now), ChatStanding.onScreen);
+      expect(store.resumeChat(now, folder: folder), same(tab));
+      // E a que ele largou não está viva em lugar nenhum.
+      tab.sessionId = now.sessionId;
+      expect(store.standingOf(old), ChatStanding.fresh);
+    });
+
+    test('a volta do claude agents não desfaz o id que os hooks trouxeram', () {
+      final store = NoPty();
+      addTearDown(store.dispose);
+      final tab = MxTab(
+        id: 't',
+        folder: store.loose,
+        kind: TabKind.claude,
+        cwd: '/tmp',
+        branch: '',
+      );
+      tab.term.fakePid = 4242;
+      store.tabs.add(tab);
+      final agent = AgentInfo(pid: 4242, cwd: '/tmp', kind: 'interactive', sessionId: 'velho');
+
+      // Antes dos hooks, é o `claude agents` que dá o id ao painel.
+      store.applyAgents([agent]);
+      expect(tab.resumeId, 'velho');
+
+      HookReducer.apply(tab.hooks, 'SessionStart', {'session_id': 'novo'});
+      tab.sessionId = tab.hooks.sessionId;
+      store.applyAgents([agent]);
+      expect(tab.resumeId, 'novo');
     });
 
     test('a de uma pasta que sumiu avisa em vez de abrir', () async {

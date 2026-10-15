@@ -2667,15 +2667,42 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   /// Em que pé está [chat] agora. Ver [ChatStanding].
   ChatStanding standingOf(ChatEntry chat) {
-    if (tabs.any((t) => t.resumeId == chat.sessionId)) return ChatStanding.onScreen;
+    if (_tabHolding(chat.sessionId) != null) return ChatStanding.onScreen;
     // Viva é o que o `claude agents --json` lista: ele só enxerga processo de
     // pé, que é a razão de ele não servir de histórico -- e a razão de servir
     // exatamente pra isto.
-    if (agents.latest.any((a) => a.sessionId == chat.sessionId)) return ChatStanding.live;
+    //
+    // Menos os processos que são painéis daqui. O id que o CLI lista é o do
+    // registro dele, que fica no da sessão em que o processo nasceu: um painel
+    // que trocou de conversa no meio do caminho -- `/clear`, `/resume` lá
+    // dentro -- segue listado com o id antigo. Contar esses dizia "aberta fora
+    // daqui" sobre a conversa que o painel já largou; a que ele está usando
+    // agora é a dos hooks, e essa a linha de cima já achou.
+    if (_elsewhere(chat.sessionId) case final a?) {
+      return a.kind == 'background' && a.id != null ? ChatStanding.background : ChatStanding.live;
+    }
     if (chat.missing || chat.cwd.isEmpty || !Directory(chat.cwd).existsSync()) {
       return ChatStanding.gone;
     }
     return ChatStanding.fresh;
+  }
+
+  /// O painel que está com a conversa [sessionId], se algum está.
+  ///
+  /// Pelos dois ids e não só pelo [MxTab.resumeId]: entre um hook e uma volta
+  /// do `claude agents` eles podem discordar (ver [applyAgents]), e o dos
+  /// hooks é o que o processo está escrevendo.
+  ///
+  /// Um terminal anexado a uma sessão de segundo plano também está com ela,
+  /// enquanto o `claude attach` dele roda: ver [ChatStanding.background].
+  MxTab? _tabHolding(String sessionId) => tabs.firstWhereOrNull(
+    (t) => (t.kind == TabKind.claude || !t.exited) && (t.resumeId == sessionId || t.hooks.sessionId == sessionId),
+  );
+
+  /// A sessão viva de [sessionId] que não é painel daqui. Ver [standingOf].
+  AgentInfo? _elsewhere(String sessionId) {
+    final ours = {for (final t in tabs) ?t.term.pid};
+    return agents.latest.firstWhereOrNull((a) => a.sessionId == sessionId && !ours.contains(a.pid));
   }
 
   /// Retoma [chat] num painel: o `--resume` daquela conversa, na pasta em que
@@ -2690,7 +2717,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         // Não é pra abrir de novo: é pra olhar. Uma segunda sessão no mesmo id
         // seria o CLI recusando por sessão viva -- a que o próprio cockpit
         // acabou de subir.
-        final open = tabs.firstWhere((t) => t.resumeId == chat.sessionId);
+        final open = _tabHolding(chat.sessionId)!;
         select(open);
         return open;
       case ChatStanding.live:
@@ -2700,6 +2727,8 @@ class AppStore extends ChangeNotifier implements TaskDesk {
           sticky: true,
         );
         return null;
+      case ChatStanding.background:
+        return _attach(chat, _elsewhere(chat.sessionId)!, folder: folder, featureOrHotfix: featureOrHotfix);
       case ChatStanding.gone:
         showBanner(
           chat.cwd.isEmpty
@@ -2725,6 +2754,27 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       resumeId: chat.sessionId,
       featureOrHotfix: featureOrHotfix,
     );
+  }
+
+  /// Anexa um terminal à sessão de segundo plano [agent], que é a conversa
+  /// [chat]. Ver [ChatStanding.background].
+  ///
+  /// Um terminal e não um painel do claude: a sessão já roda com os hooks de
+  /// quem a lançou, não com os nossos, e um painel do claude seria salvo pra
+  /// voltar amanhã com um `--resume` -- justamente o que o CLI recusa enquanto
+  /// ela estiver em segundo plano. O que o painel guarda dela é o nome e o id,
+  /// que são o que a lateral mostra e o histórico usa pra não anexar duas
+  /// vezes.
+  MxTab _attach(ChatEntry chat, AgentInfo agent, {Folder? folder, FeatureOrHotfix? featureOrHotfix}) {
+    final at = folder ?? folderAt(chat.cwd) ?? loose;
+    // A pasta só serve de lugar pro terminal: o `attach` acha a sessão pelo
+    // id, e uma sessão viva numa pasta que sumiu continua anexável.
+    final cwd = Directory(chat.cwd).existsSync() ? chat.cwd : at.root;
+    final tab = openShell(at, cwd: cwd, command: 'claude attach ${Sh.q(agent.id!)}', featureOrHotfix: featureOrHotfix);
+    tab.customLabel = chat.label;
+    tab.agentName = agent.name;
+    tab.sessionId = chat.sessionId;
+    return tab;
   }
 
   // --- painéis de leitura -------------------------------------------------
@@ -5185,6 +5235,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       // que se fala com ela.
       if (a.name != null && a.name!.isNotEmpty) mine.agentName = a.name;
       if (a.sessionId == null) continue;
+      // Só até os hooks falarem. O registro do CLI guarda o id com que o
+      // processo nasceu e não acompanha um `/clear`; o `SessionStart` traz o
+      // novo, e deixar esta volta escrever por cima fazia o painel alternar
+      // entre as duas conversas a cada trinta segundos -- e salvar a errada.
+      if (mine.hooks.sessionId != null) continue;
       mine.sessionId = a.sessionId;
     }
     _checkAlerts();
