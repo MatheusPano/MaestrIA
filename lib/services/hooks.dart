@@ -307,6 +307,12 @@ fi
         // segundo plano terminou -- ver [HookState.forksOut] --, e sem ele
         // "quando terminar" só sabe que o *turno* acabou.
         'SubagentStop': [group()],
+        // O `/compact` (e a compactação automática, no meio de um turno). Não
+        // mexem no status -- a volta pra parada depois de um `/compact` à mão
+        // tocaria o "terminou" e a fila --, mas o plugin que mostra o que a
+        // sessão faz precisa saber que ela está compactando.
+        'PreCompact': [group()],
+        'PostCompact': [group()],
       },
       'statusLine': {
         'type': 'command',

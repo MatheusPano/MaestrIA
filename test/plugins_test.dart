@@ -88,6 +88,31 @@ void main() {
       expect(m.commands, isEmpty);
     });
 
+    test('é tema, recurso ou os dois pelo que declara', () {
+      PluginManifest parse(Map<String, dynamic> contributes, {List<String>? main}) =>
+          PluginManifest.parse({
+            'id': 'x',
+            'version': '1',
+            'main': ?main,
+            'contributes': contributes,
+          });
+      final themes = {
+        'themes': ['themes/a.json'],
+      };
+      expect(parse(themes).kinds, {PluginKind.theme});
+      expect(parse({}, main: ['node', 'main.js']).kinds, {PluginKind.feature});
+      expect(
+        parse({
+          ...themes,
+          'commands': [
+            {'id': 'c', 'title': 'c', 'run': 'ls'},
+          ],
+        }).kinds,
+        {PluginKind.theme, PluginKind.feature},
+      );
+      expect(parse({}).kinds, isEmpty);
+    });
+
     test('recusa o que faria o plugin fazer outra coisa que o autor quis', () {
       void bad(Map<String, dynamic> j, String says) => expect(
         () => PluginManifest.parse({'id': 'x', 'version': '1', ...j}),
@@ -1167,6 +1192,46 @@ void main() {
     });
   });
 
+  group('mandar um claude pra casa', () {
+    test('com sessions.close, o plugin fecha uma sessão do claude; sem ela, não', () async {
+      final store = AppStore();
+      final f = Folder(root: '/repo', name: 'repo');
+      store.folders.add(f);
+      final claude = MxTab(id: 'c1', folder: f, kind: TabKind.claude, cwd: '/repo', branch: '');
+      final shell = MxTab(id: 's1', folder: f, kind: TabKind.shell, cwd: '/repo', branch: '');
+      store.tabs.addAll([claude, shell]);
+      final api = PluginApi(store);
+      final office = MxPlugin(
+        dir: '/p',
+        manifest: const PluginManifest(
+          id: 'escritorio',
+          name: 'E',
+          version: '1',
+          permissions: {PluginPermission.sessionsClose},
+        ),
+      );
+      final plain = MxPlugin(dir: '/q', manifest: const PluginManifest(id: 'q', name: 'Q', version: '1'));
+
+      await expectLater(api.handle(plain, 'session.close', {'tabId': 'c1'}), throwsA(isA<PluginRpcError>()));
+      await expectLater(
+        api.handle(office, 'session.close', {'tabId': 's1'}),
+        throwsA(isA<PluginRpcError>()),
+        reason: 'a permissão é pras sessões do claude, não pros seus terminais',
+      );
+      await expectLater(
+        api.handle(office, 'session.close', {}),
+        throwsA(isA<PluginRpcError>()),
+        reason: 'sem tabId, nada de fechar o painel em foco',
+      );
+      expect(store.tabs, contains(claude));
+
+      await api.handle(office, 'session.close', {'tabId': 'c1'});
+      expect(store.tabs, isNot(contains(claude)));
+      expect(store.tabs, contains(shell));
+      store.dispose();
+    });
+  });
+
   group('as configurações de plugin', () {
     Map<String, dynamic> manifest() => {
       'id': 'cfg',
@@ -1250,6 +1315,65 @@ void main() {
       plugins.setSetting(p, 'colors.app', null);
       expect(plugins.settingsOf(p)['colors.app'], '');
       expect(plugins.toJson(), isEmpty, reason: 'voltar ao padrão tira do config');
+    });
+
+    test('folders guarda a lista dos root marcados, e o resto cai no vazio', () {
+      final s = PluginSetting.parse({'id': 'salas', 'type': 'folders'});
+      expect(s.type, PluginSettingType.folders);
+      expect(s.resolve(null), <String>[]);
+      final saved = s.resolve(<dynamic>['/a', '/b']);
+      expect(saved, isA<List<String>>(), reason: 'o config chega List<dynamic>');
+      expect(saved, ['/a', '/b']);
+      expect(s.resolve(['/a', 3]), <String>[], reason: 'só lista de texto');
+      expect(s.resolve('/a'), <String>[]);
+    });
+
+    testWidgets('folders desenha uma caixinha por pasta da lateral', (tester) async {
+      writePlugin(tmp.path, 'cfg', {
+        'id': 'cfg',
+        'version': '1',
+        'contributes': {
+          'settings': [
+            {'id': 'salas', 'type': 'folders', 'title': 'as salas'},
+          ],
+        },
+      });
+      final store = AppStore();
+      store.plugins.all.addAll((Plugins(root: tmp.path)..scan()).all);
+      store.folders
+        ..add(Folder(root: '/r/app', name: 'app'))
+        ..add(Folder(root: '/r/api', name: 'api'));
+      final p = store.plugins.byId('cfg')!;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => TextButton(
+              onPressed: () => showPluginSettings(ctx, store, p),
+              child: const Text('abrir'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Checkbox), findsNWidgets(2));
+
+      await tester.tap(find.text('api'));
+      await tester.pumpAndSettle();
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/api']);
+
+      await tester.tap(find.text('Todas'));
+      await tester.pumpAndSettle();
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/api', '/r/app']);
+
+      await tester.tap(find.text('Nenhuma'));
+      await tester.pumpAndSettle();
+      expect(store.plugins.settingsOf(p)['salas'], <String>[]);
+      expect(store.plugins.toJson(), isEmpty, reason: 'nenhuma é o padrão: sai do config');
+      expect(find.byTooltip('Voltar ao padrão'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
     });
 
     test('a cor de um valor: hex, nome do tema ou vazio', () {
@@ -2519,6 +2643,10 @@ void main() {
       expect(session['featureOrHotfix'], 'login quebrado');
       expect(session['featureOrHotfixKind'], 'hotfix');
       expect(session['workspaces'], ['ATRIUM']);
+      // O contexto: nulo até a linha de status dizer, e os três números depois.
+      expect(session['context'], isNull);
+      tab.context = const ContextUsage(percent: 71, tokens: 142000, window: 200000);
+      expect(api.sessionJson(tab)['context'], {'percent': 71, 'tokens': 142000, 'window': 200000});
 
       store.dispose();
     });

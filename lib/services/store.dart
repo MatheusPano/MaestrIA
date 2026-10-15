@@ -273,6 +273,11 @@ class MxTab {
   /// com "processo saiu (0)". Ver [AppStore.hibernate] e [AppStore.wake].
   bool hibernated = false;
 
+  /// O retrato desta sessão (um png), quando um plugin deu um a ela
+  /// (`session.portrait`): o boneco dela no escritório. Vai na notificação de
+  /// quando ela para por você. Não é gravado: o plugin manda de novo quando sobe.
+  String? portrait;
+
   /// Quando esta sessão parou de trabalhar: o instante da virada pra repouso,
   /// não o do último evento.
   ///
@@ -2533,6 +2538,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     FeatureOrHotfix? featureOrHotfix,
     String? prompt,
     bool start = true,
+    bool place = true,
   }) {
     final tab = MxTab(
       id: _nextId(),
@@ -2544,7 +2550,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     );
     tab.sessionId = resumeId;
     if (featureOrHotfix != null && featureOrHotfix.folderRoot == f.root) tab.featureOrHotfixId = featureOrHotfix.id;
-    _register(tab);
+    // Sem [place], a sessão nasce só na lateral, sem tomar um painel nem trocar
+    // de tela: a que um plugin abre de dentro da tela dele.
+    _register(tab, place: place);
 
     final name = (label == null || label.isEmpty) ? tab.cwd.split('/').last : label;
     tab.agentName = name;
@@ -2603,10 +2611,27 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     // Nothing reports the prompt being ready -- see `HookState.settle` -- so
     // the panel gives the launch a beat and then says so itself. A session
     // that spoke first (it can only be a prompt you typed) keeps its state.
-    Timer(const Duration(seconds: 3), () {
+    void settleSoon(Duration after, int tries) => Timer(after, () {
       if (!tabs.contains(tab) || tab.exited) return;
-      if (tab.hooks.settle()) notifyListeners();
+      // O "confia nesta pasta?" na tela: o prompt ainda não subiu. Olha de
+      // novo daqui a pouco, até você responder (ou desistir de esperar).
+      if (tab.term.asksTrust) {
+        if (tries > 0) settleSoon(const Duration(seconds: 2), tries - 1);
+        return;
+      }
+      if (tab.hooks.settle()) {
+        // Os plugins também: sem isto, quem mostra as sessões ficava com a
+        // recém-aberta (ou recém-acordada) em "starting" pra sempre.
+        plugins.emit(
+          'session.status',
+          {'tabId': tab.id, 'status': ClaudeStatus.ready.name, 'previous': ClaudeStatus.starting.name},
+          activations: ['onSession'],
+        );
+        notifyListeners();
+      }
     });
+    // Uns 10 minutos de "confia nesta pasta?" no máximo, de 2 em 2 segundos.
+    settleSoon(const Duration(seconds: 3), 300);
   }
 
   // --- histórico de conversas ---------------------------------------------
@@ -3063,11 +3088,13 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// grade como uma janela qualquer.
   MxTab? pluginModal;
 
-  /// Fecha o modal. O plugin fica sabendo no próximo `view.update`, que volta
-  /// `open: false`, como com uma janela fechada.
+  /// Fecha o modal. O plugin fica sabendo pelo evento `view.closed` (e, numa
+  /// versão de antes, no próximo `view.update`, que volta `open: false`).
   void closeModal() {
-    if (pluginModal == null) return;
+    final view = pluginModal?.view;
+    if (view == null) return;
     pluginModal = null;
+    plugins.viewClosed(view.pluginId, view.id);
     notifyListeners();
   }
 
@@ -3930,6 +3957,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   void renameTab(MxTab tab, String label) {
     tab.customLabel = label;
+    // Os plugins que mostram as sessões (o escritório, o quadro) ficam com o
+    // nome novo -- venha ele da lateral ou de um plugin (`session.rename`).
+    if (!tab.isPassive) {
+      plugins.emit('session.renamed', {'tabId': tab.id, 'title': tab.title}, activations: ['onSession']);
+    }
     _save();
     notifyListeners();
   }
@@ -4195,6 +4227,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// o `--resume` devolve, que é a conversa.
   void hibernate(MxTab tab) {
     if (!canHibernate(tab)) return;
+    final before = tab.hooks.status;
     tab.hibernated = true;
     tab.armed = false;
     tab.restedAt = null;
@@ -4213,8 +4246,20 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     } else {
       unawaited(tab.term.kill());
     }
+    _sleepChanged(tab, before);
     _save();
     notifyListeners();
+  }
+
+  /// Avisa os plugins que [tab] dormiu ou acordou: o status muda por fora dos
+  /// hooks (quem desliga e religa o processo é a janela), e sem isto um plugin
+  /// que mostra as sessões ficaria com a de antes.
+  void _sleepChanged(MxTab tab, ClaudeStatus before) {
+    plugins.emit(
+      'session.status',
+      {'tabId': tab.id, 'status': tab.hooks.status.name, 'previous': before.name, 'hibernated': tab.hibernated},
+      activations: ['onSession'],
+    );
   }
 
   /// Religa uma sessão hibernada, na mesma conversa. Ver [MxTab.hibernated].
@@ -4225,8 +4270,10 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// do primeiro chegando depois do segundo subir. Ver [TermSession.relaunch].
   Future<void> wake(MxTab tab) async {
     if (!tab.hibernated) return;
+    final before = tab.hooks.status;
     tab.hibernated = false;
     tab.hooks.status = ClaudeStatus.starting;
+    _sleepChanged(tab, before);
     notifyListeners();
     if (!tab.exited) await tab.term.kill();
     if (!tabs.contains(tab)) return;
@@ -4895,6 +4942,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       return;
     }
     tab.context = now;
+    plugins.emit(
+      'session.context',
+      {'tabId': tab.id, 'context': PluginApi.contextJson(now)},
+      activations: ['onSession'],
+    );
     notifyListeners();
   }
 
@@ -5259,19 +5311,45 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     _checkAlerts();
   }
 
+  /// O corpo da notificação com retrato: o que [t] quer de você.
+  String _alertBody(MxTab t) {
+    final h = t.hooks;
+    return switch (t.status) {
+      ClaudeStatus.waitingAnswer when h.question != null => 'pergunta: ${h.question}',
+      ClaudeStatus.waitingPermission when h.activeTool != null => 'quer aprovação pra ${h.activeTool}',
+      _ => t.status.callToAction,
+    };
+  }
+
+  /// O clique numa notificação com retrato: a sessão dela na tela.
+  void _focusFromNotification(String tabId) {
+    final t = tabs.where((x) => x.id == tabId).firstOrNull;
+    if (t != null) select(t);
+  }
+
   /// Notify once per session that stops for a human, and keep the dock badge
   /// equal to how many are stopped right now.
   void _checkAlerts() {
     final waiting = <String, String>{};
+    final stopped = <String, MxTab>{};
     for (final t in tabs) {
       if (!t.done && t.status.needsHuman) {
         waiting['tab:${t.id}'] = '${t.title} · ${t.status.callToAction}';
+        stopped['tab:${t.id}'] = t;
       }
     }
 
     for (final entry in waiting.entries) {
       if (_alerted.add(entry.key)) {
-        notifier.alert('MaestrIA', entry.value);
+        final t = stopped[entry.key]!;
+        if (t.portrait case final image?) {
+          // Com o retrato: o nome da sessão em cima e, no corpo, o que ela
+          // quer -- a pergunta, ou a ferramenta que espera aprovação.
+          notifier.onTap ??= _focusFromNotification;
+          notifier.alert(t.title, _alertBody(t), subtitle: 'MaestrIA', image: image, tabId: t.id);
+        } else {
+          notifier.alert('MaestrIA', entry.value);
+        }
       }
     }
     _alerted.removeWhere((key) => !waiting.containsKey(key));

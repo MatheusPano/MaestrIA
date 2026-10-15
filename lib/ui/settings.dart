@@ -1732,7 +1732,8 @@ class _PluginRowState extends State<_PluginRow> {
                               m.version,
                               style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
                             ),
-                          Text(state.label, style: TextStyle(fontSize: 11, color: _tone)),
+                          for (final k in PluginKind.values)
+                            if (m?.kinds.contains(k) == true) PluginKindTag(k),
                           if (plugin.linked)
                             Text('Desenvolvimento', style: TextStyle(fontSize: 11, color: Mx.purple)),
                           if (store.pluginUpdates.busy.contains(plugin.id))

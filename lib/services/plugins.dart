@@ -56,6 +56,7 @@ enum PluginPermission {
   ),
   terminalWrite('terminal.write', 'digitar e enviar texto nos seus painéis'),
   sessionsCreate('sessions.create', 'abrir sessões do Claude e terminais'),
+  sessionsClose('sessions.close', 'encerrar sessões do Claude quando você pedir'),
   notifications('notifications', 'mandar notificações do sistema');
 
   const PluginPermission(this.id, this.label);
@@ -67,6 +68,21 @@ enum PluginPermission {
   final String label;
 
   static PluginPermission? byId(String id) => values.firstWhereOrNull((p) => p.id == id);
+}
+
+/// O que um plugin traz, do jeito que a lista e o catálogo separam: um tema só
+/// muda as cores, um recurso faz alguma coisa. Um plugin pode ser os dois.
+enum PluginKind {
+  theme('theme', 'Tema'),
+  feature('feature', 'Recurso');
+
+  const PluginKind(this.id, this.label);
+
+  /// Como o catálogo escreve.
+  final String id;
+  final String label;
+
+  static PluginKind? byId(String id) => values.firstWhereOrNull((k) => k.id == id);
 }
 
 /// Onde um comando acontece.
@@ -127,7 +143,11 @@ class PluginCommand {
 }
 
 /// O tipo de uma configuração de plugin -- e o campo que a tela desenha.
-enum PluginSettingType { string, number, boolean, color, select }
+///
+/// `folders` é uma caixinha pra cada pasta da lateral, e o valor é a lista dos
+/// `root` marcados: as opções são as suas pastas, que o manifesto não tem como
+/// saber.
+enum PluginSettingType { string, number, boolean, color, select, folders }
 
 /// Uma configuração que o plugin declarou (`contributes.settings`).
 ///
@@ -203,13 +223,17 @@ class PluginSetting {
       PluginSettingType.number => v is num,
       PluginSettingType.boolean => v is bool,
       PluginSettingType.select => v is String && options.any((o) => o.value == v),
+      PluginSettingType.folders => v is List && v.every((e) => e is String),
     };
-    if (fits(saved)) return saved;
-    if (fits(defaultValue)) return defaultValue;
+    // Uma lista sai sempre como List<String> -- a do config chega List<dynamic>.
+    Object? typed(Object? v) => v is List ? v.cast<String>().toList() : v;
+    if (fits(saved)) return typed(saved);
+    if (fits(defaultValue)) return typed(defaultValue);
     return switch (type) {
       PluginSettingType.boolean => false,
       PluginSettingType.number => 0,
       PluginSettingType.select => options.first.value,
+      PluginSettingType.folders => <String>[],
       _ => '',
     };
   }
@@ -302,6 +326,19 @@ class PluginManifest {
   final List<String> warnings;
 
   bool get hasProcess => main != null && main!.isNotEmpty;
+
+  /// Tema quando declara temas; recurso quando tem qualquer outra coisa --
+  /// processo, comandos, aba, tela, configurações.
+  Set<PluginKind> get kinds => {
+    if (themes.isNotEmpty) PluginKind.theme,
+    if (hasProcess ||
+        commands.isNotEmpty ||
+        settings.isNotEmpty ||
+        sidebar ||
+        screen ||
+        suggestions != null)
+      PluginKind.feature,
+  };
 
   /// Se o processo deve subir quando [event] acontece.
   ///
@@ -1313,15 +1350,34 @@ class Plugins extends ChangeNotifier {
         // O `TextInput`, o campo de texto da biblioteca de widgets. Ver
         // `ui/plugin_input.dart`.
         'textInput': 1,
-        // O `Markdown` da biblioteca de widgets.
+        // `session.openClaude` com `background: true`: a sessão nasce sem
+        // tirar você da tela do plugin.
+        'openInBackground': 1,
+        // O `Markdown` da biblioteca de widgets, e o colar imagem no
+        // `TextInput` (`onPasteImage` + `terminal.pasteClipboard`).
         'markdown': 1,
+        'pasteImage': 1,
+        // `terminal.sendKeys`: as setas e o enter, pra responder uma pergunta
+        // de um claude do chat de um plugin.
+        'keys': 1,
         // O `onArrow` do `TextInput`: as setas do campo vazio vão pro plugin.
         'arrows': 1,
+        // `session.wake`, e o `session.status` com `hibernated` quando uma
+        // sessão dorme ou acorda.
+        'wake': 1,
+        // `session.hibernate`: o plugin põe uma sessão parada pra dormir.
+        'hibernate': 1,
+        // `session.portrait`: o retrato que a notificação de uma sessão leva.
+        'portrait': 1,
+        // `session.close` de uma sessão do claude, com `sessions.close`.
+        'closeSessions': 1,
         // O modal que sai de um `Anchor` (`view.open` com `from`), com o
         // tamanho pedido (`width`, `height`).
         'modalFrom': 1,
         // O `Selectable`: uma área de seleção só pra uma janela inteira.
         'selectable': 1,
+        // `session.rename`, e o evento `session.renamed`.
+        'rename': 1,
         'pluginId': p.id,
         'pluginDir': p.dir,
         'dataDir': p.dataDir,
@@ -1478,6 +1534,16 @@ class Plugins extends ChangeNotifier {
     final p = byId(pluginId);
     if (p == null || !p.active) return;
     unawaited(_deliver(p, 'view.action', {'viewId': viewId, 'action': action, 'values': values}));
+  }
+
+  /// A janela [viewId] de [pluginId] fechou (o modal dispensado): o evento
+  /// `view.closed`, só pra ele. Sem isto, ele só sabia no próximo
+  /// `view.update` -- e um plugin que segura alguma coisa enquanto a janela
+  /// está aberta (uma reunião na tela dele) ficava esperando.
+  void viewClosed(String pluginId, String viewId) {
+    final p = byId(pluginId);
+    if (p == null || !p.active || p._conn?.alive != true) return;
+    unawaited(_deliver(p, 'event', {'type': 'view.closed', 'viewId': viewId}));
   }
 
   // --- instalação --------------------------------------------------------

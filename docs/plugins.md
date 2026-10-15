@@ -83,6 +83,7 @@ conferir), ou um repositório de git que mora em outro lugar.
     {
       "id": "maestria.git", "name": "Git", "version": "1.2.1", "maestria": 1,
       "description": "…", "author": "…", "permissions": ["sessions.create"],
+      "kinds": ["feature"],
       "icon": "https://…/git.svg",
       "url": "https://github.com/…/releases/download/git-v1.2.1/git-1.2.1.zip",
       "sha256": "2f2c3c8f84…"
@@ -91,6 +92,11 @@ conferir), ou um repositório de git que mora em outro lugar.
   ]
 }
 ```
+
+O `kinds` é o selo ao lado do nome, no catálogo e na lista de instalados:
+`theme` pra quem declara temas, `feature` pra quem tem processo, comandos, aba,
+tela, configurações ou sugestões -- os dois quando tem as duas coisas. Na lista
+de instalados ele sai do manifesto; no catálogo, sem o campo, não aparece selo.
 
 O `maestria-plugins` gera o dele sozinho; o README de lá diz como um plugin de
 outra pessoa entra.
@@ -185,6 +191,7 @@ janela do plugin), guarda o valor no config dela e avisa o plugin. É o
 | `boolean` | interruptor | `true`/`false` |
 | `select` | lista de `options` | o `value` escolhido |
 | `color` | amostra, cores prontas e hex | `#RRGGBB`, um nome do tema (`red`, `green`, `yellow`, `accent`, `purple`, `dim`, `faint`) ou vazio pra cor do texto |
+| `folders` | uma caixinha pra cada pasta da lateral, com "todas"/"nenhuma" | a lista dos `root` marcados (o mesmo `root` do `folders.list`). Uma pasta que saiu da lateral continua na lista, e volta marcada se reabrir: cruze com o `folders.list` |
 
 `group` põe um título em cima das configurações seguidas com o mesmo grupo. Só o
 que você mexeu vai pro config: um padrão que muda numa versão nova do plugin
@@ -225,7 +232,8 @@ que a **janela** aceita fazer a pedido dele:
 |---|---|
 | `hooks` | receber os eventos de hook das sessões do claude (têm o prompt e os argumentos das ferramentas) |
 | `terminal.write` | `terminal.sendText` |
-| `sessions.create` | `session.openClaude`, `session.openShell` |
+| `sessions.create` | `session.openClaude`, `session.openShell`, `session.wake` |
+| `sessions.close` | `session.close` de uma sessão do claude (sem ela, só os terminais que o próprio plugin abriu), e `session.hibernate`. Pergunte antes: é a sessão de quem usa. |
 | `notifications` | `window.notify` |
 
 Um pedido sem a permissão declarada volta com erro `-32001`.
@@ -306,7 +314,10 @@ Os `event`:
 | `session.opened` | `tabId`, `kind`, `cwd`, `folder` |
 | `session.closed` | `tabId` |
 | `session.exited` | `tabId`, `code` — o processo do painel saiu e o painel ficou (o ssh que caiu) |
-| `session.status` | `tabId`, `status`, `previous` |
+| `session.status` | `tabId`, `status`, `previous`, `hibernated?` — o `hibernated` vem quando a mudança foi a sessão dormir (`true`) ou acordar (`false`): quem desliga e religa o processo é a janela, não um hook. |
+| `session.renamed` | `tabId`, `title` — a sessão mudou de nome (pela lateral ou por um plugin). |
+| `view.closed` | `viewId` — a janela em modal do plugin fechou (dispensada por quem usa, ou pelo `view.close`). Só pro dono dela. |
+| `session.context` | `tabId`, `context` — quanto da janela de contexto a sessão ocupa agora (`{ percent, tokens, window }`, ou `null` depois de um `/compact`, até a próxima resposta). Só quando muda. |
 | `sidebar.shown` | — a aba do plugin na lateral entrou na tela (ou foi clicada de novo). Só pra quem declara `contributes.sidebar`; sobe o processo se ele não estiver de pé. |
 | `sidebar.hidden` | — a aba saiu da tela: outra aba, ou a lateral escondida |
 
@@ -335,11 +346,17 @@ Os eventos só chegam depois de o `initialize` voltar.
 | `chats.list` | `day` (`AAAA-MM-DD`) | as conversas arquivadas do Claude Code naquele dia: `[{ sessionId, title, cwd, folder, at, size }]` · `hooks` |
 | `editor.open` | `path`, `line?` | — abre no VS Code (`code -g` com linha) |
 | `command.busy` | `command`, `busy` | — o botão do comando na lateral vira spinner enquanto `busy` |
-| `terminal.sendText` | `text`, `submit?`, `tabId?` | — · `terminal.write`. Sem `tabId`, usa o painel em foco ou, se ele não tiver processo (a própria janela do plugin, por exemplo), a primeira sessão na tela. |
-| `session.openClaude` | `cwd?`, `prompt?`, `label?` | `{ tabId }` · `sessions.create` |
+| `terminal.sendText` | `text`, `submit?`, `tabId?` | — · `terminal.write`. Sem `tabId`, usa o painel em foco ou, se ele não tiver processo (a própria janela do plugin, por exemplo), a primeira sessão na tela. `text: ""` com `submit` é só o enter: manda o que já está no prompt (a imagem colada). |
+| `terminal.sendKeys` | `keys`, `tabId?` | — · `terminal.write`. Teclas de verdade, uma de cada vez (com uma pausa entre elas, pro TUI acompanhar): `up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `space`, `backspace`, ou `{ text: "…" }` digitado. É como um chat de plugin responde a pergunta de um claude (o `AskUserQuestion`): `["down", "enter"]` escolhe a segunda opção. O `initialize` diz `keys: 1`. |
+| `terminal.pasteClipboard` | `tabId?` | — · `terminal.write`. O ⌘V do terminal, feito pelo plugin: texto entra como colagem; num claude, uma imagem na área de transferência (um print) vira o ^V com que ele mesmo a lê e a põe no prompt. É o que um chat de plugin faz no `onPasteImage` do `TextInput`. O `initialize` diz `pasteImage: 1`. |
+| `session.rename` | `tabId`, `title` | `{ title }` · `sessions.create`. O nome da sessão, como o "renomear" da lateral (vale pra lateral, o cabeçalho e o histórico); vazio volta pro nome de sempre. Volta o título que ficou. O `initialize` diz `rename: 1`. |
+| `session.wake` | `tabId` | `{ woke }` · `sessions.create`. Religa uma sessão hibernada, na mesma conversa (o clique na linha dela). `woke: false` quando ela não estava dormindo. Ela volta como `starting` e depois `ready`, os dois como `session.status`. O `initialize` diz `wake: 1`. |
+| `session.portrait` | `tabId`, `image` | — · O retrato de uma sessão do claude: um `.png` da pasta do plugin (ou da de dados dele) que a notificação de quando ela para por você leva junto, com o nome da sessão no título e, no corpo, a pergunta ou a ferramenta que espera aprovação. No macOS essa notificação pede a permissão do sistema na primeira vez (sem ela, sai a de sempre, sem imagem), e o clique nela põe a sessão na tela. `image: null` tira. Não é gravado: mande de novo quando o plugin subir. O `initialize` diz `portrait: 1`. |
+| `session.hibernate` | `tabId` | `{ hibernated }` · `sessions.close`. O "hibernar" da lateral: desliga o processo de uma sessão do claude parada e fica com a conversa, que volta com `session.wake`. Só a parada no prompt (sem turno andando nem agente rodando) e com conversa pra retomar; senão, erro. `hibernated: false` quando ela já dormia. Chega como `session.status` com `hibernated: true`. O `initialize` diz `hibernate: 1`. |
+| `session.openClaude` | `cwd?`, `prompt?`, `label?`, `background?` | `{ tabId }` · `sessions.create`. Com `background: true` a sessão sobe e aparece na lateral, mas não toma um painel nem tira você da tela do plugin (o "novo claude" de dentro do escritório). O `initialize` diz `openInBackground: 1` numa Maestria que o aceita. |
 | `suggestion.created` | `suggestionId`, `ref` (`TASK#123`), `intro?`, `branch?`, `dir?` | `{ tabId, cwd }` do painel onde o trabalho começou, ou `null` — só pra quem declara `contributes.suggestions`; veja [Tarefas sugeridas](#tarefas-sugeridas) |
 | `session.openShell` | `cwd?`, `command?`, `label?`, `owned?`, `tag?`, `embedded?` | `{ tabId }` · `sessions.create`. Com `owned: true` o terminal é do plugin: sai dos avulsos e mora na aba dele (a aba genérica o lista; quem desenha a própria aba o desenha), e não volta quando o app reabre. `tag` é um texto seu que volta no `sessions.list` desse terminal — o id do host, por exemplo. Com `embedded: true` (que já é `owned`) o terminal não vira painel: ele mora dentro de uma janela do plugin, desenhado por um bloco `terminal` com esse `tabId` — a aba Terminal de um container. Fechar a janela o encerra junto. |
-| `session.close` | `tabId` | — fecha um terminal que o plugin abriu com `owned` (só esses) |
+| `session.close` | `tabId` | — fecha um terminal que o plugin abriu com `owned`; com `sessions.close`, também uma sessão do claude (o `initialize` diz `closeSessions: 1`). A conversa fica no histórico, como quando você fecha o painel. |
 | `pane.openMarkdown` | `markdown`, `title?` | `{ tabId }`, no painel de leitura |
 | `view.open` | `viewId`, `title?`, `blocks` (ou `rfw` e `data`), `modal?`, `from?`, `width?`, `height?` | `{ tabId }` — com `rfw` a janela é a interface que o plugin monta (veja "A interface em widgets"). Com `modal: true` ela abre em modal, por cima da tela e fora da grade (veja "Janelas em modal") |
 | `view.update` | `viewId`, `title?`, `blocks?`, `rfw?`, `data?` | `{ open }`: `false` quando você fechou a janela. `data` junta: cada chave de cima troca a que havia. Mandar `blocks` volta pros blocos. |
@@ -361,6 +378,7 @@ Uma sessão é:
   "onScreen": true, "focused": false, "startedAt": "2026-09-23T09:12:00.000",
   "project": "permissão do google", "featureOrHotfix": "permissão do google", "featureOrHotfixKind": "feature", "workspaces": ["ATRIUM"],
   "launcher": null,
+  "context": { "percent": 58, "tokens": 116010, "window": 200000 },
   "activity": { "prompts": 4, "tools": 31, "touched": ["lib/x.dart"], "lastPrompt": "…", "lastMessage": "…" }
 }
 ```
@@ -368,6 +386,10 @@ Uma sessão é:
 `project` é o nome antigo de `featureOrHotfix` e continua vindo, por compatibilidade.
 
 `embedded` diz se é um terminal embutido (ver `session.openShell`).
+
+`context` é quanto da janela de contexto a sessão já ocupa, lido da linha de status
+do Claude Code: `null` antes da primeira resposta e logo depois de um `/compact`.
+O evento `session.context` avisa quando muda.
 
 `activity` só vem pra quem declarou `hooks`: é o mesmo conteúdo dos eventos.
 `owner` é o id do plugin dono do terminal (ou `null`), e `tag` só vem pro

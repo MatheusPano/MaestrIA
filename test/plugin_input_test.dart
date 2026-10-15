@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
+import 'package:maestria/services/plugin_api.dart';
 import 'package:maestria/services/plugins.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/plugin_input.dart';
@@ -225,6 +226,41 @@ void main() {
     expect(copied, contains('primeiro parágrafo\nsegundo parágrafo\nno meio\n'));
     expect(copied, contains('• um item\n• outro item'));
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  test('terminal.pasteClipboard: o print vira ^V no claude; o sendText vazio é só o enter', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final store = AppStore();
+    final tab = MxTab(id: 't1', folder: Folder(root: '/repo', name: 'repo'), kind: TabKind.claude, cwd: '/repo', branch: '');
+    store.tabs.add(tab);
+    final written = <String>[];
+    tab.term.terminal.onOutput = written.add;
+    final api = PluginApi(store);
+    final plugin = MxPlugin(
+      dir: '/p',
+      manifest: const PluginManifest(id: 'p', name: 'P', version: '1', permissions: {PluginPermission.terminalWrite}),
+    );
+    clipboardHolds(null);
+    await api.handle(plugin, 'terminal.pasteClipboard', {'tabId': tab.id});
+    expect(written, ['\x16']);
+    await api.handle(plugin, 'terminal.sendText', {'tabId': tab.id, 'text': '', 'submit': true});
+    expect(written.last, '\r');
+    // Sem a permissão, não.
+    final nope = MxPlugin(dir: '/q', manifest: const PluginManifest(id: 'q', name: 'Q', version: '1'));
+    expect(() => api.handle(nope, 'terminal.pasteClipboard', {'tabId': tab.id}), throwsA(isA<PluginRpcError>()));
+    store.dispose();
+  });
+
+  test('a sessão aberta com place: false fica na lateral, fora da grade', () {
+    final store = AppStore();
+    final f = Folder(root: '/repo', name: 'repo');
+    store.folders.add(f);
+    final quiet = store.openClaude(f, cwd: '/repo', start: false, place: false);
+    expect(store.tabs, contains(quiet));
+    expect(store.isOpen(quiet), isFalse);
+    final shown = store.openClaude(f, cwd: '/repo', start: false);
+    expect(store.isOpen(shown), isTrue);
+    store.dispose();
+  });
 
   testWidgets('com o campo vazio, as setas vão pro plugin (onArrow); com texto, são do campo', (tester) async {
     final arrows = <Object?>[];

@@ -375,6 +375,8 @@ class _CatalogState extends State<_Catalog> {
                             have != null && have != e.version ? '$have → ${e.version}' : e.version,
                             style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
                           ),
+                          for (final k in PluginKind.values)
+                            if (e.kinds.contains(k)) PluginKindTag(k),
                           if (e.git != null)
                             Text('De fora', style: TextStyle(fontSize: 11, color: Mx.fgFaint)),
                         ],
@@ -411,6 +413,45 @@ class _CatalogState extends State<_Catalog> {
           ),
           const SizedBox(width: 16),
           action,
+        ],
+      ),
+    );
+  }
+}
+
+/// O selo de tema ou recurso ao lado do nome, na lista de instalados e no
+/// catálogo: o que separa "muda as cores" de "faz alguma coisa" sem precisar
+/// ler a descrição.
+class PluginKindTag extends StatelessWidget {
+  const PluginKindTag(this.kind, {super.key});
+
+  final PluginKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (kind) {
+      PluginKind.theme => Mx.accent,
+      PluginKind.feature => Mx.fgDim,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            switch (kind) {
+              PluginKind.theme => Icons.palette_outlined,
+              PluginKind.feature => Icons.extension_outlined,
+            },
+            size: 11,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Text(kind.label, style: TextStyle(fontSize: 10.5, color: color)),
         ],
       ),
     );
@@ -1196,7 +1237,8 @@ class _PluginSettings extends StatelessWidget {
           key: ValueKey(s.id),
           setting: s,
           value: values[s.id],
-          changed: values[s.id] != s.resolve(null),
+          changed: !const DeepCollectionEquality().equals(values[s.id], s.resolve(null)),
+          folders: [for (final f in store.folders) (root: f.root, name: f.name)],
           onChanged: (v) => store.setPluginSetting(plugin, s.id, v),
         ),
       );
@@ -1280,6 +1322,7 @@ class _SettingRow extends StatefulWidget {
     required this.value,
     required this.changed,
     required this.onChanged,
+    this.folders = const [],
   });
 
   final PluginSetting setting;
@@ -1287,6 +1330,9 @@ class _SettingRow extends StatefulWidget {
 
   /// Se o valor não é o padrão -- e aí aparece o "voltar ao padrão".
   final bool changed;
+
+  /// As pastas da lateral, as opções de um [PluginSettingType.folders].
+  final List<({String root, String name})> folders;
 
   /// Null volta pro padrão.
   final ValueChanged<Object?> onChanged;
@@ -1359,6 +1405,7 @@ class _SettingRowState extends State<_SettingRow> {
             icon: Icon(Icons.restart_alt, color: Mx.fgDim),
           )
         : const SizedBox(width: 26);
+    if (s.type == PluginSettingType.folders) return _folders(label, reset);
     final field = switch (s.type) {
       PluginSettingType.boolean => MxSwitch(
         value: widget.value == true,
@@ -1390,6 +1437,75 @@ class _SettingRowState extends State<_SettingRow> {
           const SizedBox(width: 12),
           field,
           reset,
+        ],
+      ),
+    );
+  }
+
+  /// Uma caixinha por pasta da lateral, embaixo do título: a lista é longa
+  /// demais pra caber do lado. Um `root` marcado de uma pasta que saiu da
+  /// lateral continua guardado -- ela volta marcada se você a abrir de novo.
+  Widget _folders(Widget label, Widget reset) {
+    final picked = [...(widget.value as List?)?.cast<String>() ?? const <String>[]];
+    final roots = [for (final f in widget.folders) f.root];
+    final all = roots.isNotEmpty && roots.every(picked.contains);
+    void pick(List<String> next) => widget.onChanged(
+      const ListEquality<String>().equals(next, widget.setting.resolve(null) as List<String>)
+          ? null
+          : next,
+    );
+    void toggle(String root) => pick(
+      picked.contains(root) ? [for (final r in picked) if (r != root) r] : [...picked, root],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: label),
+              if (roots.isNotEmpty)
+                TextButton(
+                  onPressed: () => pick(
+                    all
+                        ? [for (final r in picked) if (!roots.contains(r)) r]
+                        : [...picked, for (final r in roots) if (!picked.contains(r)) r],
+                  ),
+                  child: Text(all ? 'Nenhuma' : 'Todas', style: const TextStyle(fontSize: 12)),
+                ),
+              reset,
+            ],
+          ),
+          const SizedBox(height: 4),
+          if (widget.folders.isEmpty)
+            Text(
+              'Nenhuma pasta na lateral',
+              style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
+            ),
+          for (final f in widget.folders)
+            InkWell(
+              onTap: () => toggle(f.root),
+              borderRadius: BorderRadius.circular(6),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: picked.contains(f.root),
+                    visualDensity: VisualDensity.compact,
+                    onChanged: (_) => toggle(f.root),
+                  ),
+                  Text(f.name, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      f.root,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
