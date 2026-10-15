@@ -10,6 +10,7 @@ import '../theme.dart';
 import 'doc_pane.dart';
 import 'menus.dart';
 import 'panel.dart';
+import 'panes.dart';
 import 'plugin_dialogs.dart';
 import 'plugin_rfw.dart';
 import 'terminal_pane.dart';
@@ -446,10 +447,14 @@ class _PluginPaneState extends State<PluginPane> {
     final body = Column(
       children: [
         if (widget.framed)
-          _Header(
+          PaneGrab(
             store: widget.store,
             tab: widget.tab,
-            dimmed: widget.showFocus && !widget.focused,
+            child: _Header(
+              store: widget.store,
+              tab: widget.tab,
+              dimmed: widget.showFocus && !widget.focused,
+            ),
           ),
         if (down)
           _Stopped(
@@ -2223,7 +2228,6 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     return Container(
       height: 42,
       decoration: paneHeaderBox(store.tintOf(tab)),
@@ -2243,7 +2247,7 @@ class _Header extends StatelessWidget {
                   Flexible(
                     child: Text(tab.title, overflow: TextOverflow.ellipsis, style: paneTitleStyle),
                   ),
-                  PaneKeyHint(index: index),
+                  PaneKeyHint(chord: tab.hotkey),
                   if (box.maxWidth >= 190) ...[
                     const SizedBox(width: 8),
                     Flexible(

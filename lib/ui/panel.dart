@@ -119,23 +119,24 @@ const paneTitleStyle = TextStyle(fontWeight: FontWeight.w700, fontSize: 15);
 /// motivo que o nome: é o segundo jeito de reconhecer um painel sem ler nada
 /// -- e o único da faixa que também *ensina* como voltar pra ele.
 ///
-/// Recebe o índice já resolvido em vez do painel e da store: este arquivo é o
+/// Recebe a tecla já resolvida em vez do painel e da store: este arquivo é o
 /// desenho de um cartão, e não precisa saber o que é uma sessão pra escrever
 /// "⌘3".
 class PaneKeyHint extends StatelessWidget {
-  const PaneKeyHint({super.key, required this.index});
+  const PaneKeyHint({super.key, required this.chord});
 
-  /// A posição do painel na lista, contada de zero -- ou -1 pra quem não está
-  /// nela. Do décimo em diante não há tecla, e aí não há nada pra dizer.
-  final int index;
+  /// A tecla dada a este painel, ou null -- o padrão, e aí não há nada pra
+  /// dizer. Ver `MxTab.hotkey`.
+  final MxChord? chord;
 
   @override
   Widget build(BuildContext context) {
-    if (index < 0 || index >= 9) return const SizedBox.shrink();
+    final chord = this.chord;
+    if (chord == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(left: 8, right: 2),
       child: Text(
-        MxChord.slot(index).label,
+        chord.label,
         style: TextStyle(fontFamily: Mx.mono, fontSize: 10.5, color: Mx.fgFaint),
       ),
     );

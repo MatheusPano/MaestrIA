@@ -244,6 +244,15 @@ class MxTab {
   /// pergunta é [AppStore.isPinned], não este campo.
   bool pinned = false;
 
+  /// A tecla que traz este painel pra tela, quando alguém deu uma a ele.
+  ///
+  /// Escolhida painel a painel, e não ⌘1…⌘9 pela posição na lista: com vinte
+  /// painéis na lateral os nove primeiros eram quase sempre os errados, e o
+  /// número de cada um mudava sempre que outro abria ou fechava acima dele.
+  /// Uma tecla dada à mão é de quem a recebeu, e continua dele quando a lista
+  /// anda. Null é o padrão. Ver [AppStore.setHotkey].
+  MxChord? hotkey;
+
   /// A janela de um plugin com tela própria que você levou pra tela das
   /// sessões: a tarefa do Wiboor ao lado do claude que trabalha nela. Mora lá
   /// até você devolver -- ver [AppStore.releaseView] e [AppStore.screenOf].
@@ -447,6 +456,9 @@ class MxTab {
     // No layout e não na receita, como o grupo: preso é um jeito de estar
     // nesta tela, e a tela é o que o layout guarda.
     if (pinned) 'pinned': true,
+    // No layout e não na receita: a tecla é deste painel, e um grupo que a
+    // levasse junto abriria um segundo painel disputando a mesma tecla.
+    if (hotkey case final k?) 'hotkey': k.id,
   };
 }
 
@@ -1160,6 +1172,12 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         );
         tab.done = pane['done'] == true;
         tab.pinned = pane['pinned'] == true;
+        // Uma tecla que o mapa do app passou a usar desde que foi gravada fica
+        // com o app: dois donos é uma tecla que só um deles ouve.
+        final hotkey = MxChord.parse(pane['hotkey'] as String?);
+        if (hotkey != null && hotkey.valid && keymap.owner(hotkey) == null) {
+          tab.hotkey = hotkey;
+        }
         // Só se o grupo ainda existir: um grupo esquecido no meio do caminho
         // deixaria as linhas coloridas de um conjunto que não abre mais.
         final group = pane['group'] as String?;
@@ -1408,6 +1426,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   void bindShortcut(MxAction action, MxChord chord, {MxChord? replacing}) {
     final stolen = keymap.bind(action, chord, replacing: replacing);
     if (stolen != null) showBanner('${chord.label} saiu de "${stolen.label}"');
+    // E de um painel, pelo mesmo motivo: as ações vêm antes deles no
+    // teclado, e o painel ficaria com uma tecla que nunca chega nele.
+    for (final tab in tabs) {
+      if (tab.hotkey == chord) {
+        tab.hotkey = null;
+        showBanner('${chord.label} saiu do painel "${tab.title}"');
+      }
+    }
     _save();
     notifyListeners();
   }
@@ -3886,8 +3912,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// The list is one list while the sidebar draws it per folder, so a
   /// folder's panels are a subsequence of it and not a slice. Landing the
   /// panel on the target's index leaves every other panel's relative order
-  /// untouched -- and with it the ⌘1..9 numbering, which is this same list
-  /// counted from the top, and the saved layout, which is its order on disk.
+  /// untouched -- and with it the saved layout, which is its order on disk.
   void moveTab(MxTab tab, MxTab target) {
     final from = tabs.indexOf(tab);
     final to = tabs.indexOf(target);
@@ -4522,9 +4547,23 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     notifyListeners();
   }
 
-  void selectIndex(int index) {
-    if (index < 0 || index >= tabs.length) return;
-    select(tabs[index]);
+  /// Dá [chord] a [tab] -- ou tira, com null -- e avisa de qual painel ela
+  /// foi tirada. Ver [MxTab.hotkey].
+  ///
+  /// Roubar e não recusar, como em [bindShortcut]: quem aperta a tecla aqui
+  /// está dizendo que a quer neste painel.
+  void setHotkey(MxTab tab, MxChord? chord) {
+    if (chord != null) {
+      for (final other in tabs) {
+        if (other != tab && other.hotkey == chord) {
+          other.hotkey = null;
+          showBanner('${chord.label} saiu de "${other.title}"');
+        }
+      }
+    }
+    tab.hotkey = chord;
+    _save();
+    notifyListeners();
   }
 
   /// Move the focused pane through the panel list.
@@ -4935,9 +4974,9 @@ class AppStore extends ChangeNotifier implements TaskDesk {
   /// Pendura [child] em [parent]: o painel que um passo de fluxo abriu é filho
   /// da sessão de onde o passo saiu.
   ///
-  /// Mexer na lista é parte do vínculo, não enfeite: ela é a ordem da lateral
-  /// *e* a numeração do ⌘1..9, e um filho nascido no fim dela apareceria a
-  /// cinco linhas de quem o abriu. Ele entra atrás dos irmãos que já nasceram,
+  /// Mexer na lista é parte do vínculo, não enfeite: ela é a ordem da
+  /// lateral, e um filho nascido no fim dela apareceria a cinco linhas de
+  /// quem o abriu. Ele entra atrás dos irmãos que já nasceram,
   /// que é a ordem em que o fluxo os produziu.
   void _descend(MxTab child, MxTab parent) {
     child.bornOf = parent.id;

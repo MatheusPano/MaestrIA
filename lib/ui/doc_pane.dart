@@ -11,6 +11,7 @@ import '../services/notify.dart';
 import '../services/store.dart';
 import '../theme.dart';
 import 'panel.dart';
+import 'panes.dart';
 
 /// Um painel de leitura: markdown desenhado, no lugar de um terminal.
 ///
@@ -137,12 +138,16 @@ class _DocPaneState extends State<DocPane> {
         tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
-            _DocHeader(
+            PaneGrab(
               store: widget.store,
               tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
-              onCopy: _copy,
-              onReload: _reload,
+              child: _DocHeader(
+                store: widget.store,
+                tab: widget.tab,
+                dimmed: widget.showFocus && !widget.focused,
+                onCopy: _copy,
+                onReload: _reload,
+              ),
             ),
             Expanded(child: _surface()),
           ],
@@ -340,7 +345,6 @@ class _DocHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final doc = tab.doc!;
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     return Container(
       height: 42,
       decoration: paneHeaderBox(store.tintOf(tab)),
@@ -360,7 +364,7 @@ class _DocHeader extends StatelessWidget {
                       style: paneTitleStyle,
                     ),
                   ),
-                  PaneKeyHint(index: index),
+                  PaneKeyHint(chord: tab.hotkey),
                   if (box.maxWidth >= 190) ...[
                     const SizedBox(width: 8),
                     Flexible(

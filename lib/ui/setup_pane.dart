@@ -11,6 +11,7 @@ import '../theme.dart';
 import 'dialogs.dart';
 import 'doc_pane.dart';
 import 'panel.dart';
+import 'panes.dart';
 
 /// Um painel de configuração: os arquivos que o Claude Code lê de uma pasta,
 /// listados e editáveis, no lugar de um terminal.
@@ -361,10 +362,14 @@ class _SetupPaneState extends State<SetupPane> {
         tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
-            _SetupHeader(
+            PaneGrab(
               store: widget.store,
               tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
+              child: _SetupHeader(
+                store: widget.store,
+                tab: widget.tab,
+                dimmed: widget.showFocus && !widget.focused,
+              ),
             ),
             Expanded(
               child: Row(
@@ -481,7 +486,6 @@ class _SetupHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final setup = tab.setup!;
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     return Container(
       height: 42,
       decoration: paneHeaderBox(store.tintOf(tab)),
@@ -497,7 +501,7 @@ class _SetupHeader extends StatelessWidget {
                   Flexible(
                     child: Text(tab.title, overflow: TextOverflow.ellipsis, style: paneTitleStyle),
                   ),
-                  PaneKeyHint(index: index),
+                  PaneKeyHint(chord: tab.hotkey),
                   if (box.maxWidth >= 190) ...[
                     const SizedBox(width: 8),
                     Flexible(

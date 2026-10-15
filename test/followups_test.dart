@@ -187,8 +187,8 @@ void main() {
     });
 
     // O painel que um passo abre é filho de quem o abriu: ele entra na lista
-    // logo atrás do pai, que é a ordem da lateral e do ⌘1..9. Solto no fim
-    // dela ele aparecia a cinco linhas do fluxo de que fazia parte.
+    // logo atrás do pai, que é a ordem da lateral. Solto no fim dela ele
+    // aparecia a cinco linhas do fluxo de que fazia parte.
     test('a step that opens a panel hangs it on the session it came from', () async {
       final (store, tab) = storeWithPanel();
       final avulso = panel(tab.folder, 't9', 'outra coisa');

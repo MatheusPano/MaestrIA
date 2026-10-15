@@ -218,7 +218,7 @@ void main() {
       const chord = MxChord(LogicalKeyboardKey.keyT, control: true, shift: true);
       expect(chord.label, 'Ctrl+Shift+T');
       expect(chord.id, 'ctrl+shift+t');
-      expect(MxChord.slot(0).label, 'Alt+1');
+      expect(const MxChord(LogicalKeyboardKey.digit1, alt: true).label, 'Alt+1');
       expect(const MxChord(LogicalKeyboardKey.pageDown, control: true).label, 'Ctrl+PgDn');
       expect(MxChord.paste.first.label, 'Ctrl+Shift+V');
     });
@@ -243,8 +243,8 @@ void main() {
       }
     });
 
-    test('nenhum padrão pisa no copiar, no colar ou nas nove sessões', () {
-      final fixed = {MxChord.copy, ...MxChord.paste, for (var i = 0; i < 9; i++) MxChord.slot(i)};
+    test('nenhum padrão pisa no copiar ou no colar', () {
+      final fixed = {MxChord.copy, ...MxChord.paste};
       for (final action in MxAction.values) {
         for (final chord in action.defaults) {
           expect(fixed, isNot(contains(chord)), reason: '${action.label}: ${chord.label}');

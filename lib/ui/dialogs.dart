@@ -22,6 +22,7 @@ import 'confetti.dart';
 import 'flow.dart';
 import 'menus.dart';
 import 'panel.dart';
+import 'settings.dart' show ShortcutRecorder;
 
 InputDecoration _field(String label, [String? hint]) => InputDecoration(
   labelText: label,
@@ -336,6 +337,15 @@ Future<void> showPanelMenu(
         )
       else
         tintItem(tab.tint),
+      // A terceira coisa que se diz sobre um painel: a tecla que volta pra
+      // ele. A que ele já tem aparece na ponta, como nas outras linhas com
+      // atalho. Ver [MxTab.hotkey].
+      mxItem(
+        'hotkey',
+        glyph: Icon(Icons.keyboard_outlined, size: 14, color: Mx.fgDim),
+        label: tab.hotkey == null ? 'Definir atalho…' : 'Trocar atalho…',
+        chord: tab.hotkey?.label,
+      ),
       // --- ditado (vocalização) — fora desta versão --------------------------
       // // A outra porta do ditado. O atalho é o gesto de todo dia; esta linha é
       // // como se descobre que ele existe -- e o único caminho pra quem trocou a
@@ -512,6 +522,8 @@ Future<void> showPanelMenu(
       await showMoveToFeatureOrHotfix(context, store, tab);
     case 'rename':
       await showRenamePanel(context, store, tab);
+    case 'hotkey':
+      await showPanelHotkey(context, store, tab);
     case final pick when isTintChoice(pick):
       store.setTabTint(tab, tintPicked(pick));
     case 'done':
@@ -540,6 +552,78 @@ Future<void> showRenamePanel(BuildContext context, AppStore store, MxTab tab) as
     label: 'Título',
   );
   if (v != null) store.renameTab(tab, v);
+}
+
+/// A tecla que traz [tab] pra tela, gravada como nas configurações.
+///
+/// Recusa o que a tela de atalhos recusaria, e mais o que já tem dono: uma
+/// ação do app ou um comando de plugin. Os dois vêm antes dos painéis no
+/// teclado, então a tecla nunca chegaria aqui -- e roubar delas daqui seria
+/// mexer nas configurações sem que elas estivessem na tela. A de outro painel
+/// é roubada, sim: ver [AppStore.setHotkey].
+Future<void> showPanelHotkey(BuildContext context, AppStore store, MxTab tab) async {
+  String? rejected;
+  final MxChord? current = tab.hotkey;
+  // `(chord,)` é "fica com esta"; `(null,)` é "tira a que tem"; null é
+  // desistir.
+  final picked = await showDialog<(MxChord?,)>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        backgroundColor: Mx.bgSidebar,
+        title: Text('Atalho de "${tab.title}"', style: const TextStyle(fontSize: 15)),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                current == null
+                    ? 'A combinação que traz este painel pra tela, de onde você estiver.'
+                    : 'Hoje é ${current.label}. Pressione outra pra trocar.',
+                style: TextStyle(fontSize: 12, color: Mx.fgDim),
+              ),
+              const SizedBox(height: 12),
+              ShortcutRecorder(
+                onCancel: () => Navigator.pop(ctx),
+                onCaptured: (chord) {
+                  final why =
+                      chord.rejection ??
+                      switch (store.keymap.owner(chord)) {
+                        final action? => 'já é o atalho de "${action.label}"',
+                        null => store.plugins.commands
+                            .where((c) => c.key == chord)
+                            .map((c) => 'já é a tecla de "${c.title}", de um plugin')
+                            .firstOrNull,
+                      };
+                  if (why != null) {
+                    setState(() => rejected = '${chord.label}: $why');
+                    return;
+                  }
+                  Navigator.pop(ctx, (chord,));
+                },
+              ),
+              if (rejected case final why?) ...[
+                const SizedBox(height: 8),
+                Text(why, style: TextStyle(fontSize: 11, color: Mx.red)),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          if (current != null)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, (null,)),
+              child: Text('Remover atalho', style: TextStyle(color: Mx.red)),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+        ],
+      ),
+    ),
+  );
+  if (picked == null) return;
+  store.setHotkey(tab, picked.$1);
 }
 
 /// "Essa funcionou": the mark, wherever it is asked for.

@@ -66,12 +66,6 @@ class MxChord {
       ? MxChord(key, control: true, shift: true, alt: alt)
       : this;
 
-  /// A tecla da enésima sessão da lateral, contada de zero: ⌘1 no macOS,
-  /// Alt+1 no Linux — que é onde o gnome-terminal põe as abas, e porque lá o
-  /// Super+1 é da dock.
-  static MxChord slot(int index) =>
-      MxChord(LogicalKeyboardKey(0x31 + index), meta: !linux, alt: linux);
-
   /// Copiar a seleção do painel. No Linux o Ctrl+C é do processo, então é
   /// Ctrl+Shift+C, como em todo terminal de lá.
   static MxChord get copy => linux
@@ -114,11 +108,6 @@ class MxChord {
     if (isModifier(key)) return null;
     if (!_known) return 'essa tecla não dá pra usar num atalho';
     if (reserved[this] case final why?) return why;
-    // As teclas das sessões da lateral não estão no mapa: o `CallbackShortcuts`
-    // dispara todos os que casam, e a mesma tecla faria as duas coisas.
-    for (var i = 0; i < 9; i++) {
-      if (this == slot(i)) return 'é a tecla da ${i + 1}ª sessão da lateral';
-    }
     if (!meta && !control && !alt && !_isFunction) {
       return linux
           ? 'precisa de Ctrl ou Alt — sem modificador a tecla sumiria do terminal'

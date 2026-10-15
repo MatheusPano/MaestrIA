@@ -23,9 +23,11 @@ class MxKeys {
   static Map<ShortcutActivator, VoidCallback> bindings(AppStore store, BuildContext context) => {
     for (final action in MxAction.values)
       for (final chord in store.keymap[action]) chord.activator: () => run(action, store, context),
-    // Os únicos que não passam pelas configurações: são nove teclas que dizem
-    // "a enésima sessão", e escolher uma a uma seria configurar uma régua.
-    for (var i = 0; i < digits.length; i++) MxChord.slot(i).activator: () => store.selectIndex(i),
+    // As teclas dos painéis, depois das ações: é a mesma ordem do terminal, e
+    // a que [AppStore.bindShortcut] garante tirando do painel a tecla que uma
+    // ação passou a usar. Ver [MxTab.hotkey].
+    for (final tab in store.tabs)
+      if (tab.hotkey case final k?) k.activator: () => store.select(tab),
     // As teclas dos plugins não entram aqui: um [SingleActivator] só casa a
     // tecla lógica, e é justamente ela que as teclas mortas do macOS trocam.
     // Quem as atende é o [Focus] de `_Keys` (em `main.dart`) e o terminal --
@@ -39,9 +41,9 @@ class MxKeys {
   /// no app), então pegava a tecla primeiro: ⌘⌫ na busca da lateral, que é
   /// "apagar até o começo da linha", fechava o painel em foco e matava a
   /// sessão dele. E ele roda *todo* binding que casa, de modo que um ⌘1
-  /// dado a uma ação disparava ela e a primeira sessão juntas -- aqui o
-  /// primeiro que casa é o que vale, e as ações vêm antes das sessões, como
-  /// no terminal.
+  /// dado a uma ação disparava ela e o painel com a mesma tecla juntos --
+  /// aqui o primeiro que casa é o que vale, e as ações vêm antes dos painéis,
+  /// como no terminal.
   static KeyEventResult dispatch(Map<ShortcutActivator, VoidCallback> bindings, KeyEvent event) {
     if (_typing && _editing.contains(event.logicalKey)) return KeyEventResult.ignored;
     for (final b in bindings.entries) {
@@ -172,15 +174,11 @@ class MxKeys {
     }
   }
 
-  static const List<LogicalKeyboardKey> digits = [
-    LogicalKeyboardKey.digit1,
-    LogicalKeyboardKey.digit2,
-    LogicalKeyboardKey.digit3,
-    LogicalKeyboardKey.digit4,
-    LogicalKeyboardKey.digit5,
-    LogicalKeyboardKey.digit6,
-    LogicalKeyboardKey.digit7,
-    LogicalKeyboardKey.digit8,
-    LogicalKeyboardKey.digit9,
-  ];
+  /// O painel cuja tecla é este evento, se algum. Ver [MxTab.hotkey].
+  static MxTab? panelFor(AppStore store, KeyEvent event) {
+    for (final tab in store.tabs) {
+      if (tab.hotkey?.accepts(event) ?? false) return tab;
+    }
+    return null;
+  }
 }

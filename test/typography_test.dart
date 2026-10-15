@@ -9,7 +9,6 @@ import 'package:maestria/services/shortcuts.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/theme.dart';
 import 'package:maestria/ui/doc_pane.dart';
-import 'package:maestria/ui/keys.dart';
 import 'package:maestria/ui/settings.dart';
 import 'package:maestria/ui/terminal_pane.dart';
 import 'package:xterm/xterm.dart';
@@ -187,9 +186,7 @@ void main() {
       expect(MxAction.zoomIn.defaults.map((c) => c.label), containsAll(['⌘=', '⇧⌘=']));
     });
 
-    test('⌘0 não é uma das nove sessões da lateral', () {
-      // ⌘1 a ⌘9 são fixos e não passam pelo keymap; ⌘0 tinha que sobrar.
-      expect(MxKeys.digits, isNot(contains(LogicalKeyboardKey.digit0)));
+    test('⌘0 é do tamanho padrão', () {
       expect(
         MxKeymap().owner(const MxChord(LogicalKeyboardKey.digit0, meta: true)),
         MxAction.zoomReset,

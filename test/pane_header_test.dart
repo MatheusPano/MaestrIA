@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maestria/models.dart';
 import 'package:maestria/services/layout.dart';
+import 'package:maestria/services/shortcuts.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/theme.dart';
 import 'package:maestria/ui/panel.dart';
@@ -374,9 +375,21 @@ void main() {
       final store = AppStore();
       addTearDown(store.dispose);
       final tab = panel(store);
+      tab.hotkey = const MxChord(LogicalKeyboardKey.keyG, alt: true, meta: true);
       await pumpPane(tester, store, tab);
 
-      expect(find.descendant(of: find.byType(PaneKeyHint), matching: find.text('⌘1')), findsOne);
+      expect(find.descendant(of: find.byType(PaneKeyHint), matching: find.text('⌥⌘G')), findsOne);
+    });
+
+    testWidgets('sem tecla dada, não diz nenhuma -- nem a da posição', (tester) async {
+      final store = AppStore();
+      addTearDown(store.dispose);
+      await pumpPane(tester, store, panel(store));
+
+      expect(
+        find.descendant(of: find.byType(PaneKeyHint), matching: find.byType(Text)),
+        findsNothing,
+      );
     });
   });
 

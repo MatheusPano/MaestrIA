@@ -15,7 +15,9 @@ import 'claude_mark.dart';
 import 'dialogs.dart';
 import 'keys.dart';
 import 'panel.dart';
+import 'panes.dart';
 import 'result_strip.dart';
+import 'session_cards.dart';
 import 'suggestions.dart';
 
 /// One pane: header that says what this panel is, then the pty.
@@ -84,12 +86,16 @@ class _TerminalPaneState extends State<TerminalPane> {
         tint: widget.store.tintOf(widget.tab),
         child: Column(
           children: [
-            _PaneHeader(
+            PaneGrab(
               store: widget.store,
               tab: widget.tab,
-              dimmed: widget.showFocus && !widget.focused,
-              resultOpen: _resultOpen,
-              onToggleResult: () => setState(() => _resultOpen = !_resultOpen),
+              child: _PaneHeader(
+                store: widget.store,
+                tab: widget.tab,
+                dimmed: widget.showFocus && !widget.focused,
+                resultOpen: _resultOpen,
+                onToggleResult: () => setState(() => _resultOpen = !_resultOpen),
+              ),
             ),
             Expanded(
               child: Stack(
@@ -402,6 +408,12 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       MxKeys.run(action, widget.store, context);
       return KeyEventResult.handled;
     }
+    // As teclas dos painéis, pelo mesmo motivo: escolhidas à mão, qualquer
+    // uma delas pode ser das que a keytab engole.
+    if (MxKeys.panelFor(widget.store, event) case final target?) {
+      widget.store.select(target);
+      return KeyEventResult.handled;
+    }
     // Depois do mapa do app, pelo mesmo motivo: as teclas de plugin também
     // seriam engolidas pela keytab antes de chegar lá em cima.
     if (widget.store.plugins.commandFor(event, except: widget.store.keymap) case final command?) {
@@ -454,8 +466,6 @@ class _PaneHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A tecla deste painel, pra dizer no cabeçalho. Ver [PaneKeyHint].
-    final index = store.tabs.indexWhere((t) => t.id == tab.id);
     // The same menu the sidebar row offers: the header *is* this panel.
     return GestureDetector(
       onSecondaryTapDown: (d) => showPanelMenu(context, store, tab, d.globalPosition),
@@ -495,7 +505,7 @@ class _PaneHeader extends StatelessWidget {
                     // duas juntas são o par com que a lateral identifica uma
                     // linha, e num painel estreito é justamente ele que tem
                     // que sobrar. Ver [PaneKeyHint].
-                    PaneKeyHint(index: index),
+                    PaneKeyHint(chord: tab.hotkey),
                     if (box.maxWidth >= 170) ...[
                       const SizedBox(width: 8),
                       _faded(
@@ -874,7 +884,15 @@ class _ContextChip extends StatelessWidget {
   }
 }
 
-/// Shown in place of a pane when nothing is open. Doubles as the cheat sheet.
+/// Shown in place of a pane when nothing is open, de um de dois jeitos.
+///
+/// Com sessões na lateral: os plugins numa faixa no topo e, embaixo, as
+/// sessões em cartões, pra trazer de volta com um clique.
+///
+/// Sem sessão nenhuma: os plugins grandes, como ícones de app, no meio da
+/// tela. É a tela inteira de quem usa o app só pelos plugins e nunca abre um
+/// painel -- pra essa pessoa uma caixa de "nenhum painel aberto" seria a
+/// tela dizendo, toda vez, que ela está usando errado.
 class EmptyPane extends StatelessWidget {
   // Deliberately not const: a const instance is canonicalised, so the element
   // tree would reuse it verbatim across a theme change and this pane would go
@@ -882,104 +900,85 @@ class EmptyPane extends StatelessWidget {
   // ignore: prefer_const_constructors_in_immutables
   EmptyPane({super.key, this.store});
 
-  /// Só pra contar o que ficou rodando na lateral: desde que o X do header
-  /// apenas tira do painel, esta tela vazia não quer mais dizer que não há
-  /// nada acontecendo.
+  /// De onde vêm os plugins e as sessões: desde que o X do header apenas tira
+  /// do painel, esta tela vazia não quer mais dizer que não há nada
+  /// acontecendo.
   final AppStore? store;
 
-  /// O que a cola ensina, na ordem em que se aprende o app.
-  ///
-  /// Ações e não teclas: as teclas são escolhidas nas configurações agora, e
-  /// uma cola escrita à mão passaria a ensinar a combinação errada no dia em
-  /// que alguém trocasse a dela. Sem store — que é como os testes montam esta
-  /// tela — ficam os padrões, que é o que aquela janela teria mesmo.
-  static const _cheatSheet = [
-    MxAction.newClaude,
-    MxAction.newShell,
-    MxAction.newTask,
-    MxAction.nextPane,
-    MxAction.nextSession,
-    MxAction.closePane,
-    MxAction.settings,
-  ];
-
-  List<(String, String)> get _keys => [
-    for (final action in _cheatSheet)
-      if ((store?.keymap[action] ?? action.defaults) case final chords when chords.isNotEmpty)
-        (chords.map((c) => c.label).join('  '), action.label),
-    // Fixo, e por isso escrito: são nove teclas, não uma escolha.
-    ('${MxChord.slot(0).label}…9', 'Ir pra enésima sessão'),
-  ];
-
-  String get _headline {
-    final live = store?.tabs.where((t) => !t.exited).length ?? 0;
-    if (live == 0) return 'Nenhum painel aberto';
-    if (live == 1) return '1 sessão rodando na lateral — clique nela pra trazer de volta';
-    return '$live sessões rodando na lateral — clique numa pra trazer de volta';
-  }
-
-  // Larga o bastante pras duas combinações de uma ação que tem duas — ⌃⇥ e
-  // ⌥⌘↓ são a mesma linha.
-  static double get _keysWidth => MxChord.linux ? 170 : 104;
-  static double get _cheatWidth => _keysWidth + 14 + 210;
+  static const _pad = 28.0;
 
   @override
   Widget build(BuildContext context) {
+    final store = this.store;
     return MxPanel(
       child: LayoutBuilder(
-        builder: (context, box) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.grid_view_rounded, size: 30, color: Mx.fgFaint),
-              const SizedBox(height: 14),
-              Text(_headline, style: TextStyle(color: Mx.fgDim, fontSize: 13)),
-              const SizedBox(height: 8),
-              // A tela se divide por arraste e só por arraste, então é aqui que
-              // isso é dito: sem um atalho pra listar, era o único gesto do app
-              // que não aparecia em lugar nenhum.
-              SizedBox(
-                width: 330,
-                child: Text(
-                  'Arraste uma sessão da lateral pra cá — pela borda de um painel, '
-                  'ela divide a tela; pelo meio, toma o lugar dele',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
-                ),
-              ),
-              // Num painel estreito a cola não cabe, e cortada ela ensina metade
-              // de um atalho: melhor não mostrar nada que mostrar isso.
-              if (box.maxWidth >= _cheatWidth) ...[
-                const SizedBox(height: 22),
-                for (final (keys, what) in _keys)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: _keysWidth,
-                          child: Text(
-                            keys,
-                            textAlign: TextAlign.right,
-                            style: TextStyle(fontFamily: Mx.mono, fontSize: 11.5, color: Mx.fg),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        SizedBox(
-                          width: 210,
-                          child: Text(what, style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
-                        ),
-                      ],
+        builder: (context, box) {
+          final width = (box.maxWidth - 2 * _pad).clamp(0.0, double.infinity);
+          final live = store == null ? 0 : SessionCards.of(store).length;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(_pad),
+            child: store == null
+                ? const SizedBox.shrink()
+                : live == 0
+                ? ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minWidth: width,
+                      minHeight: (box.maxHeight - 2 * _pad).clamp(0.0, double.infinity),
                     ),
-                  ),
-              ],
-            ],
-          ),
-        ),
+                    child: Center(child: _apps(store, width)),
+                  )
+                : _sessions(store, width),
+          );
+        },
       ),
     );
   }
+
+  /// Sem sessão nenhuma: os plugins como apps, e as sessões num rodapé baixo
+  /// -- ditas, pra quem as procura, sem disputar a tela com o que se usa.
+  Widget _apps(AppStore store, double width) => SizedBox(
+    width: width,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'O que vamos abrir?',
+          style: TextStyle(color: Mx.fg, fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          store.railPlugins.isEmpty
+              ? 'Instale um plugin, ou abra uma sessão pela lateral'
+              : 'Escolha um plugin, ou abra uma sessão pela lateral',
+          style: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+        ),
+        const SizedBox(height: 32),
+        PluginTiles(store: store, width: width, large: true),
+      ],
+    ),
+  );
+
+  /// Sessões na lateral: os plugins numa faixa e as sessões em cartões.
+  Widget _sessions(AppStore store, double width) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      PluginTiles(store: store, width: width),
+      const SizedBox(height: 30),
+      SessionCards(store: store, width: width),
+      // A tela se divide por arraste e só por arraste, então é aqui que isso
+      // é dito: sem um atalho pra listar, era o único gesto do app que não
+      // aparecia em lugar nenhum.
+      SizedBox(
+        width: width,
+        child: Text(
+          'Arraste um cartão ou uma sessão da lateral pra cá — pela borda de um '
+          'painel, ela divide a tela; pelo meio, toma o lugar dele',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Mx.fgFaint, fontSize: 11.5, height: 1.45),
+        ),
+      ),
+    ],
+  );
 }
 
 /// The "and then" a panel is carrying.
