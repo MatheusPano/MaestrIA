@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
@@ -38,7 +39,11 @@ class TermSession {
   int? exitCode;
   void Function()? onExit;
 
-  int? get pid => _pty?.pid;
+  int? get pid => _pty?.pid ?? fakePid;
+
+  /// O pid de um painel que, sob teste, não tem processo nenhum.
+  @visibleForTesting
+  int? fakePid;
 
   void startShell(String cwd) => _start(['-l'], cwd, null);
 

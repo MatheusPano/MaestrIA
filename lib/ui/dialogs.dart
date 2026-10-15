@@ -2276,9 +2276,12 @@ class _ChatRowState extends State<_ChatRow> {
     final chat = widget.chat;
     final standing = widget.store.standingOf(chat);
     // A cor do aviso é a do estado: verde é a conversa que já está aqui na
-    // tela, amarelo é a que não abre -- as mesmas duas de [ClaudeStatusUi].
+    // tela, amarelo é a que não abre -- as mesmas duas de [ClaudeStatusUi]. A
+    // de segundo plano abre, só que de outro jeito, e a cor de destaque diz
+    // que o clique faz alguma coisa.
     final tint = switch (standing) {
       ChatStanding.onScreen => Mx.green,
+      ChatStanding.background => Mx.accent,
       ChatStanding.live || ChatStanding.gone => Mx.yellow,
       ChatStanding.fresh => Mx.fgFaint,
     };
