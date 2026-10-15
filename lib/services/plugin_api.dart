@@ -302,6 +302,9 @@ class PluginApi {
           blocks: PluginView.blocksFrom(p['blocks']),
           rfw: _rfw(p),
           modal: p['modal'] == true,
+          from: p['from'] as String?,
+          width: (p['width'] as num?)?.toDouble(),
+          height: (p['height'] as num?)?.toDouble(),
         );
         return {'tabId': tab.id};
       case 'view.update':

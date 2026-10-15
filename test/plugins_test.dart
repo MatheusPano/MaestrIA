@@ -729,6 +729,11 @@ void main() {
       expect(picked, '/x/app-b');
     });
 
+    test('a vassoura de limpar é um ícone da tabela, e o clear continua o bloqueio', () {
+      expect(pluginIcon('clean'), Icons.cleaning_services_outlined);
+      expect(pluginIcon('clear'), Icons.block_rounded);
+    });
+
     testWidgets('o svg da pasta do plugin vira o ícone, e não sai da pasta', (tester) async {
       final dir = writePlugin(
         tmp.path,
@@ -1696,6 +1701,49 @@ void main() {
       await tester.tap(find.text('main.dart'));
       expect(store.actions, ['preparar', 'diff']);
       await mouse.removePointer();
+    });
+
+    testWidgets('a árvore de arquivos: o ícone pequeno com as cores dele e o nome na cor do git', (
+      tester,
+    ) async {
+      const svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#F7DF1E"/></svg>';
+      final tab = MxTab(
+        id: 'tab1',
+        folder: Folder(root: '/repo', name: 'repo'),
+        kind: TabKind.plugin,
+        cwd: '/repo',
+        branch: '',
+        view: PluginView(
+          pluginId: 'p',
+          pluginName: 'P',
+          id: 'v',
+          title: 'editor',
+          blocks: PluginView.blocksFrom([
+            {
+              'type': 'list',
+              'flat': true,
+              'items': [
+                {'title': 'app.js', 'avatar': {'svg': svg, 'size': 16}, 'titleTone': 'yellow'},
+                {'title': 'docker', 'avatar': {'svg': svg}},
+              ],
+            },
+          ]),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(width: 400, height: 300, child: PluginPane(store: _ActionsStore(), tab: tab)),
+          ),
+        ),
+      );
+      final pictures = find.byType(SvgPicture);
+      expect(pictures, findsNWidgets(2));
+      expect(tester.getSize(pictures.first), const Size(16, 16), reason: 'avatar.size encolhe o desenho');
+      expect(tester.getSize(pictures.last), const Size(26, 26), reason: 'sem size, o de sempre da lista flat');
+      expect(tester.widget<Text>(find.text('app.js')).style!.color, Mx.yellow);
+      expect(tester.widget<Text>(find.text('docker')).style!.color, Mx.fg);
     });
 
     testWidgets('o menu de um item abre no botão direito e manda a ação escolhida', (tester) async {

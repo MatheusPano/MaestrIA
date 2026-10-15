@@ -74,11 +74,21 @@ IconData? pluginIcon(Object? name) => switch (name) {
   'network' => Icons.lan_outlined,
   'cpu' => Icons.memory_rounded,
   'trash' => Icons.delete_outline_rounded,
+  'clean' => Icons.cleaning_services_outlined,
   'globe' => Icons.public_rounded,
   'more' => Icons.more_horiz_rounded,
   'chevron' => Icons.chevron_right_rounded,
   'filter' => Icons.filter_list_rounded,
   'layers' => Icons.layers_outlined,
+  'send' => Icons.send_rounded,
+  'chat' => Icons.chat_bubble_outline_rounded,
+  'pets' => Icons.pets_rounded,
+  'photo' => Icons.image_outlined,
+  'home' => Icons.home_outlined,
+  'moon' => Icons.bedtime_outlined,
+  'shield' => Icons.verified_user_outlined,
+  'close' => Icons.close_rounded,
+  'palette' => Icons.palette_outlined,
   _ => null,
 };
 
@@ -1955,7 +1965,13 @@ class _ListRowState extends State<_ListRow> {
         ? Color.alphaBlend(Mx.bgHover, widget.surface)
         : widget.surface;
     final showActions = actions.isNotEmpty && (_hover || widget.alwaysActions);
-    final avatarSize = widget.flat ? 26.0 : 30.0;
+    // `avatar.size` encolhe o desenho: o ícone de um arquivo numa árvore tem o
+    // tamanho de uma letra, e não o do quadrado de um container.
+    final avatarSpec = item['avatar'];
+    final customAvatar = avatarSpec is Map && avatarSpec['size'] is num
+        ? (avatarSpec['size'] as num).toDouble().clamp(10.0, 40.0)
+        : null;
+    final avatarSize = customAvatar ?? (widget.flat ? 26.0 : 30.0);
     // A seta de abrir e fechar (`expanded`): o clique nela manda `toggle`, ou
     // a ação da linha quando o plugin não separou as duas.
     final toggle = (item['toggle'] ?? item['action']) as String?;
@@ -2005,7 +2021,7 @@ class _ListRowState extends State<_ListRow> {
                   dim: dim,
                   status: item['status'],
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: customAvatar != null ? 7 : 10),
               ] else if (widget.icon case final icon?) ...[
                 Icon(icon, size: 16, color: widget.tone),
                 const SizedBox(width: 10),
@@ -2021,8 +2037,12 @@ class _ListRowState extends State<_ListRow> {
                       style: TextStyle(
                         fontSize: widget.size - 0.5,
                         fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
+                        // `titleTone`: o nome na cor do estado, como o
+                        // arquivo mudado no git da árvore do VS Code.
                         color: selected
                             ? onAccent
+                            : item['titleTone'] != null
+                            ? _PluginPaneState._tone(item['titleTone'])
                             : dim
                             ? Mx.fgDim
                             : Mx.fg,

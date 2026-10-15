@@ -341,7 +341,7 @@ Os eventos só chegam depois de o `initialize` voltar.
 | `session.openShell` | `cwd?`, `command?`, `label?`, `owned?`, `tag?`, `embedded?` | `{ tabId }` · `sessions.create`. Com `owned: true` o terminal é do plugin: sai dos avulsos e mora na aba dele (a aba genérica o lista; quem desenha a própria aba o desenha), e não volta quando o app reabre. `tag` é um texto seu que volta no `sessions.list` desse terminal — o id do host, por exemplo. Com `embedded: true` (que já é `owned`) o terminal não vira painel: ele mora dentro de uma janela do plugin, desenhado por um bloco `terminal` com esse `tabId` — a aba Terminal de um container. Fechar a janela o encerra junto. |
 | `session.close` | `tabId` | — fecha um terminal que o plugin abriu com `owned` (só esses) |
 | `pane.openMarkdown` | `markdown`, `title?` | `{ tabId }`, no painel de leitura |
-| `view.open` | `viewId`, `title?`, `blocks` (ou `rfw` e `data`), `modal?` | `{ tabId }` — com `rfw` a janela é a interface que o plugin monta (veja "A interface em widgets"). Com `modal: true` ela abre em modal, por cima da tela e fora da grade (veja "Janelas em modal") |
+| `view.open` | `viewId`, `title?`, `blocks` (ou `rfw` e `data`), `modal?`, `from?`, `width?`, `height?` | `{ tabId }` — com `rfw` a janela é a interface que o plugin monta (veja "A interface em widgets"). Com `modal: true` ela abre em modal, por cima da tela e fora da grade (veja "Janelas em modal") |
 | `view.update` | `viewId`, `title?`, `blocks?`, `rfw?`, `data?` | `{ open }`: `false` quando você fechou a janela. `data` junta: cada chave de cima troca a que havia. Mandar `blocks` volta pros blocos. |
 | `view.appendLines` | `viewId`, `id`, `lines` | `{ open }`: junta linhas a um bloco `console` sem redesenhar a janela |
 | `view.clearLines` | `viewId`, `id` | — |
@@ -414,7 +414,11 @@ widget root = Column(children: [
   dados. `rfw.root` é o widget de cima (`root`, se não vier). Um erro no texto
   aparece na própria janela, em vermelho, com a linha.
 - **Os dados (`data`)** trocam sem reler nada: cada chave de cima substitui a que
-  havia. Números que são tamanhos (`13.0`, `[8.0, 0.0]`) ficam no texto: pelo json
+  havia. Uma atualização só de dados redesenha só aquela janela (o resto do app nem
+  fica sabendo), e só o que depende das chaves que vieram -- então mande só as que
+  mudaram: numa cena animada, mandar tudo a cada passo é o que derruba quadros. Um
+  `Svg` e cada `Sprite` ficam numa camada de pintura só deles: o que se mexe por cima
+  não repinta o fundo. Números que são tamanhos (`13.0`, `[8.0, 0.0]`) ficam no texto: pelo json
   um `13.0` chega como inteiro, e o rfw lê tamanho como double. Nos dados vão
   textos, listas, booleanos e cores.
 - **O tema:** a janela põe `data.theme` com as cores em vigor, como inteiros
@@ -439,8 +443,91 @@ widget root = Column(children: [
 | `Draggable` | `payload`, `targets`, `width`, `child`, `feedback?`, `disabled?` — o que dá pra arrastar: o cartão de um quadro. `payload` é o texto que viaja (o id do cartão); `targets`, os `id` dos `DropTarget` que o aceitam (sem ele, todos). Enquanto voa, o que se move é o `feedback` (ou o próprio `child`), um pouco inclinado e com sombra, na largura `width`; o lugar de onde saiu fica apagado. |
 | `DropTarget` | `id`, `onDrop`, `child`, `hint?`, `color?`, `hoverColor?`, `radius?` — onde soltar: a coluna. Com algo no ar que ele aceita, a borda acende de leve; com o cursor em cima, acende de vez e mostra o `hint` embaixo ("solte pra iniciar"). O que cai vai no `onDrop` com `payload` e `to` (o `id` do alvo) a mais nos argumentos; quem decide o que isso quer dizer é o plugin. |
 
+| `CodeEditor` | `doc`, `text`, `revision?`, `language?`, `line?`, `column?`, `jump?`, `readOnly?`, `wordWrap?`, `lineNumbers?`, `fontSize?`, `autofocus?`, `hint?`, `onChange`, `onSave`, `onCursor` — um editor de código: cor de sintaxe, número de linha, dobrar blocos, buscar e trocar (⌘F, ⌘⌥F), comentar (⌘/) e desfazer. Veja abaixo. |
+| `TextInput` | `id`, `placeholder?`, `value?`, `multiline?`, `maxLines?`, `autofocus?`, `disabled?`, `hint?`, `clear?`, `sendIcon?`, `fontSize?`, `onSubmit` — um campo de texto. O texto mora na janela, por `id`; o enter (ou o botão `sendIcon`) manda o `onSubmit` com `text`, e num `multiline` o shift+enter quebra a linha. O plugin esvazia o campo mudando o número do `clear` (depois de aceitar o que veio). `disabled` trava, mostrando o `hint`. `onPasteImage` dispara no ⌘V de uma imagem (o texto continua colando no campo), e `allowEmpty` deixa o enter mandar o campo vazio. Com o campo vazio, `onArrow` recebe a seta pra cima ou pra baixo (`key: "up"` ou `"down"`) — andar pelas opções de uma pergunta. `commands` (`[{ name, description? }]`) são os comandos de barra: com o campo começando por `/` e ainda sem espaço, a lista dos que combinam abre em cima dele (as setas andam, o tab completa, o enter manda o escolhido, o esc fecha); o filtro é na janela, e o plugin só recebe o `onSubmit`. O `initialize` diz `textInput: 1` (e `pasteImage: 1` e `arrows: 1` com os de cada um). |
+| `Anchor` | `id`, `child` — marca o `child` como o lugar de onde um modal sai e pra onde volta (`view.open` com `modal` e `from`: o chat que cresce a partir do boneco). Vale entre janelas do mesmo plugin. |
+| `Selectable` | `child` — uma área de seleção só pro que está dentro: arrastar atravessa parágrafos, balões e mensagens, e o ⌘C copia tudo (o chat). Um `Markdown` dentro dela é dela; solto, tem a sua. Cada pedaço que começa embaixo do anterior vai numa linha nova no que é copiado. Com uma área rolável no meio, ponha o `Selectable` por fora dela (o arraste rola sozinho) e um `SelectionLines` por dentro, em volta do conteúdo. O `initialize` diz `selectable: 1`. |
+| `Markdown` | `text`, `fontSize?` — o markdown do painel de leitura (GFM: tabela, lista de tarefas, código), com a mesma folha de estilo e os links abrindo como lá. O `initialize` diz `markdown: 1`. |
+| `Sprite` | `sheet`, `columns`, `rows`, `row`, `start?`, `frames`, `fps`, `width?`, `height?`, `flip?`, `paused?`, `loop?` — um quadro de uma folha de sprites (um `.png` da pasta do plugin), animado pela própria janela. Veja abaixo. |
+| `ZoomView` | `child`, `maxScale?`, `command?`, `commandRev?`, `onZoom?` — o conteúdo com zoom de mapa: a bolinha do mouse aproxima e afasta em volta do cursor, arrastar move, e o trackpad rola com dois dedos e dá zoom na pinça. O `child` ocupa o tamanho do `ZoomView` (um `FittedBox` dentro faz caber), e a escala 1 é ele inteiro: dá pra aproximar até `maxScale` (6, se não vier). Os botões do plugin mandam `command` (`"in"`, `"out"` ou `"fit"`), que vale cada vez que o `commandRev` muda; o `onZoom` chega com `scale` quando o zoom assenta. O `initialize` diz `zoom: 1`. |
+
 O `initialize` diz `rfw: 1` numa Maestria que desenha widgets, e `rfw: 2` numa que tem
-também o `Draggable` e o `DropTarget`; sem ele, desenhe blocos.
+também o `Draggable` e o `DropTarget`; sem ele, desenhe blocos. `editor: 1` diz que
+ela tem o `CodeEditor`, `sprites: 1`, o `Sprite`, e `zoom: 1`, o `ZoomView`.
+
+### Sprites
+
+O rfw já anima o que muda de valor: um `Positioned` com `duration` (em ms, inteiro) e
+`curve` vai do lugar antigo pro novo sozinho, e um `Container` muda de cor devagar.
+Trocar o desenho a cada quadro, não: seria o plugin mandando dados várias vezes por
+segundo. O `Sprite` resolve isso na janela.
+
+```
+Sprite(
+  sheet: "sprites/boneco.png", columns: 4, rows: 8,
+  row: data.boneco.row, frames: 4, fps: 8,
+  flip: data.boneco.flip, width: 16.0, height: 24.0,
+)
+```
+
+- **A folha** é um `.png` dentro da pasta do plugin (um caminho que sai dela não abre),
+  numa grade de `columns` × `rows` quadros do mesmo tamanho.
+- **A animação** é a linha `row`, do quadro `start` (0, se não vier) até
+  `start + frames - 1`, a `fps` quadros por segundo. Ela dá a volta; com `loop: false`
+  para no último. `paused: true`, ou `fps: 0`, fica no primeiro.
+- O plugin só manda dados quando a animação muda: os mesmos `row`, `start`, `frames` e
+  `fps` de novo (o boneco andou) seguem do quadro em que estavam, e uma animação nova
+  começa do primeiro.
+- O desenho sai **sem suavizar** — pixel art continua pixel em qualquer escala, até
+  dentro de um `FittedBox` —, e `flip: true` espelha (a caminhada pra esquerda é a da
+  direita ao contrário).
+- `width` e `height` são o tamanho na tela; sem eles, o do quadro. Os números do
+  `Sprite` podem vir dos dados como inteiros. Os do `Positioned` e do `SizedBox`, não:
+  um `start: data.x` precisa chegar como `120.001`, e não `120`.
+
+O plugin `escritorio` do `maestria-plugins` é o exemplo completo: os bonecos andando
+entre as salas, digitando e acenando.
+
+### O editor de código
+
+O texto que você digita mora na janela, e não no plugin: cada `doc` (um caminho, um
+id seu) tem um buffer com o texto, o desfazer, o cursor e a rolagem, que vive enquanto
+a janela está aberta. Trocar de arquivo numa janela de abas ou ir pras sessões e voltar
+não perde nada, e o plugin não precisa ecoar o texto a cada tecla.
+
+```
+CodeEditor(
+  doc: data.file.path, text: data.file.text, revision: data.file.rev,
+  language: data.file.language, line: data.file.line, jump: data.file.jump,
+  onChange: event "change" {}, onSave: event "save" {}, onCursor: event "cursor" {},
+)
+```
+
+- **`text`** só é lido quando o `doc` aparece pela primeira vez na janela. Mandar os
+  dados de novo com o mesmo `text` não apaga o que foi digitado.
+- **`revision`** é como o plugin troca o texto de um buffer que já existe: um número
+  novo e o `text` que veio junto toma o lugar (o arquivo mudou no disco, reverter).
+  O cursor fica na mesma linha.
+- **`onChange`** chega um pouco depois de você parar de digitar (350 ms), e também
+  quando o editor sai da tela, com `doc` e `text` — o texto inteiro. Um texto que veio
+  do plugin (o primeiro, ou o de uma `revision`) não volta.
+- **`onSave`** é o ⌘S, na hora, com `doc` e `text`. Gravar no disco é com o plugin.
+- **`onCursor`** diz `doc`, `line`, `column` (contando de 1) e `selected` (quantos
+  caracteres), a cada vez que o cursor para — pra uma barra de "Ln 12, Col 4".
+- **`line`** (e `column`) com um **`jump`** novo levam o cursor até lá, no meio da tela:
+  o resultado de uma busca, o ir pra linha.
+- **`language`**: `dart`, `javascript`, `typescript`, `json`, `yaml`, `markdown`,
+  `python`, `ruby`, `go`, `rust`, `java`, `kotlin`, `swift`, `c`, `cpp`, `csharp`,
+  `objectivec`, `php`, `bash`, `powershell`, `css`, `scss`, `less`, `xml` (e html),
+  `vue`, `sql`, `dockerfile`, `makefile`, `ini` (e toml), `properties`, `graphql`,
+  `protobuf`, `gradle`, `groovy`, `lua`, `elixir`, `scala`, `haskell`, `perl`, `r`,
+  `nginx`, `diff` e `plaintext`. As cores são as do terminal do tema em vigor. Um nome
+  fora da lista abre sem cor.
+- O rfw não aceita `null` nos dados: um campo sem valor (o `line` sem pulo pedido) não
+  vai, em vez de ir vazio.
+
+O plugin `editor` do `maestria-plugins` é o exemplo completo: a árvore da pasta, as
+abas, o salvar e a vigia do disco.
 
 ## O flutuante
 
@@ -583,6 +670,12 @@ desmontar os painéis. O conteúdo é o de uma janela qualquer (blocos ou `rfw`)
   um `view.open` dela, com ou sem `modal`, só a traz pra frente.
 - Um modal por vez: um `view.open` em modal de outra janela toma o lugar do que
   estava aberto. Pedir em modal uma janela que já está na grade não a tira de lá.
+- **De onde ele sai:** `from` é o `id` de um `Anchor` numa janela do mesmo plugin
+  (o boneco do escritório). O modal abre crescendo a partir dela e, ao fechar (o x,
+  o esc, o clique fora ou o `view.close` do plugin), encolhe de volta pra onde ela
+  estiver agora. Sem `from`, ou com a âncora fora da tela, ele aparece no meio.
+  `width` e `height` pedem um tamanho (cabendo na janela); sem eles, o de sempre.
+  O `initialize` diz `modalFrom: 1`.
 
 O `initialize` diz `modal: 1` numa Maestria que o tem; numa de antes, o `modal` é
 ignorado e a janela abre na grade.
@@ -626,13 +719,14 @@ aba do docker desenha os containers como o OrbStack:
 
 | campo | |
 |---|---|
-| `avatar` | o quadrado arredondado e colorido na frente da linha, no lugar do `icon`: um nome de ícone (ou `.svg` da pasta do plugin), ou `{ icon?, text?, color?, shape?, plain?, svg? }` — `color` é um `tone`, `text` põe letras no lugar do desenho, `shape: "circle"` faz um círculo, `plain` tira a caixa. `svg` é um desenho inteiro em texto, com as cores dele (a janela não pinta por cima): o cubo colorido de cada container do docker. |
+| `avatar` | o quadrado arredondado e colorido na frente da linha, no lugar do `icon`: um nome de ícone (ou `.svg` da pasta do plugin), ou `{ icon?, text?, color?, shape?, plain?, svg? }` — `color` é um `tone`, `text` põe letras no lugar do desenho, `shape: "circle"` faz um círculo, `plain` tira a caixa. `svg` é um desenho inteiro em texto, com as cores dele (a janela não pinta por cima): o cubo colorido de cada container do docker. `size` troca o tamanho (26 numa lista `flat`, 30 nas outras): 16 é o ícone de um arquivo numa árvore. |
 | `status` | um `tone`: a bolinha no canto do avatar — no ar, subindo, caído. |
 | `dim` | a linha apagada, com o avatar cinza: o container parado ao lado dos que rodam. |
 | `strong` | o título em negrito: a linha de um projeto. |
 | `indent` | quantos níveis de recuo: os containers dentro do projeto. |
 | `expanded` | `true`/`false` põe a seta de abrir e fechar na frente. O clique nela manda `toggle` (ou a `action` da linha, sem `toggle`). Quem esconde os filhos é o plugin, como no `section`. Numa lista com alguma seta, as linhas sem seta guardam o lugar dela, e os avatares do mesmo nível ficam alinhados. |
 | `meta` | um texto curto à direita, sempre à vista — a porta publicada, o tamanho de uma imagem. Com o mouse em cima ele dá lugar às `actions`. `metaTone` pinta. |
+| `titleTone` | a cor do título: o arquivo mudado no git, numa árvore. |
 | `subtitleTone` | a cor do subtítulo. |
 | `selected` | a linha acesa, na cor de destaque: a do que está aberto numa janela. |
 
@@ -651,8 +745,9 @@ mande também `icon` e `tone` pra ela.
 `step-into`, `step-out`, `reload`, `restart`, `stop`, `devtools`, `bug`, `device`,
 `refresh`, `clear`, `copy`, `search`, `settings`, `calendar`, `report`, `receipt`,
 `open`, `add`, `remove`, `undo`, `branch`, `commit`, `push`, `pull`, `sync`,
-`server`, `edit`, `dot`, `box`, `stack`, `image`, `drive`, `network`, `cpu`, `trash`, `globe`,
-`more`. `tone`: `green`, `red`, `yellow`, `accent`, `purple`, `faint`, as do terminal `blue`,
+`server`, `edit`, `dot`, `box`, `stack`, `image`, `drive`, `network`, `cpu`, `trash`, `clean`, `globe`,
+`more`, `chevron`, `filter`, `layers`, `send`, `chat`, `pets`, `photo`, `home`, `moon`, `shield`,
+`close`, `palette`. `tone`: `green`, `red`, `yellow`, `accent`, `purple`, `faint`, as do terminal `blue`,
 `cyan`, `magenta`, `white` e `black` (pra quando as cores de estado não bastam: um avatar por imagem), ou um hex
 (`#4FC1FF`) — que é como uma configuração de cor chega num `tone`.
 

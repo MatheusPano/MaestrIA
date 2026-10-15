@@ -56,6 +56,13 @@ dependencies:
   # desenha com o Flutter de verdade. Ver `ui/plugin_rfw.dart`.
   rfw: ^1.1.4
 
+  # O editor de código dos plugins (o `CodeEditor` da interface em widgets):
+  # desenha só as linhas na tela, então um arquivo de dez mil linhas não pesa.
+  # O `re_highlight` é o highlight.js em Dart, de onde vêm as regras de cada
+  # linguagem. Ver `ui/plugin_editor.dart`.
+  re_editor: ^0.10.0
+  re_highlight: ^0.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

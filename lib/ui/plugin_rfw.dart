@@ -6,8 +6,15 @@ import 'package:rfw/rfw.dart';
 import '../services/plugins.dart';
 import '../services/store.dart';
 import '../theme.dart';
+import 'doc_pane.dart' show MxMarkdown;
 import 'menus.dart';
+import 'plugin_editor.dart';
+import 'plugin_input.dart';
+import 'plugin_modal.dart' show PluginAnchor;
 import 'plugin_pane.dart';
+import 'plugin_selection.dart';
+import 'plugin_sprite.dart';
+import 'plugin_zoom.dart';
 
 /// A janela que o plugin monta ele mesmo: uma árvore de widgets em texto (o
 /// formato do Remote Flutter Widgets) que a Maestria desenha com o Flutter de
@@ -42,6 +49,18 @@ class _PluginRfwState extends State<PluginRfw> {
 
   final Runtime _runtime = Runtime();
   final DynamicContent _content = DynamicContent();
+
+  /// O que já foi passado ao rfw, por chave: só o que chegou novo é passado de
+  /// novo. O plugin manda uma chave e as outras ficam; reaplicar todas a cada
+  /// atualização clonava e redesenhava até o que não mudou -- o fundo inteiro
+  /// do escritório a cada passo de um boneco.
+  final Map<String, Object?> _pushed = {};
+
+  /// A janela que está sendo ouvida (ver [PluginView.rfwChanges]).
+  PluginView? _listening;
+
+  /// O widget de cima desenhado da última vez: trocá-lo é trocar a interface.
+  String? _root;
   String? _library;
   String? _error;
   int _dataRevision = -1;
@@ -57,10 +76,40 @@ class _PluginRfwState extends State<PluginRfw> {
       ..update(_maestria, _localWidgets());
     _theme();
     Mx.chrome.addListener(_theme);
+    _listen();
+  }
+
+  @override
+  void didUpdateWidget(PluginRfw oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _listen();
+  }
+
+  /// Os dados de uma janela mudam sem o app inteiro ser avisado: ela se
+  /// redesenha sozinha.
+  void _listen() {
+    final view = widget.tab.view;
+    if (view == _listening) return;
+    _listening?.rfwChanges.removeListener(_changed);
+    _listening = view;
+    view?.rfwChanges.addListener(_changed);
+  }
+
+  /// Só dados novos: vão direto pro rfw, que reconstrói só o que depende das
+  /// chaves que mudaram (o boneco que andou, e não o fundo). A interface nova
+  /// (ou um erro pra sair da tela) pede o redesenho da janela.
+  void _changed() {
+    if (!mounted) return;
+    if (_view.rfwLibrary != _library || _view.rfwRoot != _root || _error != null) {
+      setState(() {});
+    } else {
+      _sync();
+    }
   }
 
   @override
   void dispose() {
+    _listening?.rfwChanges.removeListener(_changed);
     Mx.chrome.removeListener(_theme);
     _runtime.dispose();
     super.dispose();
@@ -115,6 +164,9 @@ class _PluginRfwState extends State<PluginRfw> {
       _dataRevision = _view.rfwRevision;
       for (final e in _view.rfwData.entries) {
         if (e.key == 'theme') continue;
+        // A mesma instância é a chave que não veio nesta atualização.
+        if (_pushed.containsKey(e.key) && identical(_pushed[e.key], e.value)) continue;
+        _pushed[e.key] = e.value;
         _content.update(e.key, e.value as Object);
       }
     }
@@ -144,13 +196,21 @@ class _PluginRfwState extends State<PluginRfw> {
       );
     }
     if (_library == null) return const SizedBox.shrink();
+    _root = _view.rfwRoot;
     return DefaultTextStyle.merge(
       style: TextStyle(color: Mx.fg, fontSize: 13),
-      child: RemoteWidget(
-        runtime: _runtime,
-        data: _content,
-        widget: FullyQualifiedWidgetName(_plugin, _view.rfwRoot),
-        onEvent: _event,
+      // Sem o controlador de rolagem "principal" da janela: o
+      // `SingleChildScrollView` do rfw nasce `primary: true`, e duas janelas de
+      // plugin na tela (a aba da lateral e um modal) se penduravam no mesmo
+      // controlador -- a barra de rolagem se recusava a desenhar, com uma
+      // exceção a cada giro da roda. Cada área rolável fica com o seu.
+      child: PrimaryScrollController.none(
+        child: RemoteWidget(
+          runtime: _runtime,
+          data: _content,
+          widget: FullyQualifiedWidgetName(_plugin, _view.rfwRoot),
+          onEvent: _event,
+        ),
       ),
     );
   }
@@ -168,11 +228,15 @@ class _PluginRfwState extends State<PluginRfw> {
       'Svg': (context, source) {
         final svg = source.v<String>(['svg']);
         if (svg == null) return const SizedBox.shrink();
-        return SvgPicture.string(
-          svg,
-          width: source.v<double>(['width']),
-          height: source.v<double>(['height']),
-          excludeFromSemantics: true,
+        // Numa camada só dele: um desenho grande (o fundo do escritório) não é
+        // repintado a cada vez que algo por cima se mexe.
+        return RepaintBoundary(
+          child: SvgPicture.string(
+            svg,
+            width: source.v<double>(['width']),
+            height: source.v<double>(['height']),
+            excludeFromSemantics: true,
+          ),
         );
       },
       // Glyph(icon: "stop", size: 16.0, color: …): um ícone do app, ou um
@@ -225,6 +289,45 @@ class _PluginRfwState extends State<PluginRfw> {
       // hoverColor?, radius?): onde soltar -- a coluna. O que cai vai no onDrop
       // com `payload` e `to` (o id) a mais nos argumentos.
       'DropTarget': (context, source) => _Drop(spec: _readDrop(source)),
+      // CodeEditor(doc: "/abs/x.dart", text, revision, language: "dart",
+      // onChange, onSave, onCursor, …): o editor de código, com o texto
+      // guardado na janela por documento. Ver `plugin_editor.dart`.
+      'CodeEditor': (context, source) => buildPluginCodeEditor(_view, source),
+      // Sprite(sheet: "sprites/x.png", columns, rows, row, start, frames,
+      // fps, width, height, flip, paused, loop): um quadro de uma folha de
+      // sprites da pasta do plugin, animado aqui. Ver `plugin_sprite.dart`.
+      'Sprite': (context, source) => buildPluginSprite(dir, source),
+      // ZoomView(child, maxScale, command, commandRev, onZoom: event "…" {}):
+      // o conteúdo com zoom na bolinha e arrasto, como um mapa. Ver
+      // `plugin_zoom.dart`.
+      'ZoomView': (context, source) => buildPluginZoomView(source),
+      // TextInput(id: "chat", placeholder, multiline, clear, sendIcon,
+      // onSubmit: event "…" {}): um campo de texto, com o texto guardado na
+      // janela. O enter manda o `text`. Ver `plugin_input.dart`.
+      'TextInput': (context, source) => buildPluginTextInput(_view, source),
+      // Anchor(id: "agente:tab3", child): de onde um modal sai e pra onde
+      // volta (`view.open` com `from`). Ver `plugin_modal.dart`.
+      'Anchor': (context, source) => PluginAnchor(
+        pluginId: _view.pluginId,
+        id: source.v<String>(['id']) ?? '',
+        child: source.child(['child']),
+      ),
+      // Selectable(child): uma área de seleção só pra tudo o que está dentro
+      // -- arrastar atravessa parágrafos, balões e mensagens (o chat).
+      'Selectable': (context, source) => PluginSelectable(child: source.child(['child'])),
+      // SelectionLines(child): dentro de uma área rolável que está num
+      // Selectable, junta o que foi selecionado em linhas. Ver
+      // `plugin_selection.dart`.
+      'SelectionLines': (context, source) => SelectionLines(child: source.child(['child'])),
+      // Markdown(text: "…", fontSize: 13.0): o markdown do painel de leitura,
+      // com a mesma folha de estilo; os links abrem como lá.
+      'Markdown': (context, source) => MxMarkdown(
+        data: source.v<String>(['text']) ?? '',
+        fontSize: source.v<double>(['fontSize']) ?? MxMarkdown.baseSize,
+        onFollow: (href) {
+          if (href != null) widget.store.followLink(href, from: widget.tab);
+        },
+      ),
     });
   }
 }
