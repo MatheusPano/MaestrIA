@@ -482,14 +482,29 @@ enum MxAction {
       MxChord(LogicalKeyboardKey.arrowLeft, control: true, shift: true),
     ],
   ),
+  // O ⌘F é do painel, como em todo terminal e todo editor: é ali que está o
+  // texto comprido que se procura. A lateral, que é uma lista curta de nomes,
+  // ficou com o ⌘⇧F -- o "buscar em tudo" dos editores.
+  findInPane(
+    id: 'find',
+    label: 'Buscar no painel',
+    hint: 'No que o terminal em foco já escreveu; Enter sobe, Shift+Enter desce, Esc fecha',
+    group: MxGroup.navigation,
+    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
+    // O Ctrl+Shift+F do GNOME Terminal e do Konsole; o Ctrl+F sozinho é do
+    // readline, que anda um caractere pra frente com ele.
+    linux: [
+      MxChord(LogicalKeyboardKey.keyF, control: true, shift: true),
+    ],
+  ),
   search(
     id: 'search',
     label: 'Buscar na lateral',
     hint: 'Foca o campo de busca; Esc limpa e devolve o teclado',
     group: MxGroup.navigation,
-    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true)],
+    defaults: [MxChord(LogicalKeyboardKey.keyF, meta: true, shift: true)],
     linux: [
-      MxChord(LogicalKeyboardKey.keyF, control: true, shift: true),
+      MxChord(LogicalKeyboardKey.keyF, control: true, alt: true),
     ],
   ),
   openMarkdown(

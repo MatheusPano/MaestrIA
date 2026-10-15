@@ -5,6 +5,7 @@ import '../models.dart';
 import '../services/shortcuts.dart';
 import '../services/store.dart';
 import 'dialogs.dart';
+import 'find_bar.dart';
 import 'settings.dart';
 import 'sidebar.dart';
 
@@ -126,6 +127,14 @@ class MxKeys {
         store.cycle(1);
       case MxAction.prevSession:
         store.cycle(-1);
+      case MxAction.findInPane:
+        // Chega aqui só quando o foco não está num terminal -- com ele lá, quem
+        // atende é o próprio painel, que sabe ser ele mesmo mesmo quando não é
+        // o da grade (o terminal de uma janela de plugin). Ver [TerminalFind].
+        final focused = store.focusedTab;
+        if (focused == null || !TerminalFind.open(focused)) {
+          store.showBanner('Nenhum terminal em foco pra buscar');
+        }
       case MxAction.search:
         // Escondida, a lateral não tem campo pra focar: mostrá-la é parte de
         // buscar nela. O foco espera o quadro em que o campo passa a existir

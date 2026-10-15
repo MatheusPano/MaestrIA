@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +15,7 @@ import '../services/store.dart';
 import '../theme.dart';
 import 'claude_mark.dart';
 import 'dialogs.dart';
+import 'find_bar.dart';
 import 'keys.dart';
 import 'panel.dart';
 import 'panes.dart';
@@ -207,6 +210,20 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   /// [_clicked]. Null quando não foi o botão principal.
   Offset? _pressedAt;
 
+  /// A rolagem do pty, nossa e não do xterm, pelo mesmo motivo do [_focus]: a
+  /// busca precisa levar a tela até o achado, e o xterm guarda o dele privado.
+  final _scroll = ScrollController();
+
+  /// A busca aberta neste painel, ou null. Ver [FindBar].
+  FindSession? _find;
+  final _findText = TextEditingController();
+  final _findFocus = FocusNode(debugLabel: 'busca no painel');
+
+  /// O painel continua escrevendo com a busca aberta, e os achados novos
+  /// esperam ele dar uma pausa: o Claude escreve dezenas de vezes por segundo,
+  /// e buscar o scrollback inteiro a cada pedaço seria trabalho jogado fora.
+  Timer? _refresh;
+
   Terminal get _terminal => widget.tab.term.terminal;
 
   /// Um painel recém-aberto já nasce com o teclado.
@@ -225,6 +242,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_noteKey);
+    TerminalFind.register(widget.tab.id, _openFind);
     if (!widget.focused) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.focused) _focus.requestFocus();
@@ -234,14 +252,99 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
   @override
   void didUpdateWidget(_TerminalSurface old) {
     super.didUpdateWidget(old);
+    // Uma posição da grade, não um painel: a mesma superfície recebe outro
+    // [MxTab] quando a lateral troca o que ela mostra, e a busca era no
+    // terminal de antes.
+    if (old.tab.id != widget.tab.id) {
+      TerminalFind.unregister(old.tab.id, _openFind);
+      TerminalFind.register(widget.tab.id, _openFind);
+      if (_find != null) {
+        old.tab.term.terminal.removeListener(_onOutput);
+        _dropFind();
+      }
+    }
     if (widget.focused && !old.focused) _focus.requestFocus();
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_noteKey);
+    TerminalFind.unregister(widget.tab.id, _openFind);
+    if (_find != null) _terminal.removeListener(_onOutput);
+    _dropFind();
+    _findText.dispose();
+    _findFocus.dispose();
+    _scroll.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  /// Abre a busca, ou devolve o foco a ela com o texto selecionado.
+  ///
+  /// O foco espera o quadro: na primeira vez o campo ainda não existe, e um
+  /// [FocusNode] fora da árvore não tem como recebê-lo.
+  void _openFind() {
+    if (_find == null) {
+      setState(() => _find = FindSession(_terminal, widget.tab.term.controller));
+      _terminal.addListener(_onOutput);
+    }
+    _findText.selection = TextSelection(baseOffset: 0, extentOffset: _findText.text.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _find != null) _findFocus.requestFocus();
+    });
+  }
+
+  void _closeFind() {
+    if (_find == null) return;
+    _terminal.removeListener(_onOutput);
+    setState(_dropFind);
+    _focus.requestFocus();
+  }
+
+  /// Tira os destaques e esquece a busca. O texto fica: um ⌘F logo depois
+  /// volta com a mesma palavra selecionada, pronta pra Enter ou pra troca.
+  void _dropFind() {
+    _refresh?.cancel();
+    _find?.dispose();
+    _find = null;
+  }
+
+  void _onOutput() {
+    _refresh?.cancel();
+    _refresh = Timer(const Duration(milliseconds: 250), () => _find?.refresh());
+  }
+
+  void _findQuery(String query) {
+    _find?.search(query, nearLine: _bottomLine);
+    _reveal();
+  }
+
+  void _findStep(int by) {
+    _find?.step(by);
+    _reveal();
+  }
+
+  /// A última linha do buffer que está na tela.
+  int get _bottomLine {
+    final render = _view.currentState?.renderTerminal;
+    final last = _terminal.buffer.lines.length - 1;
+    if (render == null || render.lineHeight <= 0 || !_scroll.hasClients) return last;
+    final p = _scroll.position;
+    return ((p.pixels + p.viewportDimension) / render.lineHeight).floor().clamp(0, last);
+  }
+
+  /// Rola até o achado da vez, se ele estiver fora da tela, e o deixa no meio
+  /// dela: na borda, a linha de cima ou de baixo é o contexto que se perde.
+  void _reveal() {
+    final hit = _find?.current;
+    final render = _view.currentState?.renderTerminal;
+    if (hit == null || render == null || !_scroll.hasClients) return;
+    final line = render.lineHeight;
+    final p = _scroll.position;
+    final top = hit.from.y * line;
+    final bottom = (hit.to.y + 1) * line;
+    if (top >= p.pixels && bottom <= p.pixels + p.viewportDimension) return;
+    _scroll.jumpTo((top - (p.viewportDimension - line) / 2).clamp(0.0, p.maxScrollExtent));
   }
 
   /// Conta a tecla pro pty, e não a consome nunca.
@@ -264,7 +367,8 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     // for the alternate screen reports it to the program with the wrong button
     // at the wrong cell (see TermSession.wheel), and `simulateScroll: false`
     // stops it from turning the wheel into arrow keys when that report fails.
-    return Listener(
+    final find = _find;
+    final pty = Listener(
       onPointerSignal: (e) {
         if (e is PointerScrollEvent) _scrolled(e.scrollDelta.dy, e.position);
       },
@@ -283,6 +387,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
         _terminal,
         key: _view,
         controller: widget.tab.term.controller,
+        scrollController: _scroll,
         focusNode: _focus,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         // The pty paints in the app's palette, so a theme change
@@ -296,6 +401,32 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
         shortcuts: _xtermShortcuts,
         onSecondaryTapDown: (d, _) => showTerminalMenu(context, widget.tab, d.globalPosition),
       ),
+    );
+    // O [Stack] fica mesmo sem a barra: com ele indo e vindo, o pty mudaria de
+    // lugar na árvore a cada ⌘F e Esc.
+    return Stack(
+      children: [
+        Positioned.fill(child: pty),
+        // Fora do [Listener] do pty: um clique na barra não é um clique no
+        // terminal, e o de debaixo dela podia seguir um link.
+        if (find != null)
+          Positioned(
+            top: 8,
+            left: 12,
+            right: 12,
+            child: Align(
+              alignment: Alignment.topRight,
+              child: FindBar(
+                session: find,
+                controller: _findText,
+                focusNode: _findFocus,
+                onQuery: _findQuery,
+                onStep: _findStep,
+                onClose: _closeFind,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -405,6 +536,12 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
     // antemão quais delas o terminal engoliria — então todas passam por aqui.
     // O que não está no mapa segue pro pty, ⇥ e ⌃C inclusive.
     if (widget.store.keymap.match(event) case final action?) {
+      // A busca é deste terminal, e não do "painel em foco" do mapa: no de
+      // uma janela de plugin os dois não são o mesmo.
+      if (action == MxAction.findInPane) {
+        _openFind();
+        return KeyEventResult.handled;
+      }
       MxKeys.run(action, widget.store, context);
       return KeyEventResult.handled;
     }
