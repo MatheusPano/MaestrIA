@@ -199,7 +199,6 @@ class MxTab {
   /// renomeia o painel, enquanto o processo lá fora continua atendendo pelo
   /// nome com que foi iniciado.
   String? agentName;
-  int dirty = 0;
   final DateTime startedAt = DateTime.now();
 
   /// O ⌘+ deste painel: passos de um ponto sobre o corpo base ([MxType.size]).
@@ -2210,7 +2209,6 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     }
     for (final t in [...tabs]) {
       if (!tabs.contains(t)) continue;
-      t.dirty = await Git.dirtyCount(t.cwd) ?? t.dirty;
       if (t.branch.isEmpty) t.branch = await Git.branchOf(t.cwd);
     }
     notifyListeners();

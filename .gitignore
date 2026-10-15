@@ -49,3 +49,6 @@ app.*.map.json
 
 # Worktrees das sessões do Claude Code
 .claude/worktrees/
+
+# Notas locais
+/docs/claude-desktop-mcps.md

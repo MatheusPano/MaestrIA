@@ -224,12 +224,6 @@ class TermSession {
   /// A program that never asked for mouse reports gets an arrow key instead,
   /// which is what a terminal does for a pager in the alternate screen.
   void wheel({required bool up, required int col, required int row}) {
-    // DEBUG temporário -- remover.
-    try {
-      File('/private/tmp/claude-501/-Volumes-Dev-Mac-repos-Pessoal-maestria-v2/496a86f6-3762-4829-9abc-be86eae0b0ed/scratchpad/sticky.log')
-          .writeAsStringSync('${DateTime.now().toIso8601String()} wheel up=$up alt=${terminal.isUsingAltBuffer} '
-              'report=${terminal.mouseMode.reportScroll} sel=${controller.selection?.begin}\n', mode: FileMode.append);
-    } catch (_) {}
     if (!terminal.mouseMode.reportScroll) {
       terminal.keyInput(up ? TerminalKey.arrowUp : TerminalKey.arrowDown);
       return;

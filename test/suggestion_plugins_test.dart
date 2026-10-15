@@ -9,6 +9,7 @@ import 'package:maestria/services/plugin_api.dart';
 import 'package:maestria/services/plugins.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/suggestions.dart';
+import 'package:maestria/ui/switch.dart';
 
 /// Um plugin em sh que atende o `suggestion.start` como o do Wiboor: responde
 /// na hora e, em seguida, conta que criou a tarefa (`suggestion.created`) --
@@ -209,7 +210,7 @@ void main() {
       final (store, a) = storeWithOne();
       store.suggest('a', title: 'Converter SQL', tldr: '', prompt: 'y');
       await pumpCard(tester, store, a);
-      expect(find.byType(Switch), findsNothing);
+      expect(find.byType(MxSwitch), findsNothing);
       store.dispose();
     });
 
@@ -243,7 +244,7 @@ void main() {
       store.suggest('l', title: 'Converter SQL', tldr: '', prompt: 'y');
       store.setSuggestionsToPlugin(true);
       await pumpCard(tester, store, tab);
-      expect(find.byType(Switch), findsOneWidget);
+      expect(find.byType(MxSwitch), findsOneWidget);
       expect(find.text('iniciar com worktree'), findsNothing);
       expect(
         find.byTooltip('cria a tarefa no tracker e abre a sessão nesta pasta'),

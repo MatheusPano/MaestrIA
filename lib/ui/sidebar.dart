@@ -1859,11 +1859,6 @@ class _TabRowState extends State<_TabRow> {
                 child: Icon(Icons.bedtime_outlined, size: 13, color: Mx.fgFaint),
               ),
             ),
-          if (tab.dirty > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 5),
-              child: Icon(Icons.circle, size: 6, color: Mx.yellow),
-            ),
           if (!tab.done && tab.status.needsHuman) _Badge(count: 1, color: tab.status.color),
           if (index >= 0 && index < 9)
             Padding(
