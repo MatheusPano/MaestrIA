@@ -220,15 +220,23 @@ class MxMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MarkdownBody(
+    final body = MarkdownBody(
       data: data,
-      selectable: true,
+      // A seleção é de uma área só, e não de cada parágrafo: com o
+      // `selectable` do pacote cada bloco é um `SelectableText` à parte, e
+      // arrastar parava na primeira quebra de linha -- não dava pra copiar
+      // dois parágrafos, nem uma lista inteira.
+      selectable: false,
       styleSheet: sheet(fontSize),
       onTapLink: onFollow == null ? null : (text, href, title) => onFollow!(href),
       // GFM: tabela, lista de tarefas e ~riscado~ são o que o Claude escreve
       // num plano. Sem isto um `- [ ]` sai como um traço e um colchete.
       extensionSet: md.ExtensionSet.gitHubWeb,
     );
+    // Dentro de uma área de seleção (o chat inteiro, num plugin), é dela;
+    // solto, ganha a sua.
+    if (SelectionContainer.maybeOf(context) != null) return body;
+    return SelectionArea(child: body);
   }
 
   /// O markdown vestido com a paleta da janela.

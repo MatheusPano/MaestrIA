@@ -1301,6 +1301,27 @@ class Plugins extends ChangeNotifier {
         // A janela em modal (`view.open` com `modal: true`), que vira painel
         // num botão. Ver [AppStore.pluginModal].
         'modal': 1,
+        // O editor de código da biblioteca de widgets (`CodeEditor`). Ver
+        // `ui/plugin_editor.dart`.
+        'editor': 1,
+        // O `Sprite`, a folha de sprites animada na janela. Ver
+        // `ui/plugin_sprite.dart`.
+        'sprites': 1,
+        // O `ZoomView`, o zoom de mapa (a bolinha e o arrasto). Ver
+        // `ui/plugin_zoom.dart`.
+        'zoom': 1,
+        // O `TextInput`, o campo de texto da biblioteca de widgets. Ver
+        // `ui/plugin_input.dart`.
+        'textInput': 1,
+        // O `Markdown` da biblioteca de widgets.
+        'markdown': 1,
+        // O `onArrow` do `TextInput`: as setas do campo vazio vão pro plugin.
+        'arrows': 1,
+        // O modal que sai de um `Anchor` (`view.open` com `from`), com o
+        // tamanho pedido (`width`, `height`).
+        'modalFrom': 1,
+        // O `Selectable`: uma área de seleção só pra uma janela inteira.
+        'selectable': 1,
         'pluginId': p.id,
         'pluginDir': p.dir,
         'dataDir': p.dataDir,
@@ -1688,6 +1709,23 @@ class PluginView {
   /// Sobe quando os dados mudam: é como o painel sabe o que repassar.
   int rfwRevision = 0;
 
+  /// Avisa a janela (e só ela) que a interface ou os dados mudaram. Uma
+  /// atualização só de dados não passa pelo [AppStore]: o escritório manda
+  /// várias por segundo enquanto os bonecos andam, e cada aviso do store
+  /// reconstruía o app inteiro -- a lateral, os painéis, os cabeçalhos -- pra
+  /// mudar uma janela.
+  final ValueNotifier<int> rfwChanges = ValueNotifier(0);
+
+  /// Em modal: de onde a janela sai e pra onde volta ao fechar -- o `id` de um
+  /// `Anchor` de uma janela do mesmo plugin (o boneco cujo chat abriu). Sem
+  /// ele, o modal aparece no meio, como sempre. Ver `ui/plugin_modal.dart`.
+  String? modalFrom;
+
+  /// O tamanho que o plugin pediu pro modal (cabendo na janela); sem ele, o
+  /// de sempre.
+  double? modalWidth;
+  double? modalHeight;
+
   /// Troca a biblioteca e/ou junta dados (cada chave de cima substitui a que
   /// havia). Ver [PluginView.rfwLibrary].
   void setRfw({String? library, String? root, Map<String, Object?>? data}) {
@@ -1697,6 +1735,7 @@ class PluginView {
       rfwData.addAll(data);
       rfwRevision += 1;
     }
+    rfwChanges.value += 1;
   }
 
   List<Map<String, dynamic>> _blocks;

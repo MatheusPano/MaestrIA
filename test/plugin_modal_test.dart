@@ -9,6 +9,7 @@ import 'package:maestria/services/layout.dart';
 import 'package:maestria/services/plugins.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/ui/plugin_modal.dart';
+import 'package:maestria/ui/plugin_pane.dart';
 
 /// Um plugin com tela própria, como o Wiboor, e a janela com duas sessões lado
 /// a lado, a da direita em foco.
@@ -131,6 +132,69 @@ void main() {
       expect(d.store.tabs.where((t) => t.isPluginView), isEmpty);
     });
 
+    testWidgets('sai da âncora crescendo e, fechando, volta pra ela encolhendo', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final d = desk(tmp);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1200,
+              height: 900,
+              child: Stack(
+                children: [
+                  const Positioned(
+                    left: 100,
+                    top: 700,
+                    child: PluginAnchor(
+                      pluginId: 'wiboor',
+                      id: 'agente:1',
+                      child: SizedBox(width: 20, height: 30),
+                    ),
+                  ),
+                  Positioned.fill(child: PluginModalLayer(store: d.store)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(pluginAnchorRect('wiboor', 'agente:1'), const Rect.fromLTWH(100, 700, 20, 30));
+
+      d.store.openPluginView(
+        d.plugin,
+        'chat',
+        title: 'conversa',
+        blocks: text('o conteúdo'),
+        modal: true,
+        from: 'agente:1',
+        width: 500,
+        height: 400,
+      );
+      // O primeiro quadro: o ponto de partida, em cima do boneco.
+      await tester.pump();
+      Rect body() => tester.getRect(find.byType(PluginPane));
+      final early = body();
+      expect(early.width, lessThan(40), reason: 'começa do tamanho do boneco');
+      expect((early.center - const Offset(110, 715)).distance, lessThan(30), reason: 'em cima do boneco');
+
+      await tester.pumpAndSettle();
+      final full = body();
+      expect(full.center.dx, closeTo(600, 2), reason: 'termina no meio');
+      expect(full.width, closeTo(500, 2), reason: 'do tamanho pedido');
+
+      d.store.closeModal();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.byType(PluginPane), findsOneWidget, reason: 'ainda na tela, voltando');
+      final going = body();
+      expect(going.width, lessThan(full.width));
+      expect(going.center.dy, greaterThan(full.center.dy), reason: 'descendo de volta pro boneco');
+      await tester.pumpAndSettle();
+      expect(find.byType(PluginPane), findsNothing);
+    });
+
     testWidgets('o desenho: o conteúdo, o "abrir como painel", o esc e o clique fora', (
       tester,
     ) async {
@@ -183,7 +247,7 @@ void main() {
       await tester.tap(find.text('o conteúdo'));
       await tester.pumpAndSettle();
       expect(d.store.pluginModal, tab, reason: 'o clique dentro não fecha');
-      await tester.tap(find.text('abrir como painel'));
+      await tester.tap(find.byTooltip('abrir como painel'));
       await tester.pumpAndSettle();
       expect(d.store.pluginModal, isNull);
       expect(d.store.tabs, contains(tab));

@@ -1672,19 +1672,19 @@ class AppStore extends ChangeNotifier implements TaskDesk {
 
   /// Troca os blocos da aba de [plugin] e/ou o selo do ícone dele (vazio
   /// tira). Null é "não mexe". Diz se a aba está na tela.
-  bool updatePluginSidebar(
-    MxPlugin plugin, {
-    List<Map<String, dynamic>>? blocks,
-    String? badge,
-    PluginRfwUpdate? rfw,
-  }) {
+  bool updatePluginSidebar(MxPlugin plugin, {List<Map<String, dynamic>>? blocks, String? badge, PluginRfwUpdate? rfw}) {
+    // O selo e a troca entre blocos e widgets o app enxerga; os dados da aba
+    // são só dela (ver [PluginView.rfwChanges]).
+    final rebadged =
+        badge != null && (badge.isEmpty ? sidebarBadges.containsKey(plugin.id) : sidebarBadges[plugin.id] != badge);
     if (badge != null) {
       badge.isEmpty ? sidebarBadges.remove(plugin.id) : sidebarBadges[plugin.id] = badge;
     }
     if (blocks == null && rfw == null) {
-      notifyListeners();
+      if (rebadged) notifyListeners();
       return _sidebarLive == plugin.id;
     }
+    final fresh = !_sidebarTabs.containsKey(plugin.id);
     final tab = _sidebarTabs.putIfAbsent(
       plugin.id,
       () => MxTab(
@@ -1702,13 +1702,14 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         ),
       ),
     );
+    final switched = blocks != null || (rfw?.library != null && tab.view!.rfwLibrary == null);
     if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
     if (blocks != null) {
       tab.view!
         ..rfwLibrary = null
         ..setBlocks(blocks);
     }
-    notifyListeners();
+    if (fresh || switched || rebadged) notifyListeners();
     return _sidebarLive == plugin.id;
   }
 
@@ -3095,12 +3096,16 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     required List<Map<String, dynamic>> blocks,
     PluginRfwUpdate? rfw,
     bool modal = false,
+    String? from,
+    double? width,
+    double? height,
   }) {
     final source = focusedTab;
     // A que está em modal continua em modal: só troca o conteúdo.
     if (pluginModal case final m? when m.view?.pluginId == plugin.id && m.view?.id == viewId) {
       m.view!
         ..title = title
+        ..modalFrom = from ?? m.view!.modalFrom
         ..setBlocks(blocks);
       if (rfw != null) m.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
       notifyListeners();
@@ -3137,6 +3142,10 @@ class AppStore extends ChangeNotifier implements TaskDesk {
       ),
     );
     if (rfw != null) tab.view!.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
+    tab.view!
+      ..modalFrom = from
+      ..modalWidth = width
+      ..modalHeight = height;
     // Em modal ela fica fora da grade (ver [pluginModal]); um segundo modal
     // toma o lugar do primeiro.
     if (modal) {
@@ -3163,6 +3172,11 @@ class AppStore extends ChangeNotifier implements TaskDesk {
     final tab = _pluginTab(plugin.id, viewId);
     if (tab == null) return false;
     final view = tab.view!;
+    // O que o resto do app enxerga: o título (no cabeçalho e na lateral) e a
+    // troca entre blocos e widgets. Os dados de uma janela de widgets são só
+    // dela -- ver [PluginView.rfwChanges].
+    final retitled = title != null && title != view.title;
+    final switched = blocks != null || (rfw?.library != null && view.rfwLibrary == null);
     if (title != null) view.title = title;
     if (rfw != null) view.setRfw(library: rfw.library, root: rfw.root, data: rfw.data);
     if (blocks != null) {
@@ -3170,7 +3184,7 @@ class AppStore extends ChangeNotifier implements TaskDesk {
         ..rfwLibrary = null
         ..setBlocks(blocks);
     }
-    notifyListeners();
+    if (retitled || switched) notifyListeners();
     return true;
   }
 
