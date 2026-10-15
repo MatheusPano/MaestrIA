@@ -1328,7 +1328,7 @@ void main() {
       expect(s.resolve('/a'), <String>[]);
     });
 
-    testWidgets('folders desenha uma caixinha por pasta da lateral', (tester) async {
+    testWidgets('folders mostra as marcadas num botão, que abre o modal das pastas', (tester) async {
       writePlugin(tmp.path, 'cfg', {
         'id': 'cfg',
         'version': '1',
@@ -1357,17 +1357,50 @@ void main() {
       await tester.tap(find.text('abrir'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(find.byType(Checkbox), findsNWidgets(2));
+      expect(find.byType(Checkbox), findsNothing, reason: 'as caixinhas ficam no modal');
 
-      await tester.tap(find.text('api'));
-      await tester.pumpAndSettle();
+      Future<void> pickIn(String button, List<String> taps, {String done = 'Pronto'}) async {
+        await tester.tap(find.text(button));
+        await tester.pumpAndSettle();
+        expect(find.byType(Checkbox), findsNWidgets(2));
+        for (final t in taps) {
+          await tester.tap(find.text(t));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(find.text(done).last); // o do modal, em cima do das configurações
+        await tester.pumpAndSettle();
+      }
+
+      await pickIn('Nenhuma', ['api']);
       expect(store.plugins.settingsOf(p)['salas'], ['/r/api']);
 
+      // O cancelar deixa como estava.
+      await pickIn('api', ['app'], done: 'Cancelar');
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/api']);
+
+      // Na ordem da lateral.
+      await pickIn('api', ['Todas']);
+      expect(store.plugins.settingsOf(p)['salas'], ['/r/app', '/r/api']);
+      expect(find.text('app, api'), findsOneWidget);
+
+      // O filtro: o Todas/Nenhuma vale só pro que aparece.
+      await tester.tap(find.text('app, api'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'api');
+      await tester.pumpAndSettle();
+      expect(find.byType(Checkbox), findsOneWidget);
+      await tester.tap(find.text('Nenhuma'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 de 2'), findsOneWidget);
+      // Sem o filtro, o app segue marcado: o Todas marca o resto, o Nenhuma tira tudo.
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Todas'));
       await tester.pumpAndSettle();
-      expect(store.plugins.settingsOf(p)['salas'], ['/r/api', '/r/app']);
-
+      expect(find.text('2 de 2'), findsOneWidget);
       await tester.tap(find.text('Nenhuma'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pronto').last);
       await tester.pumpAndSettle();
       expect(store.plugins.settingsOf(p)['salas'], <String>[]);
       expect(store.plugins.toJson(), isEmpty, reason: 'nenhuma é o padrão: sai do config');

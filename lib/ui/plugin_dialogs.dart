@@ -1387,12 +1387,23 @@ class _SettingRowState extends State<_SettingRow> {
   @override
   Widget build(BuildContext context) {
     final s = widget.setting;
-    final label = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // A descrição vai num "?" do lado do título, como o hintAsInfo da tela de
+    // configurações: escrita por extenso embaixo de cada linha, um plugin com
+    // muitas configurações vira uma parede de texto.
+    final label = Row(
       children: [
-        Text(s.title, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
-        if (s.description.isNotEmpty)
-          Text(s.description, style: TextStyle(fontSize: 11, color: Mx.fgFaint, height: 1.35)),
+        Flexible(child: Text(s.title, style: TextStyle(fontSize: 12.5, color: Mx.fg))),
+        if (s.description.isNotEmpty) ...[
+          const SizedBox(width: 6),
+          Tooltip(
+            message: s.description,
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.help,
+              child: Icon(Icons.help_outline, size: 14, color: Mx.fgFaint),
+            ),
+          ),
+        ],
       ],
     );
     final reset = widget.changed
@@ -1442,70 +1453,68 @@ class _SettingRowState extends State<_SettingRow> {
     );
   }
 
-  /// Uma caixinha por pasta da lateral, embaixo do título: a lista é longa
-  /// demais pra caber do lado. Um `root` marcado de uma pasta que saiu da
-  /// lateral continua guardado -- ela volta marcada se você a abrir de novo.
+  /// As pastas marcadas numa linha só, como as outras configurações: o botão
+  /// mostra quais são e abre o [_FolderPicker], onde se marca. Um `root`
+  /// marcado de uma pasta que saiu da lateral continua guardado -- ela volta
+  /// marcada se você a abrir de novo.
   Widget _folders(Widget label, Widget reset) {
     final picked = [...(widget.value as List?)?.cast<String>() ?? const <String>[]];
-    final roots = [for (final f in widget.folders) f.root];
-    final all = roots.isNotEmpty && roots.every(picked.contains);
-    void pick(List<String> next) => widget.onChanged(
-      const ListEquality<String>().equals(next, widget.setting.resolve(null) as List<String>)
-          ? null
-          : next,
-    );
-    void toggle(String root) => pick(
-      picked.contains(root) ? [for (final r in picked) if (r != root) r] : [...picked, root],
-    );
+    final names = {for (final f in widget.folders) f.root: f.name};
+    final shown = [
+      for (final r in picked)
+        if (names.containsKey(r)) names[r]!,
+    ];
+    final summary = switch (shown.length) {
+      0 => 'Nenhuma',
+      <= 2 => shown.join(', '),
+      _ => '${shown.take(2).join(', ')} e mais ${shown.length - 2}',
+    };
+    Future<void> choose() async {
+      final next = await showDialog<List<String>>(
+        context: context,
+        builder: (_) => _FolderPicker(title: widget.setting.title, folders: widget.folders, picked: picked),
+      );
+      if (next == null) return;
+      widget.onChanged(
+        const ListEquality<String>().equals(next, widget.setting.resolve(null) as List<String>) ? null : next,
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Expanded(child: label),
-              if (roots.isNotEmpty)
-                TextButton(
-                  onPressed: () => pick(
-                    all
-                        ? [for (final r in picked) if (!roots.contains(r)) r]
-                        : [...picked, for (final r in roots) if (!picked.contains(r)) r],
-                  ),
-                  child: Text(all ? 'Nenhuma' : 'Todas', style: const TextStyle(fontSize: 12)),
-                ),
-              reset,
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (widget.folders.isEmpty)
-            Text(
-              'Nenhuma pasta na lateral',
-              style: TextStyle(fontSize: 11.5, color: Mx.fgFaint),
-            ),
-          for (final f in widget.folders)
-            InkWell(
-              onTap: () => toggle(f.root),
-              borderRadius: BorderRadius.circular(6),
+          Expanded(child: label),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 200,
+            child: OutlinedButton(
+              onPressed: widget.folders.isEmpty ? null : choose,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                minimumSize: const Size(0, 32),
+                alignment: Alignment.centerLeft,
+                side: BorderSide(color: Mx.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              ),
               child: Row(
                 children: [
-                  Checkbox(
-                    value: picked.contains(f.root),
-                    visualDensity: VisualDensity.compact,
-                    onChanged: (_) => toggle(f.root),
-                  ),
-                  Text(f.name, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
-                  const SizedBox(width: 8),
+                  Icon(Icons.folder_outlined, size: 14, color: Mx.fgDim),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      f.root,
+                      widget.folders.isEmpty ? 'Nenhuma pasta na lateral' : summary,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, fontFamily: Mx.mono, color: Mx.fgFaint),
+                      style: TextStyle(fontSize: 12.5, color: shown.isEmpty ? Mx.fgFaint : Mx.fg),
                     ),
                   ),
+                  Icon(Icons.unfold_more, size: 14, color: Mx.fgFaint),
                 ],
               ),
             ),
+          ),
+          reset,
         ],
       ),
     );
@@ -1568,6 +1577,169 @@ class _SettingRowState extends State<_SettingRow> {
         const SizedBox(width: 6),
         SizedBox(width: 96, child: _input(hint: 'Do tema')),
       ],
+    );
+  }
+}
+
+/// O modalzinho das pastas de um [PluginSettingType.folders]: as da lateral,
+/// com o filtro e o "Todas"/"Nenhuma"; o "Pronto" devolve a lista marcada (os
+/// `root`s de fora da lateral seguem guardados), e o "Cancelar", null.
+class _FolderPicker extends StatefulWidget {
+  const _FolderPicker({required this.title, required this.folders, required this.picked});
+
+  final String title;
+  final List<({String root, String name})> folders;
+  final List<String> picked;
+
+  @override
+  State<_FolderPicker> createState() => _FolderPickerState();
+}
+
+class _FolderPickerState extends State<_FolderPicker> {
+  final _query = TextEditingController();
+  late final _picked = [...widget.picked];
+
+  List<({String root, String name})> get _shown {
+    final terms = _query.text.toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    return [
+      for (final f in widget.folders)
+        if (terms.every((t) => '${f.name} ${f.root}'.toLowerCase().contains(t))) f,
+    ];
+  }
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _toggle(String root) => setState(() => _picked.contains(root) ? _picked.remove(root) : _picked.add(root));
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _shown;
+    final roots = [for (final f in shown) f.root];
+    final all = roots.isNotEmpty && roots.every(_picked.contains);
+    final count = widget.folders.where((f) => _picked.contains(f.root)).length;
+    return Dialog(
+      backgroundColor: Mx.bgSidebar,
+      child: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 10, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Mx.fg),
+                    ),
+                  ),
+                  Text('$count de ${widget.folders.length}', style: TextStyle(fontSize: 11.5, color: Mx.fgFaint)),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: roots.isEmpty
+                        ? null
+                        : () => setState(() {
+                            if (all) {
+                              _picked.removeWhere(roots.contains);
+                            } else {
+                              _picked.addAll(roots.where((r) => !_picked.contains(r)));
+                            }
+                          }),
+                    child: Text(all ? 'Nenhuma' : 'Todas', style: const TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: TextField(
+                controller: _query,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Filtrar pastas',
+                  hintStyle: TextStyle(color: Mx.fgFaint, fontSize: 12.5),
+                  prefixIcon: Icon(Icons.search, size: 16, color: Mx.fgFaint),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 32),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 380),
+              child: shown.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Text('Nenhuma pasta com esse nome', style: TextStyle(fontSize: 12, color: Mx.fgFaint)),
+                    )
+                  : ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      children: [
+                        for (final f in shown)
+                          InkWell(
+                            onTap: () => _toggle(f.root),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Row(
+                                children: [
+                                  Checkbox(
+                                    value: _picked.contains(f.root),
+                                    visualDensity: VisualDensity.compact,
+                                    onChanged: (_) => _toggle(f.root),
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(f.name, style: TextStyle(fontSize: 12.5, color: Mx.fg)),
+                                        Text(
+                                          f.root,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(fontSize: 10.5, fontFamily: Mx.mono, color: Mx.fgFaint),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+                  const SizedBox(width: 4),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, [
+                      // Na ordem da lateral, e os de fora dela no fim.
+                      for (final f in widget.folders)
+                        if (_picked.contains(f.root)) f.root,
+                      for (final r in _picked)
+                        if (!widget.folders.any((f) => f.root == r)) r,
+                    ]),
+                    child: const Text('Pronto'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
