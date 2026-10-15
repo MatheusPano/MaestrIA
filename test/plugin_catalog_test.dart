@@ -106,7 +106,13 @@ void main() {
         'u',
         jsonEncode({
           'plugins': [
-            {'id': 'a', 'version': '1.0.0', 'url': 'http://x/a.zip', 'sha256': 'AB'},
+            {
+              'id': 'a',
+              'version': '1.0.0',
+              'url': 'http://x/a.zip',
+              'sha256': 'AB',
+              'kinds': ['theme', 'nova'],
+            },
             {'id': 'b', 'version': '1.0.0', 'url': 'http://x/b.zip'},
             {'id': 'c', 'version': '0.1.0', 'git': 'https://github.com/x/c', 'ref': 'main'},
             {'id': 'd', 'version': '2.0.0', 'git': 'https://x/d', 'maestria': 99},
@@ -115,6 +121,8 @@ void main() {
       );
       expect(c.plugins.map((e) => e.id), ['a', 'c', 'd']);
       expect(c.byId('a')!.sha256, 'ab');
+      expect(c.byId('a')!.kinds, {PluginKind.theme}, reason: 'o que não conhece fica de fora');
+      expect(c.byId('c')!.kinds, isEmpty, reason: 'catálogo antigo, sem o campo');
       expect(c.byId('c')!.git, 'https://github.com/x/c');
       expect(c.byId('c')!.url, isNull);
       expect(c.byId('d')!.fits, isFalse, reason: 'pede uma API que esta janela não tem');

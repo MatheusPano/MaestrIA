@@ -120,12 +120,46 @@ class Notifier {
     return r.ok;
   }
 
+  /// What a click on a notification that names a tab does: focus it. Set by
+  /// the store; only the notifications with a picture carry a tab (see
+  /// [alert]).
+  void Function(String tabId)? onTap;
+
+  bool _listening = false;
+
   /// A desktop notification: `osascript` on macOS, `notify-send` on Linux.
   /// Neither needs signing or an entitlement.
-  Future<void> alert(String title, String body) async {
+  ///
+  /// With an [image] -- the portrait a plugin gave the session -- macOS goes
+  /// through the native side instead, which can show a picture and knows
+  /// which [tabId] a click is about. That one needs the user's permission;
+  /// without it (or in a build without the native half) the plain one goes.
+  Future<void> alert(String title, String body, {String? image, String? subtitle, String? tabId}) async {
     if (Platform.isLinux) {
-      await Sh.run('notify-send -a maestria ${Sh.q(title)} ${Sh.q(body)}');
+      await Sh.run('notify-send -a maestria ${image == null ? '' : '-i ${Sh.q(image)} '}${Sh.q(title)} ${Sh.q(body)}');
       return;
+    }
+    if (image != null) {
+      if (!_listening) {
+        _listening = true;
+        _dock.setMethodCallHandler((call) async {
+          if (call.method == 'notificationTapped' && call.arguments is String) onTap?.call(call.arguments as String);
+        });
+      }
+      try {
+        final shown = await _dock.invokeMethod<bool>('notify', {
+          'title': title,
+          'body': body,
+          'subtitle': ?subtitle,
+          'image': image,
+          'tabId': ?tabId,
+        });
+        if (shown == true) return;
+      } on MissingPluginException {
+        // A build without the native half: the plain one below.
+      } on PlatformException {
+        // Same.
+      }
     }
     await Sh.run(
       'osascript -e ${Sh.q('display notification ${_esc(body)} with title ${_esc(title)}')}',

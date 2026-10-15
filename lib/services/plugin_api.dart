@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../models.dart';
@@ -7,6 +9,7 @@ import 'history.dart';
 import 'notify.dart';
 import 'plugin_floats.dart';
 import 'plugins.dart';
+import 'pty.dart' show TermSession;
 import 'store.dart';
 
 /// O que um plugin pode pedir à janela: os métodos do lado de cá do JSON-RPC.
@@ -184,12 +187,53 @@ class PluginApi {
             '"${tab.title}" não tem processo pra receber texto',
           );
         }
+        _trustGate(tab);
         final text = _text(p, 'text');
         if (p['submit'] == true) {
-          await tab.term.submit(text);
+          // Sem texto, o enter sozinho: manda o que já está no prompt (a
+          // imagem que o `terminal.pasteClipboard` pôs lá).
+          if (text.trim().isEmpty) {
+            tab.term.enter();
+          } else {
+            await tab.term.submit(text);
+          }
         } else {
           tab.term.terminal.paste(text);
         }
+        return null;
+      case 'terminal.sendKeys':
+        // Teclas de verdade, e não uma colagem: as setas e o enter que
+        // respondem a pergunta de um claude (o `AskUserQuestion`) do chat de
+        // um plugin.
+        _need(plugin, PluginPermission.terminalWrite);
+        final tab = _sessionTab(p);
+        if (tab.isPassive || tab.exited || tab.hibernated) {
+          throw PluginRpcError(PluginRpcError.invalidParams, '"${tab.title}" não tem processo pra receber teclas');
+        }
+        _trustGate(tab);
+        final keys = p['keys'];
+        if (keys is! List ||
+            keys.isEmpty ||
+            keys.length > 200 ||
+            keys.any((k) => !TermSession.terminalKeys.containsKey(k) && !(k is Map && k['text'] is String))) {
+          throw PluginRpcError(
+            PluginRpcError.invalidParams,
+            '`keys`: uma lista de ${TermSession.terminalKeys.keys.join(', ')} ou { text }',
+          );
+        }
+        await tab.term.sendKeys(keys);
+        return null;
+      case 'terminal.pasteClipboard':
+        // O ⌘V de um terminal, feito pelo plugin: texto entra como colagem; uma
+        // imagem (o print), num claude, vira o ^V com que ele mesmo a lê da área
+        // de transferência -- o "colar um print" do chat de um plugin.
+        _need(plugin, PluginPermission.terminalWrite);
+        final tab = _sessionTab(p);
+        if (tab.isPassive || tab.exited || tab.hibernated) {
+          throw PluginRpcError(PluginRpcError.invalidParams, '"${tab.title}" não tem processo pra receber a colagem');
+        }
+        _trustGate(tab);
+        await tab.term.pasteClipboard(imagesViaCtrlV: tab.kind == TabKind.claude);
         return null;
       case 'session.openClaude':
         _need(plugin, PluginPermission.sessionsCreate);
@@ -200,8 +244,98 @@ class PluginApi {
           label: p['label'] as String?,
           prompt: p['prompt'] as String?,
           featureOrHotfix: store.focusedFeatureOrHotfix,
+          // Em segundo plano: a sessão sobe e aparece na lateral, e você fica
+          // onde está (a tela do plugin que a abriu).
+          place: p['background'] != true,
         );
         return {'tabId': tab.id};
+      case 'session.rename':
+        // O nome da sessão, como o "renomear" da lateral: vale pra lateral, o
+        // cabeçalho e o histórico. Vazio volta pro nome de sempre (a pasta, a
+        // branch). Pede o `tabId`: renomear o painel em foco por engano não.
+        _need(plugin, PluginPermission.sessionsCreate);
+        if (p['tabId'] is! String) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"tabId" é obrigatório');
+        }
+        final tab = _tab(p);
+        final title = _text(p, 'title').trim();
+        store.renameTab(tab, title.length > 80 ? title.substring(0, 80) : title);
+        return {'title': tab.title};
+      case 'session.wake':
+        // Religa uma sessão hibernada, na mesma conversa -- o clique na linha
+        // dela, feito pelo plugin. Ela volta como `starting` e, quando o
+        // claude sobe, `ready`; os dois chegam como `session.status`.
+        _need(plugin, PluginPermission.sessionsCreate);
+        // Sem o "painel em foco" de reserva: acordar é ligar um processo, e
+        // tem que ser o que o plugin pediu.
+        if (p['tabId'] is! String) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"tabId" é obrigatório');
+        }
+        final tab = _tab(p);
+        if (!tab.hibernated) return {'woke': false};
+        await store.wake(tab);
+        return {'woke': true};
+      case 'session.portrait':
+        // O retrato de uma sessão do claude (um png do próprio plugin), que a
+        // notificação de quando ela para por você leva junto. Só arquivo da
+        // pasta do plugin ou da de dados dele: o plugin não aponta a janela
+        // pra um arquivo qualquer da máquina.
+        if (p['tabId'] is! String) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"tabId" é obrigatório');
+        }
+        final tab = _tab(p);
+        if (tab.kind != TabKind.claude) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, 'só uma sessão do claude tem retrato');
+        }
+        final image = p['image'];
+        if (image == null) {
+          tab.portrait = null;
+          return null;
+        }
+        if (image is! String || !image.toLowerCase().endsWith('.png') || !File(image).existsSync()) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"image": o caminho de um .png que existe');
+        }
+        final real = File(image).absolute.resolveSymbolicLinksSync();
+        bool inside(String dir) {
+          final d = Directory(dir);
+          if (!d.existsSync()) return false;
+          return real.startsWith('${d.absolute.resolveSymbolicLinksSync()}/');
+        }
+        final mine = inside(plugin.dir) || inside(plugin.dataDir);
+        if (!mine) {
+          throw const PluginRpcError(PluginRpcError.forbidden, '"image" tem que estar na pasta do plugin ou na de dados dele');
+        }
+        tab.portrait = real;
+        return null;
+      case 'session.hibernate':
+        // O "hibernar" da lateral, feito pelo plugin: desliga o processo de
+        // uma sessão parada e fica com a conversa. Volta com `session.wake`.
+        // Desligar um processo é parente de fechar: pede `sessions.close`.
+        _need(plugin, PluginPermission.sessionsClose);
+        if (p['tabId'] is! String) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"tabId" é obrigatório');
+        }
+        final tab = _tab(p);
+        if (tab.hibernated) return {'hibernated': false};
+        if (!store.canHibernate(tab)) {
+          throw PluginRpcError(
+            PluginRpcError.invalidParams,
+            tab.kind != TabKind.claude || tab.exited
+                ? '"${tab.title}" não é uma sessão do claude rodando'
+                : '"${tab.title}" ainda não tem conversa pra retomar',
+          );
+        }
+        // No meio de um turno, ou com agentes rodando, o processo é trabalho
+        // em andamento -- como no hibernar sozinho, só a sessão parada.
+        final status = tab.status;
+        if ((status != ClaudeStatus.ready && !status.atRest) || tab.hooks.busyForks) {
+          throw PluginRpcError(
+            PluginRpcError.invalidParams,
+            '"${tab.title}" está trabalhando: hiberne quando ele parar',
+          );
+        }
+        store.hibernate(tab);
+        return {'hibernated': true};
       case 'suggestion.created':
         // O fim do `suggestion.start`: a tarefa existe no tracker, e a
         // Maestria faz o que foi escolhido no cartão. Ver
@@ -249,13 +383,22 @@ class PluginApi {
         store.touch();
         return {'tabId': tab.id};
       case 'session.close':
-        // Só o que é dele: fechar a sessão de outra pessoa -- a sua -- não é
-        // coisa que um plugin faça.
+        // O que é dele, sempre. Uma sessão sua do claude, só com
+        // `sessions.close` -- declarada no manifesto, e vista na instalação --,
+        // e com o `tabId` dito: nada de fechar o painel em foco por engano. O
+        // plugin é quem pergunta antes (o "mandar pra casa" do escritório).
+        if (p['tabId'] is! String) {
+          throw const PluginRpcError(PluginRpcError.invalidParams, '"tabId" é obrigatório');
+        }
         final tab = _tab(p);
-        if (tab.owner != plugin.id) {
-          throw const PluginRpcError(
+        final mine = tab.owner == plugin.id;
+        final claude = tab.kind == TabKind.claude && tab.owner == null;
+        if (!mine && !(claude && plugin.allows(PluginPermission.sessionsClose))) {
+          throw PluginRpcError(
             PluginRpcError.forbidden,
-            'só dá pra fechar um terminal que o plugin abriu com "owned"',
+            claude
+                ? 'fechar uma sessão do claude pede a permissão "sessions.close"'
+                : 'só dá pra fechar um terminal que o plugin abriu com "owned"',
           );
         }
         store.closeTab(tab);
@@ -402,6 +545,10 @@ class PluginApi {
     'featureOrHotfixKind': store.featureOrHotfixOf(t)?.kind.name,
     'workspaces': [for (final w in store.workspacesOf(t.folder)) w.name],
     'launcher': t.launcher?.name,
+    // Quanto da janela de contexto a sessão já ocupa, da linha de status do
+    // Claude Code; `null` antes da primeira resposta e logo depois de um
+    // `/compact`. Muda com o evento `session.context`.
+    'context': contextJson(t.context),
     'owner': t.owner,
     'embedded': t.embedded,
     // O tag é conversa entre o plugin e os terminais dele.
@@ -415,6 +562,21 @@ class PluginApi {
         'lastMessage': t.hooks.lastMessageFull ?? t.hooks.lastMessage,
       },
   };
+
+  static Map<String, int>? contextJson(ContextUsage? c) =>
+      c == null ? null : {'percent': c.percent, 'tokens': c.tokens, 'window': c.window};
+
+  /// Com o "confia nesta pasta?" do Claude Code na tela, nada de fora entra
+  /// no terminal: o "No, exit" vem marcado, e o enter de uma mensagem fecha a
+  /// sessão. Quem responde essa pergunta é você, no terminal.
+  static void _trustGate(MxTab tab) {
+    if (tab.kind == TabKind.claude && tab.term.asksTrust) {
+      throw PluginRpcError(
+        PluginRpcError.invalidParams,
+        '"${tab.title}" está perguntando se você confia na pasta: responda no terminal dele',
+      );
+    }
+  }
 
   static void _need(MxPlugin plugin, PluginPermission perm) {
     if (plugin.allows(perm)) return;

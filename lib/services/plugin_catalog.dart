@@ -38,6 +38,7 @@ class CatalogEntry {
     this.author = '',
     this.api = mxPluginApi,
     this.permissions = const [],
+    this.kinds = const {},
     this.icon,
     this.url,
     this.sha256,
@@ -56,6 +57,10 @@ class CatalogEntry {
 
   /// Os ids de [PluginPermission], como o manifesto os escreve.
   final List<String> permissions;
+
+  /// Tema, recurso ou os dois ([PluginManifest.kinds]). Vazio num catálogo
+  /// que ainda não diz.
+  final Set<PluginKind> kinds;
 
   /// A URL de um `.svg`.
   final String? icon;
@@ -87,6 +92,10 @@ class CatalogEntry {
       author: j['author'] as String? ?? '',
       api: (j['maestria'] as num?)?.toInt() ?? mxPluginApi,
       permissions: (j['permissions'] as List? ?? const []).whereType<String>().toList(),
+      kinds: {
+        for (final k in (j['kinds'] as List? ?? const []).whereType<String>())
+          if (PluginKind.byId(k) case final kind?) kind,
+      },
       icon: j['icon'] as String?,
       url: git == null ? url : null,
       sha256: git == null ? sha?.toLowerCase() : null,

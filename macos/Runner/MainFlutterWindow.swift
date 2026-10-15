@@ -5,6 +5,69 @@ import Cocoa
 import FlutterMacOS
 import Quartz
 import UniformTypeIdentifiers
+import UserNotifications
+
+/// The notification that carries a picture: a plugin's portrait of the
+/// session that stopped for you. The plain ones still go through `osascript`,
+/// which needs nothing from the system; this one needs the user's permission,
+/// asked the first time, and answers `false` when it is not there so the Dart
+/// side falls back to the plain one.
+///
+/// It is also the delegate, for the two things a notification posted by the
+/// app needs from it: showing up while the app is in front (the default is to
+/// swallow it), and the click, which comes back to Dart as the tab to focus.
+class NotificationRelay: NSObject, UNUserNotificationCenterDelegate {
+  var channel: FlutterMethodChannel?
+
+  func post(_ args: [String: Any], result: @escaping FlutterResult) {
+    let center = UNUserNotificationCenter.current()
+    center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+      guard granted else {
+        DispatchQueue.main.async { result(false) }
+        return
+      }
+      let content = UNMutableNotificationContent()
+      content.title = args["title"] as? String ?? ""
+      content.body = args["body"] as? String ?? ""
+      if let subtitle = args["subtitle"] as? String, !subtitle.isEmpty { content.subtitle = subtitle }
+      if let tab = args["tabId"] as? String { content.userInfo = ["tabId": tab] }
+      if let image = args["image"] as? String {
+        // The attachment takes the file away from where it is: hand it a copy.
+        let copy = URL(fileURLWithPath: NSTemporaryDirectory())
+          .appendingPathComponent(UUID().uuidString + ".png")
+        if (try? FileManager.default.copyItem(at: URL(fileURLWithPath: image), to: copy)) != nil,
+          let attachment = try? UNNotificationAttachment(identifier: "portrait", url: copy, options: nil)
+        {
+          content.attachments = [attachment]
+        }
+      }
+      let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+      center.add(request) { error in
+        DispatchQueue.main.async { result(error == nil) }
+      }
+    }
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([.banner, .list])
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    if let tab = response.notification.request.content.userInfo["tabId"] as? String {
+      NSApp.activate(ignoringOtherApps: true)
+      channel?.invokeMethod("notificationTapped", arguments: tab)
+    }
+    completionHandler()
+  }
+}
 
 /// What Quick Look is being asked to show. One file at a time: the result
 /// strip previews the row you clicked, not the whole list.
@@ -25,6 +88,10 @@ class MainFlutterWindow: NSWindow {
   /// walks the responder chain looking for a controller, so the data source
   /// has to outlive the method call that set it.
   private let quickLook = QuickLookSource()
+
+  /// Lives as long as the window, like [quickLook]: the notification center
+  /// keeps only a weak reference to its delegate.
+  private let notifications = NotificationRelay()
 
   // --- ditado (vocalização) — fora desta versão -----------------------------
   // Ver o cabeçalho de `lib/services/dictation.dart`.
@@ -49,8 +116,12 @@ class MainFlutterWindow: NSWindow {
       name: "maestria/dock",
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
-    channel.setMethodCallHandler { call, result in
+    notifications.channel = channel
+    UNUserNotificationCenter.current().delegate = notifications
+    channel.setMethodCallHandler { [notifications] call, result in
       switch call.method {
+      case "notify":
+        notifications.post(call.arguments as? [String: Any] ?? [:], result: result)
       case "badge":
         let label = call.arguments as? String
         NSApp.dockTile.badgeLabel = (label?.isEmpty ?? true) ? nil : label

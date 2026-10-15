@@ -11,6 +11,16 @@ Map<String, dynamic> ev(String name, [Map<String, dynamic> extra = const {}]) =>
 
 void main() {
   group('HookReducer', () {
+    test('a /compact by hand leaves the status where it was', () {
+      final s = HookState();
+      HookReducer.apply(s, 'Stop', ev('Stop', {'last_assistant_message': 'ok'}));
+      expect(s.status, ClaudeStatus.idle);
+      HookReducer.apply(s, 'PreCompact', ev('PreCompact', {'trigger': 'manual'}));
+      expect(s.status, ClaudeStatus.idle);
+      HookReducer.apply(s, 'PostCompact', ev('PostCompact', {'trigger': 'manual'}));
+      expect(s.status, ClaudeStatus.idle);
+    });
+
     test('a turn walks from prompt to tool to idle', () {
       final s = HookState();
       HookReducer.apply(s, 'SessionStart', ev('SessionStart'));
