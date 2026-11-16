@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart' show GestureBinding;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -789,11 +790,13 @@ class _ShortcutsState extends State<_Shortcuts> {
   });
 
   void _captured(MxChord chord) {
+    final action = _recording;
+    if (action == null) return;
     if (chord.rejection case final why?) {
       setState(() => _rejected = why);
       return;
     }
-    widget.store.bindShortcut(_recording!, chord, replacing: _replacing);
+    widget.store.bindShortcut(action, chord, replacing: _replacing);
     _stop();
   }
 
@@ -810,8 +813,9 @@ class _ShortcutsState extends State<_Shortcuts> {
               child: _Heading(
                 'Atalhos',
                 hint: 'Clique numa tecla pra trocar, no + pra dar uma segunda '
-                    'combinação à mesma ação. Uma tecla só tem um dono: dar a '
-                    'outra ação tira de quem a tinha.',
+                    'combinação à mesma ação. Os botões de lado do mouse também '
+                    'servem. Uma tecla só tem um dono: dar a outra ação tira de '
+                    'quem a tinha.',
               ),
             ),
             if (!keymap.allDefault)
@@ -1099,19 +1103,68 @@ class _GhostState extends State<_Ghost> {
   }
 }
 
-/// O campo que escuta o teclado.
+/// O campo que escuta o teclado e os botões extras do mouse.
 ///
 /// Devolve `handled` em tudo enquanto está no ar: gravar um atalho é o único
 /// momento em que a tecla não deve fazer o que ela faz — inclusive o ⏎ que
 /// fecharia o diálogo e o ⇥ que mudaria o foco.
 ///
+/// O mouse é ouvido no diálogo inteiro e não só em cima do campo: o botão de
+/// lado é apertado onde a mão estiver. O esquerdo, o direito e o do meio
+/// passam direto, pra continuar dando pra clicar no resto da tela.
+///
 /// Público porque são duas as telas que gravam uma tecla: esta, das ações, e
 /// a do menu do painel, que dá uma tecla a ele (ver [showPanelHotkey]).
-class ShortcutRecorder extends StatelessWidget {
+class ShortcutRecorder extends StatefulWidget {
   const ShortcutRecorder({super.key, required this.onCaptured, required this.onCancel});
 
   final ValueChanged<MxChord> onCaptured;
   final VoidCallback onCancel;
+
+  @override
+  State<ShortcutRecorder> createState() => _ShortcutRecorderState();
+}
+
+class _ShortcutRecorderState extends State<ShortcutRecorder> {
+  @override
+  void initState() {
+    super.initState();
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_pointer);
+  }
+
+  @override
+  void dispose() {
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointer);
+    super.dispose();
+  }
+
+  void _pointer(PointerEvent event) {
+    final chord = MxChord.fromPointer(event);
+    if (chord == null || !mounted) return;
+    // Um segundo clique enquanto o diálogo sai de cena não é outro atalho:
+    // daria um segundo `pop`, e esse tiraria a tela de baixo.
+    if (ModalRoute.of(context)?.isCurrent == false) return;
+    // Fora do cartão o clique é da barreira, que fecha o diálogo com qualquer
+    // botão -- gravar ali seria gravar e perder a tela no mesmo gesto.
+    if (_card() case final card? when !card.paintBounds.contains(card.globalToLocal(event.position))) {
+      return;
+    }
+    widget.onCaptured(chord);
+  }
+
+  /// O [Material] mais de fora debaixo do [Dialog]: o próprio Dialog ocupa a
+  /// tela inteira, com a margem em volta do cartão.
+  RenderBox? _card() {
+    Element? material;
+    RenderBox? card;
+    context.visitAncestorElements((e) {
+      if (e.widget is Material) material = e;
+      if (e.widget is! Dialog) return true;
+      card = material?.renderObject as RenderBox?;
+      return false;
+    });
+    return card;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1122,13 +1175,13 @@ class ShortcutRecorder extends StatelessWidget {
         if (chord == null) return KeyEventResult.handled;
         // ⎋ sozinho desiste; com modificador, é um atalho como outro qualquer.
         if (chord.key == LogicalKeyboardKey.escape && !chord.meta && !chord.control && !chord.alt) {
-          onCancel();
+          widget.onCancel();
           return KeyEventResult.handled;
         }
         // Um ⌘ segurado ainda não é nada: a combinação chega quando a tecla
         // de verdade descer.
         if (MxChord.isModifier(chord.key!)) return KeyEventResult.handled;
-        onCaptured(chord);
+        widget.onCaptured(chord);
         return KeyEventResult.handled;
       },
       child: Container(

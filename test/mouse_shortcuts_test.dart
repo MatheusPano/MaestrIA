@@ -8,8 +8,10 @@ import 'package:maestria/services/plugins.dart';
 import 'package:maestria/services/shortcuts.dart';
 import 'package:maestria/services/store.dart';
 import 'package:maestria/theme.dart';
+import 'package:maestria/ui/dialogs.dart';
 import 'package:maestria/ui/keys.dart';
 import 'package:maestria/ui/panes.dart';
+import 'package:maestria/ui/settings.dart';
 import 'package:xterm/xterm.dart';
 
 const _m4 = MxChord.mouse(kBackMouseButton);
@@ -245,6 +247,107 @@ void main() {
     });
   });
 
+  group('a tela de atalhos', () {
+    Future<AppStore> pumpSettings(WidgetTester tester) async {
+      final store = AppStore();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Mx.theme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => TextButton(
+                onPressed: () => showSettings(ctx, store, section: MxSection.shortcuts),
+                child: const Text('abrir'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      return store;
+    }
+
+    testWidgets('grava o botão de lado apertado em qualquer lugar', (tester) async {
+      tester.view
+        ..physicalSize = const Size(1600, 1200)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final store = await pumpSettings(tester);
+      await tester.ensureVisible(find.text(MxAction.prevPane.label));
+      await tester.pumpAndSettle();
+      final row = find.ancestor(of: find.text(MxAction.prevPane.label), matching: find.byType(Row));
+      await tester.tap(find.descendant(of: row.first, matching: find.byIcon(Icons.add)));
+      await tester.pumpAndSettle();
+      expect(find.byType(ShortcutRecorder), findsOneWidget);
+
+      // O esquerdo continua sendo clique na tela, não atalho.
+      await click(tester, kPrimaryMouseButton, at: tester.getCenter(find.text(MxAction.prevPane.label)));
+      expect(find.byType(ShortcutRecorder), findsOneWidget);
+
+      // Longe do campo que grava: o botão de lado é apertado onde a mão está.
+      await click(tester, kBackMouseButton, at: tester.getCenter(find.byType(Dialog)));
+      expect(find.byType(ShortcutRecorder), findsNothing);
+      expect(store.keymap.owner(_m4), MxAction.prevPane);
+      expect(find.text('Mouse 4'), findsOneWidget);
+
+      await closeWindow(tester, store);
+    });
+
+    testWidgets('fora do cartão o botão é da barreira, não vira atalho', (tester) async {
+      tester.view
+        ..physicalSize = const Size(1600, 1200)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final store = await pumpSettings(tester);
+      await tester.ensureVisible(find.text(MxAction.prevPane.label));
+      await tester.pumpAndSettle();
+      final row = find.ancestor(of: find.text(MxAction.prevPane.label), matching: find.byType(Row));
+      await tester.tap(find.descendant(of: row.first, matching: find.byIcon(Icons.add)));
+      await tester.pumpAndSettle();
+
+      await click(tester, kBackMouseButton, at: const Offset(3, 3));
+      expect(store.keymap.owner(_m4), isNull);
+
+      await closeWindow(tester, store);
+    });
+  });
+
+  testWidgets('dois cliques no diálogo da tecla do painel fecham só o diálogo', (tester) async {
+    final store = AppStore();
+    final tab = panel(store, 't1', 'primeiro');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Mx.theme(),
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => TextButton(
+              onPressed: () => showPanelHotkey(ctx, store, tab),
+              child: const Text('abrir'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    final at = tester.getCenter(find.byType(ShortcutRecorder));
+
+    // O segundo chega durante a saída do diálogo, antes dele sumir da árvore.
+    for (final button in [kBackMouseButton, kForwardMouseButton]) {
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: button);
+      await gesture.down(at);
+      await gesture.up();
+      await gesture.removePointer();
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pumpAndSettle();
+
+    expect(tab.hotkey, _m4);
+    expect(find.text('abrir'), findsOneWidget, reason: 'a tela de baixo continua lá');
+
+    await closeWindow(tester, store);
+  });
 
   test('um plugin que pede botão do mouse fica sem, com aviso', () {
     final m = PluginManifest.parse({
