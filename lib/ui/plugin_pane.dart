@@ -14,6 +14,7 @@ import 'panes.dart';
 import 'plugin_dialogs.dart';
 import 'plugin_rfw.dart';
 import 'terminal_pane.dart';
+import '../services/shortcuts.dart';
 
 /// Os desenhos que um plugin pode pedir, pelo nome: nos blocos (`icon` de
 /// botão e de item de lista) e nos botões de comando da lateral.
@@ -503,7 +504,10 @@ class _PluginPaneState extends State<PluginPane> {
     );
     if (!widget.framed) return body;
     return Listener(
-      onPointerDown: (_) => widget.onFocus?.call(),
+      onPointerDown: (e) {
+        // O botão de atalho age sobre o painel em foco: ver [MxChord.isShortcutPointer].
+        if (!MxChord.isShortcutPointer(e)) widget.onFocus?.call();
+      },
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,

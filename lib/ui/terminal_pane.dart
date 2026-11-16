@@ -80,7 +80,10 @@ class _TerminalPaneState extends State<TerminalPane> {
       // disparar no header, e clicar no meio do terminal dava o teclado a
       // ele sem mover o anel. O Listener vê a pressão antes da arena e não
       // disputa com ninguém.
-      onPointerDown: (_) => widget.onFocus?.call(),
+      onPointerDown: (e) {
+        // O botão de atalho age sobre o painel em foco: ver [MxChord.isShortcutPointer].
+        if (!MxChord.isShortcutPointer(e)) widget.onFocus?.call();
+      },
       // The pane is a card of its own: with two open, the accent outline says
       // which one the keyboard is talking to.
       child: MxPanel(
@@ -380,7 +383,7 @@ class _TerminalSurfaceState extends State<_TerminalSurface> {
       // O clique, pelo mesmo motivo do wheel: ver [_clicked].
       onPointerDown: (e) {
         _pressedAt = e.buttons == kPrimaryButton ? e.position : null;
-        if (widget.embedded) _focus.requestFocus();
+        if (widget.embedded && !MxChord.isShortcutPointer(e)) _focus.requestFocus();
       },
       onPointerUp: _clicked,
       child: TerminalView(
