@@ -1127,7 +1127,7 @@ class ShortcutRecorder extends StatelessWidget {
         }
         // Um ⌘ segurado ainda não é nada: a combinação chega quando a tecla
         // de verdade descer.
-        if (MxChord.isModifier(chord.key)) return KeyEventResult.handled;
+        if (MxChord.isModifier(chord.key!)) return KeyEventResult.handled;
         onCaptured(chord);
         return KeyEventResult.handled;
       },

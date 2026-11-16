@@ -23,12 +23,13 @@ class MxKeys {
   /// O mapa como o [CallbackShortcuts] quer, montado do que o usuário deixou.
   static Map<ShortcutActivator, VoidCallback> bindings(AppStore store, BuildContext context) => {
     for (final action in MxAction.values)
-      for (final chord in store.keymap[action]) chord.activator: () => run(action, store, context),
+      for (final chord in store.keymap[action])
+        if (chord.activator case final a?) a: () => run(action, store, context),
     // As teclas dos painéis, depois das ações: é a mesma ordem do terminal, e
     // a que [AppStore.bindShortcut] garante tirando do painel a tecla que uma
     // ação passou a usar. Ver [MxTab.hotkey].
     for (final tab in store.tabs)
-      if (tab.hotkey case final k?) k.activator: () => store.select(tab),
+      if (tab.hotkey?.activator case final a?) a: () => store.select(tab),
     // As teclas dos plugins não entram aqui: um [SingleActivator] só casa a
     // tecla lógica, e é justamente ela que as teclas mortas do macOS trocam.
     // Quem as atende é o [Focus] de `_Keys` (em `main.dart`) e o terminal --
