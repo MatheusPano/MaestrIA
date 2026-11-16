@@ -348,7 +348,7 @@ class _Keys extends StatelessWidget {
           store.runPluginCommand(command);
           return KeyEventResult.handled;
         },
-        child: child,
+        child: MxPointerKeys(store: store, context: context, child: child),
       ),
     );
   }

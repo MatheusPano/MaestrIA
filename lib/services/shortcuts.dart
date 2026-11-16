@@ -1,13 +1,15 @@
 import 'dart:io' show Platform;
 
 import 'package:collection/collection.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 // Pelo [SingleActivator], que mora nos widgets — é o único pedaço de Flutter
 // que sabe casar uma tecla com o que foi segurado junto, e reescrevê-lo aqui
 // seria reescrever a regra que o resto do app já obedece.
 import 'package:flutter/widgets.dart';
 
-/// Uma combinação de teclas: a tecla e os modificadores segurados junto.
+/// Uma combinação de teclas: a tecla, ou um botão do mouse, e os modificadores
+/// segurados junto.
 ///
 /// Existe porque um [SingleActivator] sabe disparar e mais nada — não se
 /// compara com outro, não sabe se dizer em ⌘⇧T e não cabe num json. As três
@@ -15,12 +17,22 @@ import 'package:flutter/widgets.dart';
 @immutable
 class MxChord {
   const MxChord(
-    this.key, {
+    LogicalKeyboardKey this.key, {
     this.meta = false,
     this.control = false,
     this.alt = false,
     this.shift = false,
-  });
+  }) : button = null;
+
+  /// Um botão do mouse no lugar da tecla: o M4 e o M5 dos lados, que mouse
+  /// nenhum usa pra nada dentro do terminal.
+  const MxChord.mouse(
+    int this.button, {
+    this.meta = false,
+    this.control = false,
+    this.alt = false,
+    this.shift = false,
+  }) : key = null;
 
   /// Se o teclado é o do Linux, e não o do macOS.
   ///
@@ -31,7 +43,12 @@ class MxChord {
   /// testes poderem ver a tela dos dois lados sem trocar de máquina.
   static bool linux = Platform.isLinux;
 
-  final LogicalKeyboardKey key;
+  /// A tecla, ou null quando o atalho é um [button].
+  final LogicalKeyboardKey? key;
+
+  /// O bit do Flutter ([kBackMouseButton] é o M4), ou null quando é tecla.
+  final int? button;
+
   final bool meta;
   final bool control;
   final bool alt;
@@ -40,10 +57,14 @@ class MxChord {
   /// O mesmo objeto que o Flutter já usava antes de isto ser configurável: a
   /// comparação de modificadores é exata (⌘T não responde a ⌘⇧T), e é dela que
   /// o mapa inteiro herda o comportamento que sempre teve.
-  SingleActivator get activator =>
-      SingleActivator(key, meta: meta, control: control, alt: alt, shift: shift);
+  ///
+  /// Null num botão do mouse, que não passa pelo teclado.
+  SingleActivator? get activator => switch (key) {
+    final k? => SingleActivator(k, meta: meta, control: control, alt: alt, shift: shift),
+    null => null,
+  };
 
-  bool accepts(KeyEvent event) => activator.accepts(event, HardwareKeyboard.instance);
+  bool accepts(KeyEvent event) => activator?.accepts(event, HardwareKeyboard.instance) ?? false;
 
   /// Como se escreve na tela: na ordem e com os glifos do macOS (⌃⌥⇧⌘), ou
   /// por extenso no Linux (Ctrl+Shift+T), onde ninguém conhece os glifos.
@@ -62,9 +83,12 @@ class MxChord {
   /// Pros atalhos que vêm escritos por outra pessoa — o manifesto de um
   /// plugin diz `meta+alt+g` pensando no ⌘. No Linux o ⌘ vira Ctrl+Shift, o
   /// mesmo lugar em que os padrões do app moram lá.
-  MxChord get forHost => linux && meta
-      ? MxChord(key, control: true, shift: true, alt: alt)
-      : this;
+  MxChord get forHost => linux && meta ? _with(control: true, shift: true, alt: alt) : this;
+
+  MxChord _with({bool control = false, bool alt = false, bool shift = false}) => switch (key) {
+    final k? => MxChord(k, control: control, alt: alt, shift: shift),
+    null => MxChord.mouse(button!, control: control, alt: alt, shift: shift),
+  };
 
   /// Copiar a seleção do painel. No Linux o Ctrl+C é do processo, então é
   /// Ctrl+Shift+C, como em todo terminal de lá.
@@ -88,7 +112,8 @@ class MxChord {
         ]
       : const [MxChord(LogicalKeyboardKey.keyV, meta: true)];
 
-  /// Como se escreve no disco: `meta+shift+t`, `ctrl+tab`, `meta+alt+right`.
+  /// Como se escreve no disco: `meta+shift+t`, `ctrl+tab`, `meta+alt+right`,
+  /// `mouse4`.
   ///
   /// Legível de propósito — o config é um arquivo que dá pra abrir, e um
   /// `keyId` de dez dígitos não diz nada pra quem o abrir.
@@ -105,7 +130,14 @@ class MxChord {
   /// Recusar cedo é o ponto: um atalho impossível não falha na hora em que é
   /// escolhido, falha meses depois como "essa tecla parou de funcionar".
   String? get rejection {
-    if (isModifier(key)) return null;
+    if (button != null) {
+      if (button! < kBackMouseButton) return 'o clique esquerdo, o direito e o do meio são do terminal';
+      // Medido no Flutter 3.47.4 sob X11: o GTK entrega o 8 e o 9 do X como
+      // M4 e M5, e do 10 em diante nenhum evento chega ao app.
+      if (linux && button! > kForwardMouseButton) return 'no Linux só o M4 e o M5 chegam ao app';
+      return null;
+    }
+    if (isModifier(key!)) return null;
     if (!_known) return 'essa tecla não dá pra usar num atalho';
     if (reserved[this] case final why?) return why;
     if (!meta && !control && !alt && !_isFunction) {
@@ -122,22 +154,24 @@ class MxChord {
     return null;
   }
 
-  bool get valid => !isModifier(key) && rejection == null;
+  bool get valid => !(key != null && isModifier(key!)) && rejection == null;
 
   static MxChord? parse(String? id) {
     if (id == null || id.isEmpty) return null;
     final parts = id.split('+');
-    final key = _keyNamed(parts.removeLast());
-    if (key == null) return null;
+    final last = parts.removeLast();
     const mods = {'ctrl', 'alt', 'shift', 'meta'};
     if (parts.any((p) => !mods.contains(p))) return null;
-    return MxChord(
-      key,
-      control: parts.contains('ctrl'),
-      alt: parts.contains('alt'),
-      shift: parts.contains('shift'),
-      meta: parts.contains('meta'),
-    );
+    final control = parts.contains('ctrl');
+    final alt = parts.contains('alt');
+    final shift = parts.contains('shift');
+    final meta = parts.contains('meta');
+    if (_buttonNamed(last) case final button?) {
+      return MxChord.mouse(button, control: control, alt: alt, shift: shift, meta: meta);
+    }
+    final key = _keyNamed(last);
+    if (key == null) return null;
+    return MxChord(key, control: control, alt: alt, shift: shift, meta: meta);
   }
 
   /// O que o teclado está fazendo agora, lido de uma tecla que desceu.
@@ -147,14 +181,39 @@ class MxChord {
   /// última a mudar de estado.
   static MxChord? fromEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return null;
+    return _held(event.logicalKey);
+  }
+
+  /// O botão extra que desceu, com os modificadores segurados neste instante,
+  /// ou null se o clique não é de atalho (ver [isShortcutPointer]).
+  static MxChord? fromPointer(PointerEvent event) {
+    if (!isShortcutPointer(event)) return null;
+    final buttons = event.buttons;
+    return _held(null, button: buttons & -buttons);
+  }
+
+  /// Se este clique é de atalho: um botão extra do mouse descendo, sem o
+  /// esquerdo, o direito ou o do meio junto.
+  ///
+  /// É a pergunta que os painéis também fazem antes de puxar o foco pra si:
+  /// o M4 apertado em cima de um painel age sobre o painel em foco, como a
+  /// tecla, e não sobre o que está embaixo do ponteiro. A caneta e o toque
+  /// também têm `buttons`, e o bit deles não é botão de lado nenhum.
+  static bool isShortcutPointer(PointerEvent event) =>
+      event is PointerDownEvent &&
+      event.kind == PointerDeviceKind.mouse &&
+      event.buttons >= kBackMouseButton &&
+      event.buttons & (kBackMouseButton - 1) == 0;
+
+  static MxChord _held(LogicalKeyboardKey? key, {int? button}) {
     final k = HardwareKeyboard.instance;
-    return MxChord(
-      event.logicalKey,
-      meta: k.isMetaPressed,
-      control: k.isControlPressed,
-      alt: k.isAltPressed,
-      shift: k.isShiftPressed,
-    );
+    final meta = k.isMetaPressed;
+    final control = k.isControlPressed;
+    final alt = k.isAltPressed;
+    final shift = k.isShiftPressed;
+    return key != null
+        ? MxChord(key, meta: meta, control: control, alt: alt, shift: shift)
+        : MxChord.mouse(button!, meta: meta, control: control, alt: alt, shift: shift);
   }
 
   /// Um ⌘ sozinho não é atalho nenhum — é a metade de um sendo digitada.
@@ -211,23 +270,42 @@ class MxChord {
   bool operator ==(Object other) =>
       other is MxChord &&
       other.key == key &&
+      other.button == button &&
       other.meta == meta &&
       other.control == control &&
       other.alt == alt &&
       other.shift == shift;
 
   @override
-  int get hashCode => Object.hash(key, meta, control, alt, shift);
+  int get hashCode => Object.hash(key, button, meta, control, alt, shift);
 
   @override
   String toString() => label;
 
   bool get _known => _names.containsKey(key) || _printable;
-  bool get _printable => key.keyLabel.length == 1;
+  bool get _printable => key!.keyLabel.length == 1;
   bool get _isFunction => _functions.contains(key);
-  bool get _isLetter => key.keyId >= 0x61 && key.keyId <= 0x7a;
-  String get _name => _names[key] ?? key.keyLabel.toLowerCase();
-  String get _glyph => _glyphs[key] ?? key.keyLabel.toUpperCase();
+  bool get _isLetter => key!.keyId >= 0x61 && key!.keyId <= 0x7a;
+  String get _name => switch (key) {
+    final k? => _names[k] ?? k.keyLabel.toLowerCase(),
+    null => 'mouse$_buttonNumber',
+  };
+  String get _glyph => switch (key) {
+    final k? => _glyphs[k] ?? k.keyLabel.toUpperCase(),
+    null => 'Mouse $_buttonNumber',
+  };
+
+  /// O número que o mouse imprime no botão: o bit 8 do Flutter é o M4.
+  int get _buttonNumber => button!.bitLength;
+
+  /// `mouse4` → [kBackMouseButton]. Do 1 ao 32, que é onde um bit cabe; um
+  /// número fora disso é uma tecla que esta versão não conhece.
+  static int? _buttonNamed(String name) {
+    if (!name.startsWith('mouse')) return null;
+    final n = int.tryParse(name.substring(5));
+    if (n == null || n < 1 || n > 32 || name.substring(5) != '$n') return null;
+    return 1 << (n - 1);
+  }
 
   static LogicalKeyboardKey? _keyNamed(String name) {
     if (name.length == 1) {

@@ -456,6 +456,8 @@ class PluginManifest {
           warnings.add('o comando "$cid" pede a tecla "$k", que não dá pra ler — ficou sem');
         } else if (chord.rejection case final why?) {
           warnings.add('o comando "$cid" pede ${chord.label}: $why — ficou sem');
+        } else if (chord.button != null) {
+          warnings.add('o comando "$cid" pede ${chord.label}: plugin só usa teclado — ficou sem');
         } else {
           key = chord;
         }
@@ -1050,7 +1052,9 @@ class Plugins extends ChangeNotifier {
   @visibleForTesting
   static bool chordHits(MxChord chord, KeyEvent event) {
     if (chord.accepts(event)) return true;
-    final physical = _physicalOf(chord.key);
+    final key = chord.key;
+    if (key == null) return false;
+    final physical = _physicalOf(key);
     if (physical == null || event.physicalKey != physical) return false;
     final k = HardwareKeyboard.instance;
     return k.isMetaPressed == chord.meta &&

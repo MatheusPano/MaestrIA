@@ -12,6 +12,7 @@ import '../services/store.dart';
 import '../theme.dart';
 import 'panel.dart';
 import 'panes.dart';
+import '../services/shortcuts.dart';
 
 /// Um painel de leitura: markdown desenhado, no lugar de um terminal.
 ///
@@ -131,7 +132,10 @@ class _DocPaneState extends State<DocPane> {
   @override
   Widget build(BuildContext context) {
     return Listener(
-      onPointerDown: (_) => widget.onFocus?.call(),
+      onPointerDown: (e) {
+        // O botão de atalho age sobre o painel em foco: ver [MxChord.isShortcutPointer].
+        if (!MxChord.isShortcutPointer(e)) widget.onFocus?.call();
+      },
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,

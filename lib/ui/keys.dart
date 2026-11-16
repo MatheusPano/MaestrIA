@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -23,12 +24,13 @@ class MxKeys {
   /// O mapa como o [CallbackShortcuts] quer, montado do que o usuário deixou.
   static Map<ShortcutActivator, VoidCallback> bindings(AppStore store, BuildContext context) => {
     for (final action in MxAction.values)
-      for (final chord in store.keymap[action]) chord.activator: () => run(action, store, context),
+      for (final chord in store.keymap[action])
+        if (chord.activator case final a?) a: () => run(action, store, context),
     // As teclas dos painéis, depois das ações: é a mesma ordem do terminal, e
     // a que [AppStore.bindShortcut] garante tirando do painel a tecla que uma
     // ação passou a usar. Ver [MxTab.hotkey].
     for (final tab in store.tabs)
-      if (tab.hotkey case final k?) k.activator: () => store.select(tab),
+      if (tab.hotkey?.activator case final a?) a: () => store.select(tab),
     // As teclas dos plugins não entram aqui: um [SingleActivator] só casa a
     // tecla lógica, e é justamente ela que as teclas mortas do macOS trocam.
     // Quem as atende é o [Focus] de `_Keys` (em `main.dart`) e o terminal --
@@ -54,6 +56,21 @@ class MxKeys {
       }
     }
     return KeyEventResult.ignored;
+  }
+
+  /// Um botão do mouse contra o mapa, na mesma ordem do teclado: as ações
+  /// antes dos painéis.
+  ///
+  /// Só os botões extras: o esquerdo, o direito e o do meio seguem pra quem
+  /// está embaixo do ponteiro, sem nem consultar o mapa.
+  static void dispatchPointer(AppStore store, BuildContext context, PointerEvent event) {
+    final chord = MxChord.fromPointer(event);
+    if (chord == null) return;
+    if (store.keymap.owner(chord) case final action?) {
+      run(action, store, context);
+    } else if (store.tabs.firstWhereOrNull((t) => t.hotkey == chord) case final tab?) {
+      store.select(tab);
+    }
   }
 
   /// As teclas que um campo de texto usa com modificador: apagar, andar,
@@ -190,4 +207,24 @@ class MxKeys {
     }
     return null;
   }
+}
+
+/// Os botões extras do mouse valendo como atalho, com o ponteiro em qualquer
+/// lugar de [child] -- terminal incluso -- e sem depender do foco.
+///
+/// Num diálogo aberto o clique não chega aqui, como a tecla não chega ao mapa.
+class MxPointerKeys extends StatelessWidget {
+  const MxPointerKeys({super.key, required this.store, required this.context, required this.child});
+
+  final AppStore store;
+  // ignore: use_build_context_synchronously
+  final BuildContext context;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext _) => Listener(
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: (event) => MxKeys.dispatchPointer(store, context, event),
+    child: child,
+  );
 }

@@ -12,6 +12,7 @@ import 'dialogs.dart';
 import 'doc_pane.dart';
 import 'panel.dart';
 import 'panes.dart';
+import '../services/shortcuts.dart';
 
 /// Um painel de configuração: os arquivos que o Claude Code lê de uma pasta,
 /// listados e editáveis, no lugar de um terminal.
@@ -355,7 +356,10 @@ class _SetupPaneState extends State<SetupPane> {
   @override
   Widget build(BuildContext context) {
     return Listener(
-      onPointerDown: (_) => widget.onFocus?.call(),
+      onPointerDown: (e) {
+        // O botão de atalho age sobre o painel em foco: ver [MxChord.isShortcutPointer].
+        if (!MxChord.isShortcutPointer(e)) widget.onFocus?.call();
+      },
       child: MxPanel(
         focused: widget.focused,
         showFocus: widget.showFocus,
